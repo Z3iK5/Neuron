@@ -1,0 +1,48 @@
+"""Configuration for the audit bot."""
+
+from __future__ import annotations
+
+from pydantic import Field, SecretStr
+from pydantic_settings import SettingsConfigDict
+
+from neuron_core.config import NeuronCoreSettings
+
+
+class AuditorSettings(NeuronCoreSettings):
+    """Settings for neuron-auditor (inherits Synapse connection + logging)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="NEURON_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # The audit bot's own access token (Client-Server API).
+    auditor_bot_token: SecretStr = Field(
+        default=SecretStr(""), description="Access token for the audit bot account."
+    )
+
+    # Automatically accept room invites so the bot starts auditing new rooms.
+    auditor_auto_join: bool = True
+
+    # Where to persist the /sync pagination token (so a restart resumes without
+    # gaps or duplicates). Relative paths are fine for local dev.
+    auditor_state_path: str = "auditor-state.json"
+
+    # Sink selection: "file", "s3", or "both".
+    auditor_sink: str = "file"
+
+    # Filesystem sink: the JSON Lines file events are appended to.
+    auditor_file_path: str = "audit-log.jsonl"
+
+    # S3 sink (S3-compatible; e.g. AWS S3 or MinIO in dev).
+    auditor_s3_endpoint_url: str = ""   # e.g. http://localhost:9000 for MinIO; blank = AWS
+    auditor_s3_bucket: str = ""
+    auditor_s3_prefix: str = "audit"
+    auditor_s3_access_key: SecretStr = SecretStr("")
+    auditor_s3_secret_key: SecretStr = SecretStr("")
+    auditor_s3_region: str = "us-east-1"
+
+    def has_bot_token(self) -> bool:
+        return bool(self.auditor_bot_token.get_secret_value())
