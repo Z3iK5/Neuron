@@ -24,6 +24,11 @@ tracked in [`PROGRESS.md`](./PROGRESS.md).
   a local dev Synapse via Docker Compose, and CI.
 - **Phase 1 — Admin console (read-only)**: `neuron_console`, a FastAPI web UI
   over the Synapse Admin API for browsing users, rooms, and content reports.
+- **Phase 2 — Admin console (write)**: user/room/token management with CSRF and
+  MAS-aware guards.
+- **Phase 3 — Supervision bot**: `neuron_supervisor` promotes a bot to room
+  admin and moderates (kick/ban/redact).
+- **Phase 4 — Audit bot**: `neuron_auditor` streams room events to filesystem/S3.
 
 ## Repository layout
 
@@ -61,7 +66,7 @@ cp .env.example .env        # then edit values as needed (never commit .env)
 docker compose up -d
 ```
 
-### Run the admin console (Phase 1)
+### Run the admin console (Phases 1–2)
 
 With a Synapse to talk to (see `deploy/compose/README.md` for getting an admin
 token), from the `neuron/` directory with the venv active:
@@ -105,6 +110,27 @@ python -m neuron_supervisor run     # keep re-promoting on a timer
 With the same two env vars set for the console, its **Supervision** tab can
 promote the bot and the per-room member list gains **Kick/Ban** buttons.
 (Reading/moderating *encrypted* rooms needs E2EE, which comes in a later phase.)
+
+### Audit bot (Phase 4)
+
+`neuron_auditor` joins rooms and streams every event to a durable sink (local
+JSON Lines and/or an S3-compatible bucket). Create a local audit-bot account, get
+its token, then:
+
+```bash
+export NEURON_AUDITOR_BOT_TOKEN=<the audit bot account's access token>
+export NEURON_AUDITOR_SINK=file              # file | s3 | both
+export NEURON_AUDITOR_FILE_PATH=audit-log.jsonl
+python -m neuron_auditor run                  # stream until stopped (Ctrl+C)
+```
+
+Invite the bot to a room (or let it auto-join), send messages, and watch them
+appear as JSON lines in `audit-log.jsonl`. A resume token is persisted, so
+restarting the bot continues without gaps or duplicates. For S3/MinIO, set
+`NEURON_AUDITOR_SINK=s3` (or `both`) and the `NEURON_AUDITOR_S3_*` variables.
+
+> Plaintext only for now: messages in **encrypted** rooms are recorded as
+> undecryptable envelopes (not dropped). Decryption arrives in Phase 5.
 
 ## Configuration & secrets
 
