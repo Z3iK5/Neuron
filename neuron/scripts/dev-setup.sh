@@ -32,4 +32,4 @@ pytest -q
 
 echo
 echo "All good. Activate the environment with:  . neuron/.venv/bin/activate"
-echo "To start a local Synapse to test against, see neuron/deploy/compose/README.md"
+echo "To start a local backend homeserver to test against, see neuron/deploy/compose/README.md"

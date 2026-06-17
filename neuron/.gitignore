@@ -19,7 +19,8 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# Local dev stack data (generated Synapse config, signing keys, DB volumes if bind-mounted)
+# Local dev stack data (generated homeserver config, signing keys, DB volumes if bind-mounted)
+deploy/compose/homeserver-data/
 deploy/compose/synapse-data/
 deploy/compose/data/
 

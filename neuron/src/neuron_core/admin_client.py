@@ -1,19 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A small, typed client for the open **Synapse Admin API**.
+"""A small, typed client for the homeserver **Admin API**.
 
-The Synapse Admin API is documented in this repository under
-``docs/admin_api/`` (e.g. ``user_admin_api.md``). It is a standard HTTP+JSON API
-that requires a server-admin access token, sent as a Bearer token.
+This is a standard HTTP+JSON administration API that requires a server-admin
+access token, sent as a Bearer token. The endpoints live under the
+Synapse-compatible ``/_synapse/admin/...`` path namespace (kept verbatim as the
+on-the-wire contract); Neuron's own ``neuron_server`` will implement the same
+namespace so this client works unchanged before and after cut-over.
 
 This client wraps the endpoints Neuron needs, one method per endpoint, with
-typed inputs/outputs. Errors become :class:`SynapseAdminError`.
+typed inputs/outputs. Errors become :class:`AdminApiError`.
 
 We use an *async* HTTP client (``httpx.AsyncClient``) because the services that
 use this (FastAPI web apps, the Matrix bots) are themselves async.
 
 Example::
 
-    async with SynapseAdminClient("http://localhost:8008", token) as admin:
+    async with AdminClient("http://localhost:8008", token) as admin:
         version = await admin.get_server_version()
         page = await admin.list_users(limit=10)
         for user in page.users:
@@ -29,15 +31,16 @@ from typing import Any
 import httpx
 
 from neuron_core._http import ok_json
-from neuron_core.errors import SynapseAdminError
+from neuron_core.errors import AdminApiError
 
 
 @dataclass
 class UserListPage:
     """One page of results from the "list users" admin endpoint.
 
-    Synapse paginates users forward-only: if ``next_token`` is not ``None`` there
-    are more results, and you pass it back as ``from_token`` to fetch the next page.
+    The endpoint paginates users forward-only: if ``next_token`` is not ``None``
+    there are more results, and you pass it back as ``from_token`` to fetch the
+    next page.
     """
 
     users: list[dict[str, Any]]
@@ -73,8 +76,8 @@ class EventReportPage:
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
-class SynapseAdminClient:
-    """Typed async client for the Synapse Admin API."""
+class AdminClient:
+    """Typed async client for the homeserver Admin API."""
 
     def __init__(
         self,
@@ -106,7 +109,7 @@ class SynapseAdminClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def __aenter__(self) -> SynapseAdminClient:
+    async def __aenter__(self) -> AdminClient:
         return self
 
     async def __aexit__(
@@ -120,8 +123,8 @@ class SynapseAdminClient:
     # --- internal helpers ---------------------------------------------------
     @staticmethod
     def _ok_json(response: httpx.Response) -> dict[str, Any]:
-        """Return the parsed JSON body, or raise ``SynapseAdminError`` on failure."""
-        return ok_json(response, SynapseAdminError)
+        """Return the parsed JSON body, or raise ``AdminApiError`` on failure."""
+        return ok_json(response, AdminApiError)
 
     async def _request(
         self,
@@ -139,7 +142,7 @@ class SynapseAdminClient:
 
     # --- read endpoints -----------------------------------------------------
     async def get_server_version(self) -> dict[str, Any]:
-        """``GET /_synapse/admin/v1/server_version`` — Synapse + Python versions.
+        """``GET /_synapse/admin/v1/server_version`` — server + Python versions.
 
         Returns a dict like ``{"server_version": "1.155.0", "python_version": "3.11.x"}``.
         Useful as a connectivity/health probe and for the console's dashboard.
@@ -296,7 +299,7 @@ class SynapseAdminClient:
     ) -> dict[str, Any]:
         """``POST /_synapse/admin/v1/reset_password/{user_id}`` — set a new password.
 
-        NOTE: disabled by Synapse when delegated auth (MAS / MSC3861) is enabled.
+        NOTE: disabled by the homeserver when delegated auth (MAS / MSC3861) is enabled.
         """
         return await self._request(
             "POST",
@@ -409,5 +412,5 @@ class SynapseAdminClient:
 
 
 def _bool_param(value: bool) -> str:
-    """Synapse expects query booleans as the lowercase strings 'true'/'false'."""
+    """The Admin API expects query booleans as the lowercase strings 'true'/'false'."""
     return "true" if value else "false"

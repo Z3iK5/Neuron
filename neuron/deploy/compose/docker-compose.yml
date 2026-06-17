@@ -1,14 +1,22 @@
 # Neuron — local development stack.
 #
-# Brings up a STOCK, unmodified Synapse homeserver with PostgreSQL and Redis so
-# Neuron services have something real to talk to during development. This is a
-# THROWAWAY dev environment — not a production deployment.
+# Brings up a TRANSITIONAL backend homeserver with PostgreSQL and Redis so Neuron
+# services have something real to talk to during development. This is a THROWAWAY
+# dev environment — not a production deployment.
+#
+# NOTE ON THE BACKEND: until Neuron's own homeserver (`neuron_server`) reaches
+# parity, the `homeserver` service runs a STOCK, unmodified upstream image as an
+# opaque black box. Neuron contains no homeserver source and is not derived from
+# it (see the repository NOTICE and HOMESERVER-PLAN.md). The image-specific
+# settings below (image name, `SYNAPSE_*` env vars, `synapse.app.homeserver`
+# entrypoint) are the upstream image's own contract and will go away once we cut
+# over to `neuron_server`.
 #
 # Secrets handling: nothing secret is committed. All secrets come from a
-# git-ignored `.env` file (copy `.env.example` to `.env`). Synapse's signing
-# keys and generated config live in the `synapse-data` volume, also not
-# committed. The Postgres password and Synapse registration secret are passed in
-# from the environment and written into a runtime config file inside the volume.
+# git-ignored `.env` file (copy `.env.example` to `.env`). The backend's signing
+# keys and generated config live in the `homeserver-data` volume, also not
+# committed. The Postgres password and registration secret are passed in from the
+# environment and written into a runtime config file inside the volume.
 #
 # Quick start:  see ./README.md
 
@@ -16,15 +24,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-synapse}
+      POSTGRES_USER: ${POSTGRES_USER:-neuron}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-synapse}
-      # Synapse requires this specific locale/encoding for its database.
+      POSTGRES_DB: ${POSTGRES_DB:-neuron}
+      # The backend homeserver requires this specific locale/encoding for its DB.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neuron}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -38,31 +46,35 @@ services:
       timeout: 5s
       retries: 10
 
-  synapse:
+  # Transitional backend homeserver. Runs a stock, unmodified upstream image as
+  # an opaque black box until `neuron_server` reaches parity and replaces it.
+  # The image name, `SYNAPSE_*` env vars and `synapse.app.homeserver` entrypoint
+  # are the upstream image's own contract — not Neuron code.
+  homeserver:
     image: ghcr.io/element-hq/synapse:latest   # pin to a specific tag for reproducibility
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      SYNAPSE_SERVER_NAME: ${SYNAPSE_SERVER_NAME:-neuron.local}
-      POSTGRES_USER: ${POSTGRES_USER:-synapse}
+      SYNAPSE_SERVER_NAME: ${NEURON_SERVER_NAME:-neuron.local}
+      POSTGRES_USER: ${POSTGRES_USER:-neuron}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      POSTGRES_DB: ${POSTGRES_DB:-neuron}
       REGISTRATION_SHARED_SECRET: ${REGISTRATION_SHARED_SECRET:?set REGISTRATION_SHARED_SECRET in .env}
     ports:
-      - "8008:8008"     # Synapse client + admin API (HTTP, dev only)
+      - "8008:8008"     # homeserver client + admin API (HTTP, dev only)
     volumes:
-      - synapse-data:/data
-    # On first start we generate Synapse's base config + signing keys (into the
-    # git-ignored volume), then write a small override file that points Synapse
-    # at PostgreSQL and injects the registration secret from the environment.
-    # Synapse merges multiple --config-path arguments (later files win).
+      - homeserver-data:/data
+    # On first start we generate the backend's base config + signing keys (into
+    # the git-ignored volume), then write a small override file that points it at
+    # PostgreSQL and injects the registration secret from the environment. The
+    # upstream image merges multiple --config-path arguments (later files win).
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
         if [ ! -f /data/homeserver.yaml ]; then
-          echo "Generating Synapse config + signing keys..."
+          echo "Generating homeserver config + signing keys..."
           python -m synapse.app.homeserver \
             --server-name "$$SYNAPSE_SERVER_NAME" \
             --config-path /data/homeserver.yaml \
@@ -94,12 +106,12 @@ services:
         report_stats: false
         suppress_key_server_warning: true
         EOF
-        echo "Starting Synapse..."
+        echo "Starting homeserver..."
         exec python -m synapse.app.homeserver \
           --config-path /data/homeserver.yaml \
           --config-path /data/conf.d
     healthcheck:
-      # Synapse exposes a simple health endpoint on each listener.
+      # The backend exposes a simple health endpoint on each listener.
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8008/health').status==200 else 1)\""]
       interval: 10s
       timeout: 5s
@@ -108,4 +120,4 @@ services:
 
 volumes:
   postgres-data:
-  synapse-data:
+  homeserver-data:

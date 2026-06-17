@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""neuron_auditor — an audit-logging bot for a stock Synapse.
+"""neuron_auditor — an audit-logging bot for a Matrix homeserver.
 
 The auditor joins rooms and streams every event it sees to a durable **sink**
 (the local filesystem as JSON Lines, and/or an S3-compatible bucket) so there is

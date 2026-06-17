@@ -6,12 +6,12 @@ Tracks implementation progress against `PLAN.md`. Updated per phase.
 
 ## Phase 0 — Foundation & local dev environment — ✅ built
 
-Project skeleton under `neuron/` (separate from Synapse's tree); the shared
-`neuron_core` library (typed `SynapseAdminClient`, `pydantic-settings` config
-with `SecretStr` token, stdlib JSON/console logging, error types); unit tests
-(httpx `MockTransport`) + an auto-skipping integration smoke test; a Docker
-Compose dev stack (stock Synapse + PostgreSQL + Redis); CI (ruff + mypy +
-pytest, path-filtered to `neuron/**`); dev-setup script.
+Project skeleton under `neuron/`; the shared `neuron_core` library (typed
+`AdminClient`, `pydantic-settings` config with `SecretStr` token, stdlib
+JSON/console logging, error types); unit tests (httpx `MockTransport`) + an
+auto-skipping integration smoke test; a Docker Compose dev stack (a transitional
+backend homeserver — stock upstream image — + PostgreSQL + Redis); CI (ruff +
+mypy + pytest, path-filtered to `neuron/**`); dev-setup script.
 
 Verified locally: ruff clean, mypy clean, unit tests pass. Live `docker compose`
 bring-up needs a Docker daemon (run it in your environment to fully close it).
@@ -20,7 +20,7 @@ bring-up needs a Docker daemon (run it in your environment to fully close it).
 
 ## Phase 1 — neuron-console (read-only) — ✅ built
 
-A FastAPI web UI over the Synapse Admin API: operator login (password + signed
+A FastAPI web UI over the homeserver Admin API: operator login (password + signed
 session cookie; the admin token stays server-side and never reaches the
 browser), and server-rendered pages for the dashboard, users (list/search/
 detail), rooms (list/search/detail), content reports, and `/healthz`.
@@ -33,7 +33,7 @@ Write actions: create/modify/deactivate users, reset password (classic auth),
 shadow-ban, registration tokens, server notices, room block/delete (async +
 status page), redaction (async + status page). CSRF protection on every form,
 confirmation prompts for destructive actions, flash messages. Under
-`NEURON_AUTH_MODE=mas`, endpoints Synapse disables are blocked with a clear
+`NEURON_AUTH_MODE=mas`, endpoints the homeserver disables are blocked with a clear
 message (full MAS/OIDC operator login deferred per the classic-first decision).
 
 ---
@@ -84,10 +84,10 @@ testable. matrix-nio / decryption arrives in Phase 5.
 ### Phase 4 acceptance criteria status
 - [✅] Events appear as JSON in the filesystem sink and S3, no gaps across a
   restart — covered by unit tests (file/S3 sinks + token-resume); ready for a
-  live run (`run` against the dev Synapse + MinIO).
+  live run (`run` against the dev homeserver + MinIO).
 
 ### Review gate
-Run the auditor against the dev Synapse, send messages in a room the bot is in,
+Run the auditor against the dev homeserver, send messages in a room the bot is in,
 and confirm they land in `audit-log.jsonl` (and MinIO if configured), surviving a
 restart. When happy, we proceed to **Phase 5 — E2EE for auditor & supervisor**
 (the hard phase).
@@ -146,7 +146,7 @@ cross-signing identity, and one-time-key replenishment.
 - **Server-side + trust handshake:** `/keys/upload` and
   `/keys/device_signing/upload` acceptance (the latter typically needs UIA), and a
   *real* client *choosing* to share keys with the bot, can only be exercised
-  against a running Synapse + a cooperating, trusting client. The crypto and
+  against a running homeserver + a cooperating, trusting client. The crypto and
   payloads are validated offline; the wire calls are unit-tested for shape.
 - **Verification is identity, not yet interactive trust:** the bot now publishes a
   proper cross-signed identity, but interactive (SAS) verification and a
@@ -155,7 +155,7 @@ cross-signing identity, and one-time-key replenishment.
   store, and cross-signing seeds can all decrypt messages — protect them.
 
 ### Review gate
-Validate against the dev Synapse (or accept the offline validation), then move to
+Validate against the dev homeserver (or accept the offline validation), then move to
 **Phase 6 — media scanner**.
 
 ---

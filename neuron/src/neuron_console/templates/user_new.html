@@ -10,7 +10,7 @@
     <label for="localpart">Username</label>
     <input type="text" id="localpart" name="localpart" placeholder="alice" required>
     {% if server_name %}<p class="muted">Will create <code>@username:{{ server_name }}</code></p>
-    {% else %}<p class="muted">Tip: set <code>NEURON_SYNAPSE_SERVER_NAME</code>, or enter a full ID like <code>@alice:example.org</code>.</p>{% endif %}
+    {% else %}<p class="muted">Tip: set <code>NEURON_SERVER_NAME</code>, or enter a full ID like <code>@alice:example.org</code>.</p>{% endif %}
 
     <label for="password">Password</label>
     <input type="password" id="password" name="password" required>

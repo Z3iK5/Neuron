@@ -105,7 +105,7 @@ async def _amain(command: str) -> None:
         raise SystemExit("NEURON_AUDITOR_BOT_TOKEN is required.")
 
     client = MatrixClient(
-        settings.synapse_base_url,
+        settings.homeserver_url,
         settings.auditor_bot_token.get_secret_value(),
         timeout=settings.http_timeout_seconds,
     )

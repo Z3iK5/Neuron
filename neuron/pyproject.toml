@@ -1,9 +1,8 @@
 # Neuron — Python project definition.
 #
-# This is the project file for ALL Neuron services and shared libraries. It is
-# deliberately SEPARATE from Synapse's own pyproject.toml at the repository root:
-# Neuron is additive software that runs *around* a stock Synapse, so it keeps its
-# own dependencies and never interferes with Synapse's packaging.
+# This is the project file for ALL Neuron services and shared libraries: the
+# operator tooling (admin console, bots, crypto) and, in progress, Neuron's own
+# homeserver (`neuron_server`). See HOMESERVER-PLAN.md at the repository root.
 #
 # Layout uses the conventional "src/" pattern: importable packages live under
 # src/ (e.g. src/neuron_core). Tests live under tests/.
@@ -15,7 +14,7 @@ build-backend = "hatchling.build"
 [project]
 name = "neuron"
 version = "0.0.1"
-description = "Neuron — clean-room services around a stock Synapse (ESS Pro-equivalent features)"
+description = "Neuron — a clean-room, all-in-one Matrix platform (operator tooling + homeserver)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -25,7 +24,7 @@ authors = [{ name = "Neuron contributors" }]
 # extras later (e.g. matrix-nio for the bots, fastapi for the web services); the
 # shared library (neuron_core) only needs an HTTP client + config/validation.
 dependencies = [
-    "httpx>=0.27,<1.0",          # modern async HTTP client used to call Synapse
+    "httpx>=0.27,<1.0",          # modern async HTTP client used to call the homeserver
     "pydantic>=2.7,<3.0",        # data validation + typed models
     "pydantic-settings>=2.3,<3.0", # load configuration from env vars / .env
     "PyYAML>=6.0",               # read optional YAML config files

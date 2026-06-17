@@ -48,5 +48,5 @@ jobs:
 
       - name: Unit tests (pytest)
         # Integration tests under tests/integration are skipped automatically
-        # unless NEURON_SYNAPSE_BASE_URL / NEURON_SYNAPSE_ADMIN_TOKEN are set.
+        # unless NEURON_HOMESERVER_URL / NEURON_HOMESERVER_ADMIN_TOKEN are set.
         run: pytest -q

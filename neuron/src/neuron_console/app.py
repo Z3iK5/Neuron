@@ -4,14 +4,14 @@
 Phase 1 added read-only browsing. Phase 2 adds **write actions** (create/modify/
 deactivate users, reset passwords, shadow-ban, registration tokens, server
 notices, room block/delete, redaction) with **CSRF protection** and **MAS-aware
-guards** (actions Synapse disables under delegated auth are blocked with a clear
-message).
+guards** (actions the homeserver disables under delegated auth are blocked with a
+clear message).
 
 Run locally::
 
-    NEURON_SYNAPSE_BASE_URL=http://localhost:8008 \\
-    NEURON_SYNAPSE_ADMIN_TOKEN=<server-admin token> \\
-    NEURON_SYNAPSE_SERVER_NAME=neuron.local \\
+    NEURON_HOMESERVER_URL=http://localhost:8008 \\
+    NEURON_HOMESERVER_ADMIN_TOKEN=<server-admin token> \\
+    NEURON_SERVER_NAME=neuron.local \\
     NEURON_CONSOLE_PASSWORD=letmein \\
     uvicorn neuron_console.app:app --reload
 """
@@ -42,8 +42,8 @@ from neuron_console.deps import (
     require_login,
 )
 from neuron_console.security import get_csrf_token
-from neuron_core import MatrixClient, SynapseAdminClient, configure_logging, get_logger
-from neuron_core.errors import SynapseAdminError
+from neuron_core import AdminClient, MatrixClient, configure_logging, get_logger
+from neuron_core.errors import AdminApiError
 from neuron_supervisor import Supervisor
 from neuron_supervisor.core import SupervisorError
 
@@ -59,9 +59,9 @@ def create_app(settings: ConsoleSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        admin = SynapseAdminClient(
-            settings.synapse_base_url,
-            settings.synapse_admin_token.get_secret_value(),
+        admin = AdminClient(
+            settings.homeserver_url,
+            settings.homeserver_admin_token.get_secret_value(),
             timeout=settings.http_timeout_seconds,
         )
         # The supervision bot's CS-API client is optional: promotion works with
@@ -69,7 +69,7 @@ def create_app(settings: ConsoleSettings | None = None) -> FastAPI:
         bot: MatrixClient | None = None
         if settings.has_supervisor_bot():
             bot = MatrixClient(
-                settings.synapse_base_url,
+                settings.homeserver_url,
                 settings.supervisor_bot_token.get_secret_value(),
                 timeout=settings.http_timeout_seconds,
             )
@@ -110,7 +110,7 @@ def _render(
     base: dict[str, Any] = {
         "csrf_token": get_csrf_token(request),
         "mas_enabled": settings.mas_enabled(),
-        "server_name": settings.synapse_server_name,
+        "server_name": settings.server_name,
         "flash": request.session.pop("flash", None),
     }
     base.update(context)
@@ -163,10 +163,10 @@ def _register_exception_handlers(app: FastAPI) -> None:
             message=str(exc),
         )
 
-    @app.exception_handler(SynapseAdminError)
-    async def _on_admin_error(request: Request, exc: SynapseAdminError) -> Response:
+    @app.exception_handler(AdminApiError)
+    async def _on_admin_error(request: Request, exc: AdminApiError) -> Response:
         log.warning(
-            "synapse admin error",
+            "admin api error",
             extra={"status": exc.status_code, "errcode": exc.errcode, "path": request.url.path},
         )
         return _render(
@@ -210,7 +210,7 @@ def _register_routes(app: FastAPI) -> None:
     async def dashboard(
         request: Request,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
     ) -> Response:
         version = await admin.get_server_version()
         users = await admin.list_users(limit=1)
@@ -228,7 +228,7 @@ def _register_routes(app: FastAPI) -> None:
     async def users_list(
         request: Request,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         search: str | None = None,
         from_token: str | None = None,
         limit: int = 50,
@@ -250,7 +250,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         settings: ConsoleSettings = Depends(get_settings),
         localpart: str = Form(...),
         password: str = Form(...),
@@ -274,7 +274,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         user_id: str,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
     ) -> Response:
         user = await admin.get_user(user_id)
         return _render(request, "user_detail.html", user_id=user_id, user=user)
@@ -286,7 +286,7 @@ def _register_routes(app: FastAPI) -> None:
         user_id: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         settings: ConsoleSettings = Depends(get_settings),
         displayname: str = Form(""),
         make_admin: bool = Form(False),
@@ -303,7 +303,7 @@ def _register_routes(app: FastAPI) -> None:
         user_id: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         settings: ConsoleSettings = Depends(get_settings),
         new_password: str = Form(...),
         logout_devices: bool = Form(False),
@@ -319,7 +319,7 @@ def _register_routes(app: FastAPI) -> None:
         user_id: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         banned: bool = Form(...),
     ) -> Response:
         await admin.set_shadow_ban(user_id, banned)
@@ -340,7 +340,7 @@ def _register_routes(app: FastAPI) -> None:
         user_id: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         erase: bool = Form(False),
     ) -> Response:
         await admin.deactivate_user(user_id, erase=erase)
@@ -353,7 +353,7 @@ def _register_routes(app: FastAPI) -> None:
         user_id: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
     ) -> Response:
         redact_id = await admin.redact_user_events(user_id, rooms=[])
         return RedirectResponse(f"/redactions/{redact_id}", status_code=303)
@@ -363,7 +363,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         redact_id: str,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
     ) -> Response:
         status = await admin.get_redact_status(redact_id)
         return _render(request, "redact_status.html", redact_id=redact_id, status=status)
@@ -373,7 +373,7 @@ def _register_routes(app: FastAPI) -> None:
     async def rooms_list(
         request: Request,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         search: str | None = None,
         from_offset: int = 0,
         limit: int = 50,
@@ -388,7 +388,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         room_id: str,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         settings: ConsoleSettings = Depends(get_settings),
     ) -> Response:
         room = await admin.get_room(room_id)
@@ -407,7 +407,7 @@ def _register_routes(app: FastAPI) -> None:
         room_id: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         block: bool = Form(...),
     ) -> Response:
         await admin.set_room_block(room_id, block)
@@ -428,7 +428,7 @@ def _register_routes(app: FastAPI) -> None:
         room_id: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         block: bool = Form(False),
         purge: bool = Form(True),
     ) -> Response:
@@ -440,7 +440,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         delete_id: str,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
     ) -> Response:
         status = await admin.get_room_delete_status(delete_id)
         return _render(request, "room_delete_status.html", delete_id=delete_id, status=status)
@@ -516,7 +516,7 @@ def _register_routes(app: FastAPI) -> None:
     async def tokens_list(
         request: Request,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
     ) -> Response:
         tokens = await admin.list_registration_tokens()
         return _render(request, "registration_tokens.html", tokens=tokens)
@@ -526,7 +526,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         uses_allowed: str = Form(""),
     ) -> Response:
         uses = int(uses_allowed) if uses_allowed.strip().isdigit() else None
@@ -540,7 +540,7 @@ def _register_routes(app: FastAPI) -> None:
         token: str,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
     ) -> Response:
         await admin.delete_registration_token(token)
         _flash(request, "Registration token deleted.")
@@ -558,7 +558,7 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         _: None = Depends(require_login),
         __: None = Depends(csrf_protect),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         user_id: str = Form(...),
         message: str = Form(...),
     ) -> Response:
@@ -571,7 +571,7 @@ def _register_routes(app: FastAPI) -> None:
     async def reports_list(
         request: Request,
         _: None = Depends(require_login),
-        admin: SynapseAdminClient = Depends(get_admin),
+        admin: AdminClient = Depends(get_admin),
         from_offset: int = 0,
         limit: int = 50,
     ) -> Response:

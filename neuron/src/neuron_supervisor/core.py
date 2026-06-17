@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from neuron_core import MatrixClient, SynapseAdminClient, get_logger
-from neuron_core.errors import NeuronError, SynapseAdminError
+from neuron_core import AdminClient, MatrixClient, get_logger
+from neuron_core.errors import AdminApiError, NeuronError
 
 log = get_logger(__name__)
 
@@ -31,7 +31,7 @@ class Supervisor:
 
     def __init__(
         self,
-        admin: SynapseAdminClient,
+        admin: AdminClient,
         bot_user_id: str,
         *,
         bot: MatrixClient | None = None,
@@ -90,7 +90,7 @@ class Supervisor:
                 try:
                     await self.admin.make_room_admin(room_id, self.bot_user_id)
                     entry["promoted"] = True
-                except SynapseAdminError as exc:
+                except AdminApiError as exc:
                     entry["error"] = exc.message or exc.errcode or str(exc.status_code)
                     log.warning("could not promote in room", extra={"room_id": room_id})
                 results.append(entry)

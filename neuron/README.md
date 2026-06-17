@@ -1,19 +1,22 @@
 # Neuron
 
-**Neuron** is a suite of independent, clean-room services that run *around* a
-stock, unmodified [Synapse](https://github.com/element-hq/synapse) homeserver
-(this repository) to provide the kind of functionality that distinguishes
-commercial Matrix distributions: a federation firewall, identity/directory
-sync, an audit bot, a supervision bot, an admin console, a media scanner, and a
-high-availability deployment blueprint.
+**Neuron** is an independent, clean-room Matrix platform: an all-in-one,
+self-owned product that bundles operator tooling (an admin console, a
+supervision bot, an audit bot, E2EE crypto, and a high-availability deployment
+blueprint) and is growing its **own** Matrix homeserver (`neuron_server`, see
+[`HOMESERVER-PLAN.md`](../HOMESERVER-PLAN.md)).
+
+Until `neuron_server` reaches parity, Neuron's services run against a
+**transitional backend homeserver** — a stock, unmodified upstream image used as
+an opaque black box (see `deploy/compose/`). Neuron talks to it only over
+**public Matrix APIs** (Client-Server, Server-Server, Application Service) and
+the **homeserver Admin API**. Neuron contains no homeserver source, forks or
+patches nothing, and is not derived from any other homeserver (see the
+repository `NOTICE`).
 
 > **Design docs:** see the repository root for `ARCHITECTURE.md`,
-> `FEATURE-MATRIX.md`, `PLAN.md`, and `OPEN-QUESTIONS.md`, plus the cited
-> behavioral research in `docs/feature-analysis.md`.
-
-Neuron talks to Synapse only over **public Matrix APIs** (Client-Server,
-Server-Server, Application Service) and the **open Synapse Admin API**. It does
-not fork or patch Synapse, and it contains no proprietary code.
+> `FEATURE-MATRIX.md`, `PLAN.md`, `OPEN-QUESTIONS.md`, and `HOMESERVER-PLAN.md`,
+> plus the cited behavioral research in `docs/feature-analysis.md`.
 
 ## Status
 
@@ -21,9 +24,9 @@ Early development. Built phase-by-phase per `PLAN.md`; current progress is
 tracked in [`PROGRESS.md`](./PROGRESS.md).
 
 - **Phase 0 — Foundation**: project skeleton, the shared `neuron_core` library,
-  a local dev Synapse via Docker Compose, and CI.
+  a local dev backend homeserver via Docker Compose, and CI.
 - **Phase 1 — Admin console (read-only)**: `neuron_console`, a FastAPI web UI
-  over the Synapse Admin API for browsing users, rooms, and content reports.
+  over the homeserver Admin API for browsing users, rooms, and content reports.
 - **Phase 2 — Admin console (write)**: user/room/token management with CSRF and
   MAS-aware guards.
 - **Phase 3 — Supervision bot**: `neuron_supervisor` promotes a bot to room
@@ -36,11 +39,11 @@ tracked in [`PROGRESS.md`](./PROGRESS.md).
 
 ```
 neuron/
-├── src/neuron_core/     # shared library: Synapse Admin API client, config, logging
-├── tests/               # unit tests (and integration tests that need a live Synapse)
-├── deploy/compose/      # local dev stack: Synapse + PostgreSQL (+ Redis)
+├── src/neuron_core/     # shared library: homeserver Admin API client, config, logging
+├── tests/               # unit tests (and integration tests that need a live homeserver)
+├── deploy/compose/      # local dev stack: backend homeserver + PostgreSQL (+ Redis)
 ├── scripts/             # helper scripts (dev setup, etc.)
-├── pyproject.toml       # Neuron's own Python project (separate from Synapse's)
+├── pyproject.toml       # Neuron's own Python project
 └── README.md
 ```
 
@@ -56,12 +59,12 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
 
-# 2. Run the linters, type checker, and unit tests (no Synapse needed).
+# 2. Run the linters, type checker, and unit tests (no homeserver needed).
 ruff check .
 mypy
 pytest
 
-# 3. (Optional) Bring up a local dev Synapse to test against.
+# 3. (Optional) Bring up a local dev backend homeserver to test against.
 #    See deploy/compose/README.md for the full walkthrough.
 cd deploy/compose
 cp .env.example .env        # then edit values as needed (never commit .env)
@@ -70,13 +73,13 @@ docker compose up -d
 
 ### Run the admin console (Phases 1–2)
 
-With a Synapse to talk to (see `deploy/compose/README.md` for getting an admin
+With a homeserver to talk to (see `deploy/compose/README.md` for getting an admin
 token), from the `neuron/` directory with the venv active:
 
 ```bash
-export NEURON_SYNAPSE_BASE_URL=http://localhost:8008
-export NEURON_SYNAPSE_ADMIN_TOKEN=<server-admin token>
-export NEURON_SYNAPSE_SERVER_NAME=neuron.local         # needed to create users by username
+export NEURON_HOMESERVER_URL=http://localhost:8008
+export NEURON_HOMESERVER_ADMIN_TOKEN=<server-admin token>
+export NEURON_SERVER_NAME=neuron.local         # needed to create users by username
 export NEURON_CONSOLE_PASSWORD=<a password you choose>  # to log in to the console
 # Optional: NEURON_AUTH_MODE=mas  if your homeserver delegates auth to MAS (MSC3861)
 uvicorn neuron_console.app:app --reload --port 8080
@@ -87,7 +90,7 @@ The console never exposes the admin token to the browser. It supports browsing
 **and** write actions (create/modify/deactivate users, reset passwords,
 shadow-ban, registration tokens, server notices, room block/delete, redaction),
 with CSRF protection and confirmation prompts for destructive actions. Under
-`NEURON_AUTH_MODE=mas`, actions Synapse disables (e.g. password reset) are
+`NEURON_AUTH_MODE=mas`, actions the homeserver disables (e.g. password reset) are
 blocked with an explanatory message.
 
 ### Supervision bot (Phase 3)

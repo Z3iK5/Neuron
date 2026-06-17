@@ -10,7 +10,7 @@ from neuron_core.config import NeuronCoreSettings
 
 
 class AuditorSettings(NeuronCoreSettings):
-    """Settings for neuron-auditor (inherits Synapse connection + logging)."""
+    """Settings for neuron-auditor (inherits homeserver connection + logging)."""
 
     model_config = SettingsConfigDict(
         env_prefix="NEURON_",

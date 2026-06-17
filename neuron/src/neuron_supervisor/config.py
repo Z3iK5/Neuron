@@ -10,7 +10,7 @@ from neuron_core.config import NeuronCoreSettings
 
 
 class SupervisorSettings(NeuronCoreSettings):
-    """Settings for neuron-supervisor (inherits Synapse connection + logging)."""
+    """Settings for neuron-supervisor (inherits homeserver connection + logging)."""
 
     model_config = SettingsConfigDict(
         env_prefix="NEURON_",

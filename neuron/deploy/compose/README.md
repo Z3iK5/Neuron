@@ -1,7 +1,11 @@
 # Local dev stack
 
-A throwaway Synapse + PostgreSQL + Redis environment for developing and testing
-Neuron services against a **real** homeserver.
+A throwaway homeserver + PostgreSQL + Redis environment for developing and
+testing Neuron services against a **real** backend.
+
+> The `homeserver` service runs a stock, unmodified upstream image as a
+> transitional black box until Neuron's own `neuron_server` reaches parity. See
+> the repository `NOTICE` and `HOMESERVER-PLAN.md`.
 
 > Requires Docker with the Compose plugin (`docker compose`).
 
@@ -24,12 +28,12 @@ cp .env.example .env
 docker compose up -d
 ```
 
-On first start, the Synapse container generates its config and signing keys into
-the `synapse-data` volume, then starts against PostgreSQL. Wait until it is
-healthy:
+On first start, the homeserver container generates its config and signing keys
+into the `homeserver-data` volume, then starts against PostgreSQL. Wait until it
+is healthy:
 
 ```bash
-docker compose ps          # STATUS should show "healthy" for synapse
+docker compose ps          # STATUS should show "healthy" for homeserver
 curl -s http://localhost:8008/_matrix/client/versions | head -c 200
 ```
 
@@ -43,7 +47,7 @@ generated `homeserver.yaml`, so `-c /data/homeserver.yaml` would fail with
 "HMAC incorrect".
 
 ```bash
-docker compose exec synapse sh -c \
+docker compose exec homeserver sh -c \
   'register_new_matrix_user -k "$REGISTRATION_SHARED_SECRET" -a -u admin -p "<your-dev-password>" http://localhost:8008'
 ```
 
@@ -58,8 +62,8 @@ curl -s -XPOST http://localhost:8008/_matrix/client/v3/login \
 Export it for Neuron tooling and tests:
 
 ```bash
-export NEURON_SYNAPSE_BASE_URL=http://localhost:8008
-export NEURON_SYNAPSE_ADMIN_TOKEN=<the access_token from above>
+export NEURON_HOMESERVER_URL=http://localhost:8008
+export NEURON_HOMESERVER_ADMIN_TOKEN=<the access_token from above>
 ```
 
 ## 4. Verify with neuron_core
@@ -67,13 +71,13 @@ export NEURON_SYNAPSE_ADMIN_TOKEN=<the access_token from above>
 From the `neuron/` directory, with the venv active:
 
 ```bash
-python -c "import asyncio, os; from neuron_core import SynapseAdminClient; \
-print(asyncio.run(SynapseAdminClient(os.environ['NEURON_SYNAPSE_BASE_URL'], os.environ['NEURON_SYNAPSE_ADMIN_TOKEN']).get_server_version()))"
+python -c "import asyncio, os; from neuron_core import AdminClient; \
+print(asyncio.run(AdminClient(os.environ['NEURON_HOMESERVER_URL'], os.environ['NEURON_HOMESERVER_ADMIN_TOKEN']).get_server_version()))"
 ```
 
-You should see the Synapse + Python versions. The integration test
+You should see the backend's server + Python versions. The integration test
 (`neuron/tests/integration/test_smoke.py`) exercises the same path and will run
-automatically when `NEURON_SYNAPSE_BASE_URL` and `NEURON_SYNAPSE_ADMIN_TOKEN`
+automatically when `NEURON_HOMESERVER_URL` and `NEURON_HOMESERVER_ADMIN_TOKEN`
 point at a reachable homeserver (otherwise it is skipped).
 
 ## 5. Stop / reset

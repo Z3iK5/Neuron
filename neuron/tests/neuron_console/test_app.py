@@ -2,7 +2,7 @@
 """Tests for the admin console (read + write).
 
 These use FastAPI's ``TestClient`` with a fake admin client that records calls,
-so no real Synapse is needed. They check auth gating, CSRF protection, the
+so no real homeserver is needed. They check auth gating, CSRF protection, the
 MAS-disabled guard, that write actions call the right admin methods, and that
 the server-admin token never leaks to the browser.
 """
@@ -169,8 +169,8 @@ def make_client(**overrides: Any) -> Iterator[tuple[TestClient, FakeAdmin]]:
         _env_file=None,
         console_password=SecretStr(CONSOLE_PASSWORD),
         console_session_secret=SecretStr("unit-test-session-secret"),
-        synapse_admin_token=SecretStr(ADMIN_TOKEN),
-        synapse_server_name=SERVER_NAME,
+        homeserver_admin_token=SecretStr(ADMIN_TOKEN),
+        server_name=SERVER_NAME,
         supervisor_bot_user_id=BOT_USER_ID,
         supervisor_bot_token=SecretStr("bot-token"),
         **overrides,

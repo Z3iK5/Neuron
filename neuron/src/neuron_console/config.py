@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Configuration for the admin console service.
 
-Extends ``NeuronCoreSettings`` (which provides the Synapse connection + logging
-settings) with console-specific settings: the operator login password and the
+Extends ``NeuronCoreSettings`` (which provides the homeserver connection +
+logging settings) with console-specific settings: the operator login password and the
 secret used to sign session cookies. All are read from ``NEURON_*`` env vars.
 """
 

@@ -6,7 +6,7 @@ A small hierarchy:
 - ``NeuronError`` — base for anything we raise on purpose.
 - ``MatrixApiError`` — an HTTP+JSON error from a Matrix API (carries the HTTP
   status plus the Matrix ``errcode``/``error`` fields).
-- ``SynapseAdminError`` / ``MatrixError`` — the Admin API vs Client-Server API
+- ``AdminApiError`` / ``MatrixError`` — the Admin API vs Client-Server API
   flavours, so callers can tell which API failed if they care.
 """
 
@@ -40,8 +40,8 @@ class MatrixApiError(NeuronError):
         super().__init__(f"Matrix API error {status_code}{code}: {detail}")
 
 
-class SynapseAdminError(MatrixApiError):
-    """An error from the Synapse Admin API (``/_synapse/admin/...``)."""
+class AdminApiError(MatrixApiError):
+    """An error from the homeserver Admin API (``/_synapse/admin/...``)."""
 
 
 class MatrixError(MatrixApiError):
