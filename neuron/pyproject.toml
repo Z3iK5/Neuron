@@ -30,6 +30,12 @@ dependencies = [
     "PyYAML>=6.0",               # read optional YAML config files
 ]
 
+# Console commands installed on `pip install`/`pipx install`. `neuron-server`
+# runs the homeserver (needs the `server` extra); this is what makes Neuron an
+# installable program on macOS/Windows/Linux (see DESKTOP-PLAN.md).
+[project.scripts]
+neuron-server = "neuron_server.__main__:main"
+
 [project.optional-dependencies]
 # The admin console service (FastAPI + server-rendered templates).
 # Install with:  pip install -e ".[console]"
