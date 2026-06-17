@@ -93,47 +93,62 @@ restart. When happy, we proceed to **Phase 5 — E2EE for auditor & supervisor**
 (the hard phase).
 
 ---
-## Phase 5 — E2EE for auditor & supervisor — ✅ crypto core built, awaiting review gate
+## Phase 5 + 5b — E2EE for auditor — ✅ built (offline-validated), awaiting review gate
 
-**Goal:** read/audit **encrypted** room messages, with honest limits.
+**Goal:** read/audit **encrypted** room messages, including automatic key receipt.
 
-### Delivered
-- **`neuron_crypto` package (new):** `base.py` (no libolm dependency) with the
-  `Decryptor` protocol, `DecryptResult`, and `NullDecryptor`; `megolm.py` (needs
+### Delivered — Phase 5 (Megolm decryption core)
+- **`neuron_crypto` package:** `base.py` (no libolm dependency) with the
+  `Decryptor` protocol, `DecryptResult`, `NullDecryptor`; `megolm.py` (needs
   libolm via the `e2e` extra) with `MegolmSessionStore` (import keys from an
   `m.room_key` content or a JSON key file; pickle persistence) and
-  `MegolmDecryptor`, which decrypts `m.room.encrypted` (`m.megolm.v1.aes-sha2`)
-  events to the inner cleartext.
-- **Auditor integration:** `Auditor` takes an optional `decryptor`; encrypted
-  events are decrypted when a key is available (record carries the inner
-  type/content + `decrypted: true`), else recorded as an **undecryptable
-  envelope** with a `decryption_error` reason — never dropped. Keys are imported
-  from `NEURON_AUDITOR_E2E_KEY_FILE` when set.
-- **Packaging:** `e2e` extra (`python-olm`); needs system `libolm`.
+  `MegolmDecryptor`, decrypting `m.room.encrypted` (`m.megolm.v1.aes-sha2`) to the
+  inner cleartext.
+- **Auditor integration:** optional `decryptor`; encrypted events are decrypted
+  when a key is available (inner type/content + `decrypted: true`) else recorded
+  as an **undecryptable envelope** with a `decryption_error` reason — never dropped.
+
+### Delivered — Phase 5b (automatic key receipt)
+- **`OlmDevice`** (`olm_device.py`): the bot's Olm identity — device + one-time
+  keys (signed, for `/keys/upload`), Olm to-device decryption, account/session
+  persistence.
+- **`E2EEManager`** (`manager.py`): `handle_to_device(events)` decrypts Olm
+  to-device messages and imports the Megolm key from any `m.room_key`; `decrypt()`
+  then reads room events — so once a room's key is received, its messages decrypt
+  automatically.
+- **`MatrixClient.keys_upload`** to publish device + one-time keys.
+- **Auditor** now feeds each sync's `to_device` events to the decryptor before
+  recording, so keys are ingested automatically. Full E2EE mode is enabled by
+  `NEURON_AUDITOR_E2E_DEVICE_STORE` (persistent device; publishes keys on startup).
 
 ### Verified locally (offline, with libolm)
-- `ruff` clean, `mypy` clean (27 source files), `pytest` → **49 passed,
-  3 skipped**. Includes **real Megolm round-trips** (outbound session → encrypt →
-  import inbound key → decrypt → cleartext recovered), persistence, key-file
-  import, and an auditor test that records the decrypted inner message.
+- `ruff` clean, `mypy` clean (29 source files), `pytest` → **55 passed,
+  3 skipped**. Includes the **full automatic pipeline end-to-end**: a sending
+  device claims the bot's one-time key → sends an Olm to-device `m.room_key` →
+  the manager ingests it → a Megolm room message then decrypts — plus Megolm
+  round-trips, persistence, key-file import, `keys_upload` shape, and the auditor
+  to-device wiring.
 
-### Honest scope / not done here
-- **Automatic live key receipt is not implemented yet** (Phase 5b): a live bot
-  gets Megolm keys via Olm-encrypted to-device `m.room_key` (needs device-key
-  upload, OTK claiming, Olm sessions, cross-signing/verification) and/or
-  server-side key backup — all of which need a running homeserver. For now keys
-  are **imported** (operator key file / future key backup), which the crypto core
-  fully supports and is validated offline.
+### Honest scope / what needs a live homeserver
+- **Server-side validation:** `/keys/upload` acceptance and a *real* client
+  choosing to share keys can only be exercised against a running Synapse + a
+  cooperating client. The crypto is validated offline; the wire calls are
+  unit-tested for shape.
+- **Trust / verification:** well-behaved clients typically share keys only with
+  **verified / cross-signed** devices. Cross-signing setup + verification is not
+  implemented; the bot's device should be verified by the operator (or the
+  deployment must allow sharing with it). This is the main operational
+  prerequisite for automatic decryption in practice.
+- **OTK replenishment:** a batch of one-time keys is published at startup;
+  ongoing replenishment from sync's key counts is a refinement, not yet added.
 - **Forward-only (protocol limit):** messages sent before the bot held the key
-  can't be read unless their keys are imported; such events are recorded as
-  envelopes, not dropped.
-- **Security:** the audit store is plaintext and the key file can decrypt
-  messages — both must be access-controlled.
+  can't be read unless imported. **Security:** the audit store is plaintext and
+  device/key files can decrypt messages — all must be access-controlled.
 
 ### Review gate
-Proceed to **Phase 5b** (automatic live key receipt: device keys + to-device Olm
-+ cross-signing, validated against the dev Synapse), or accept import-based
-decryption and move to **Phase 6 — media scanner**.
+Validate against the dev Synapse (or accept offline validation), then choose:
+add **verification/cross-signing + OTK replenishment** to finish live E2EE, or
+move to **Phase 6 — media scanner**.
 
 ---
 ## Phase 6 — neuron-mediascan (ClamAV) — ⬜ not started

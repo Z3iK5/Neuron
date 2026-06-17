@@ -103,6 +103,25 @@ class MatrixClient:
         """``POST /_matrix/client/v3/join/{roomIdOrAlias}`` — join a room."""
         return await self._request("POST", f"/_matrix/client/v3/join/{room_id_or_alias}")
 
+    async def keys_upload(
+        self,
+        *,
+        device_keys: dict[str, Any] | None = None,
+        one_time_keys: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """``POST /_matrix/client/v3/keys/upload`` — publish device + one-time keys.
+
+        Publishing the device's identity keys and a supply of one-time keys is what
+        lets other devices claim a key and send this bot Olm-encrypted room keys.
+        Returns ``{"one_time_key_counts": {...}}``.
+        """
+        body: dict[str, Any] = {}
+        if device_keys is not None:
+            body["device_keys"] = device_keys
+        if one_time_keys is not None:
+            body["one_time_keys"] = one_time_keys
+        return await self._request("POST", "/_matrix/client/v3/keys/upload", json=body)
+
     async def messages(
         self, room_id: str, *, from_token: str | None = None, direction: str = "b", limit: int = 100
     ) -> dict[str, Any]:

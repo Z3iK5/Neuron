@@ -52,6 +52,10 @@ class Auditor:
         response = await self.client.sync(since=since, timeout_ms=self.sync_timeout_ms)
         rooms = response.get("rooms", {})
 
+        # Ingest any room keys the bot was sent via to-device messages BEFORE
+        # decrypting this batch's room events (the decryptor may know how).
+        self._handle_to_device(response.get("to_device", {}).get("events", []))
+
         if self.auto_join:
             await self._accept_invites(rooms.get("invite", {}))
 
@@ -73,6 +77,14 @@ class Auditor:
             except Exception:  # keep the daemon alive across transient failures
                 log.exception("poll failed; retrying")
                 await asyncio.sleep(self.retry_seconds)
+
+    def _handle_to_device(self, events: list[dict[str, object]]) -> None:
+        """Pass to-device events to the decryptor if it can ingest room keys."""
+        handler = getattr(self.decryptor, "handle_to_device", None)
+        if events and callable(handler):
+            imported = handler(events)
+            if imported:
+                log.info("imported room keys from to-device", extra={"count": imported})
 
     async def _accept_invites(self, invites: dict[str, object]) -> None:
         for room_id in invites:
