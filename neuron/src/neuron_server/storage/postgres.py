@@ -8,6 +8,7 @@ PostgreSQL's positional ``$1``/``$2`` style. (Our queries never contain a litera
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
@@ -34,6 +35,8 @@ class PostgresDatabase(Database):
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
         self._conn: Any = None
+        # Serializes transactions on the single connection (see SQLite backend).
+        self._tx_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         import asyncpg
@@ -57,5 +60,5 @@ class PostgresDatabase(Database):
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
-        async with self._conn.transaction():
+        async with self._tx_lock, self._conn.transaction():
             yield

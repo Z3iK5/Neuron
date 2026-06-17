@@ -92,6 +92,34 @@ async def next_depth(db: Database, room_id: str) -> int:
     return int(value)
 
 
+async def get_max_stream_ordering(db: Database) -> int:
+    value = await db.fetchval("SELECT COALESCE(MAX(stream_ordering), 0) FROM events")
+    return int(value)
+
+
+async def get_recent_events(db: Database, room_id: str, limit: int) -> list[Event]:
+    """Return the most recent ``limit`` events in a room, ascending by ordering."""
+    rows = await db.fetchall(
+        f"SELECT {_EVENT_COLUMNS} FROM events WHERE room_id = ?"
+        " ORDER BY stream_ordering DESC LIMIT ?",
+        (room_id, limit),
+    )
+    return [_row_to_event(row) for row in reversed(rows)]
+
+
+async def get_events_after(
+    db: Database, room_id: str, after_ordering: int, limit: int
+) -> list[Event]:
+    """Return events with ordering greater than ``after_ordering`` (ascending)."""
+    rows = await db.fetchall(
+        f"SELECT {_EVENT_COLUMNS} FROM events"
+        " WHERE room_id = ? AND stream_ordering > ?"
+        " ORDER BY stream_ordering ASC LIMIT ?",
+        (room_id, after_ordering, limit),
+    )
+    return [_row_to_event(row) for row in rows]
+
+
 async def insert_event(db: Database, event: Event) -> None:
     await db.execute(
         "INSERT INTO events ("
@@ -207,6 +235,15 @@ async def get_joined_rooms(db: Database, user_id: str) -> list[str]:
         (user_id,),
     )
     return [str(row[0]) for row in rows]
+
+
+async def get_user_memberships(db: Database, user_id: str) -> list[tuple[str, str]]:
+    """Return ``(room_id, membership)`` for every room the user has a membership in."""
+    rows = await db.fetchall(
+        "SELECT room_id, membership FROM room_memberships WHERE user_id = ?",
+        (user_id,),
+    )
+    return [(str(row[0]), str(row[1])) for row in rows]
 
 
 async def get_joined_members(db: Database, room_id: str) -> list[str]:

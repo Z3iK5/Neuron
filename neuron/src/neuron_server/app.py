@@ -29,6 +29,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from neuron_core import configure_logging, get_logger
 from neuron_server.api.client_auth import router as client_auth_router
 from neuron_server.api.client_rooms import router as client_rooms_router
+from neuron_server.api.client_sync import router as client_sync_router
 from neuron_server.auth.service import AuthService
 from neuron_server.config import NeuronServerSettings
 from neuron_server.errors import MatrixError, unrecognized
@@ -37,6 +38,8 @@ from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
 from neuron_server.storage.database import Database, connect_database
 from neuron_server.storage.metadata import get_metadata, set_metadata
 from neuron_server.storage.migrations import run_migrations
+from neuron_server.sync.notifier import StreamNotifier
+from neuron_server.sync.service import SyncService
 
 log = get_logger(__name__)
 
@@ -73,9 +76,11 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         newly = await run_migrations(db)
         log.info("database ready", extra={"newly_applied_migrations": newly})
         await _ensure_server_identity(db, settings)
+        notifier = StreamNotifier()
         app.state.db = db
         app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
-        app.state.rooms = RoomService(db, settings.name)
+        app.state.rooms = RoomService(db, settings.name, notify=notifier.notify)
+        app.state.sync = SyncService(db, notifier)
         try:
             yield
         finally:
@@ -107,6 +112,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     # specific routes match first).
     app.include_router(client_auth_router)
     app.include_router(client_rooms_router)
+    app.include_router(client_sync_router)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.

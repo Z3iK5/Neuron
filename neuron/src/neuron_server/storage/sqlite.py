@@ -8,6 +8,7 @@ transactions explicitly with ``BEGIN``/``COMMIT``/``ROLLBACK``; this keeps DDL
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
@@ -21,6 +22,9 @@ class SQLiteDatabase(Database):
     def __init__(self, path: str) -> None:
         self._path = path
         self._conn: Any = None
+        # Serializes multi-statement transactions: with a single connection,
+        # concurrent BEGIN/COMMIT from different tasks must not interleave.
+        self._tx_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         import aiosqlite
@@ -55,11 +59,12 @@ class SQLiteDatabase(Database):
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
-        await self._conn.execute("BEGIN")
-        try:
-            yield
-        except BaseException:
-            await self._conn.execute("ROLLBACK")
-            raise
-        else:
-            await self._conn.execute("COMMIT")
+        async with self._tx_lock:
+            await self._conn.execute("BEGIN")
+            try:
+                yield
+            except BaseException:
+                await self._conn.execute("ROLLBACK")
+                raise
+            else:
+                await self._conn.execute("COMMIT")

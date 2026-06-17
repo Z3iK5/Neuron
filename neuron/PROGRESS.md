@@ -264,7 +264,33 @@ federation-grade event hashing/signing + state resolution (HS-7). Power-levels
 change validation uses the well-known "can't set/change a level above your own"
 approximation rather than the full per-key delta rules.
 
+## HS-3 — Sync — ✅ built
+
+`GET /sync` over the event stream, with long-polling.
+
+- **Tokens** are the server-local `stream_ordering` position. Initial sync (no
+  `since`) returns each joined room's current state + a recent timeline slice;
+  incremental sync returns events after the token. Invited rooms appear with
+  stripped `invite_state`; recent leaves/bans appear under `leave`.
+- **Long-poll** (`sync/notifier.py`): a `StreamNotifier` wakes waiting syncs when
+  any event is appended (`RoomService` calls it post-commit), so an incremental
+  sync with a `timeout` blocks until something changes instead of busy-polling.
+- **Concurrency safety:** introduced an async lock around DB `transaction()` so
+  concurrent writes on the single connection can't interleave `BEGIN`/`COMMIT`.
+- **Endpoint** (`api/client_sync.py`): `GET /v3/sync` (`since`, `timeout`).
+  `to_device` / `device_lists` / `account_data` are present but empty until HS-5.
+
+Acceptance criterion met: a client syncs and sees live messages, **and the real
+`neuron_auditor` records a message synced from `neuron_server`** (compat test) —
+plus initial/incremental/invite/leave unit tests and a **concurrent long-poll**
+test (a waiting sync wakes when another request sends). Verified live via uvicorn.
+ruff + mypy clean (63 files); 98 unit tests pass.
+
+Honest scope / deferred: per-membership history visibility (currently "shared"),
+sync filters, `full_state`, presence/ephemeral/account-data payloads, and
+gappy-sync state catch-up. The notifier wakes all waiters on any event (fine for
+single-server); a smarter per-user/room notifier is a later optimization.
+
 ### Next gate
-HS-3 — sync: `GET /sync` (initial + incremental — timeline, state, account_data,
-to_device, device_lists, since-tokens) so a real client and the Neuron auditor
-see live messages.
+HS-4 — media repository: authenticated upload/download/thumbnail/config
+(`/_matrix/media` + the newer authenticated `/_matrix/client/v1/media`).

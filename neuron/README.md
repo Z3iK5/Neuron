@@ -182,10 +182,11 @@ transitional upstream backend once it reaches parity (phase HS-6).
 
 Built so far: **HS-0** (ASGI app, async SQLite/PostgreSQL storage with
 migrations, spec-discovery endpoints), **HS-1** (identity & auth: registration,
-login, logout, `whoami`, devices), and **HS-2** (rooms, events, state, membership
-and the spec's authorization rules on room version 11 — create / send / join /
-invite / kick / ban / redact, read state & history). Run it with the `server`
-extra (no Docker needed; defaults to a local SQLite file):
+login, logout, `whoami`, devices), **HS-2** (rooms, events, state, membership and
+the spec's authorization rules on room version 11 — create / send / join /
+invite / kick / ban / redact, read state & history), and **HS-3** (`GET /sync`:
+initial + incremental with long-polling). Run it with the `server` extra (no
+Docker needed; defaults to a local SQLite file):
 
 ```bash
 pip install -e ".[server]"
@@ -201,8 +202,8 @@ curl -s -XPOST localhost:8008/_matrix/client/v3/register \
   -d "{\"username\":\"alice\",\"password\":\"choose-a-password\",\"auth\":{\"type\":\"m.login.dummy\",\"session\":\"$S\"}}"
 ```
 
-> **Honest status.** There is **no `/sync`, media, or E2EE yet** (those are
-> phases HS-3..HS-5), so a full Matrix client still can't follow a room live.
+> **Honest status.** There is **no media repository or E2EE yet** (those are
+> phases HS-4..HS-5), and federation is a separate later epic (HS-7).
 > Registration defaults to **open** (gate `NEURON_SERVER_REGISTRATION_ENABLED` in
 > production). Until parity, keep running the Neuron services against the
 > transitional backend in `deploy/compose/` as described above.

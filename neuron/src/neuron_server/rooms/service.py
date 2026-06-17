@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 
 from neuron_server.errors import MatrixError
@@ -55,9 +56,16 @@ def _default_power_levels(creator: str) -> dict[str, Any]:
 class RoomService:
     """Create and operate on rooms for one server."""
 
-    def __init__(self, db: Database, server_name: str) -> None:
+    def __init__(
+        self, db: Database, server_name: str, notify: Callable[[], None] | None = None
+    ) -> None:
         self._db = db
         self._server_name = server_name
+        self._notify = notify
+
+    def _wake_syncs(self) -> None:
+        if self._notify is not None:
+            self._notify()
 
     # --- internals ---------------------------------------------------------
 
@@ -180,6 +188,7 @@ class RoomService:
                     content={"membership": "invite"}, state_key=str(invitee), ts=ts,
                 )
 
+        self._wake_syncs()
         return room_id
 
     # --- sending events ----------------------------------------------------
@@ -202,6 +211,7 @@ class RoomService:
         async with self._db.transaction():
             event = await self._append(room_id, etype=etype, sender=sender, content=content)
             await store.put_txn_event(self._db, sender, txn_id, event.event_id)
+        self._wake_syncs()
         return event.event_id
 
     async def send_state(
@@ -218,6 +228,7 @@ class RoomService:
             event = await self._append(
                 room_id, etype=etype, sender=sender, content=content, state_key=state_key
             )
+        self._wake_syncs()
         return event.event_id
 
     # --- membership --------------------------------------------------------
@@ -245,6 +256,7 @@ class RoomService:
             event = await self._append(
                 room_id, etype="m.room.member", sender=sender, content=content, state_key=target
             )
+        self._wake_syncs()
         return event.event_id
 
     async def join(self, room_id: str, user_id: str) -> str:
@@ -303,6 +315,7 @@ class RoomService:
             )
             await self._apply_redaction(target, redaction.event_id)
             await store.put_txn_event(self._db, sender, txn_id, redaction.event_id)
+        self._wake_syncs()
         return redaction.event_id
 
     async def _apply_redaction(self, target: Event, redaction_event_id: str) -> None:
