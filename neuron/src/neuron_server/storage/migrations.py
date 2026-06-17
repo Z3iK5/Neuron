@@ -72,6 +72,54 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX IF NOT EXISTS idx_tokens_user ON access_tokens (user_id)",
         ),
     ),
+    Migration(
+        version=3,
+        name="rooms_events_state",
+        statements=(
+            "CREATE TABLE IF NOT EXISTS rooms ("
+            " room_id TEXT PRIMARY KEY,"
+            " creator TEXT NOT NULL,"
+            " room_version TEXT NOT NULL,"
+            " created_ts INTEGER NOT NULL"
+            ")",
+            "CREATE TABLE IF NOT EXISTS events ("
+            " event_id TEXT PRIMARY KEY,"
+            " room_id TEXT NOT NULL,"
+            " type TEXT NOT NULL,"
+            " state_key TEXT,"
+            " sender TEXT NOT NULL,"
+            " content TEXT NOT NULL,"
+            " origin_server_ts INTEGER NOT NULL,"
+            " depth INTEGER NOT NULL,"
+            " stream_ordering INTEGER NOT NULL,"
+            " unsigned TEXT,"
+            " redacts TEXT"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_events_room_stream"
+            " ON events (room_id, stream_ordering)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_stream ON events (stream_ordering)",
+            "CREATE TABLE IF NOT EXISTS current_state ("
+            " room_id TEXT NOT NULL,"
+            " type TEXT NOT NULL,"
+            " state_key TEXT NOT NULL,"
+            " event_id TEXT NOT NULL,"
+            " PRIMARY KEY (room_id, type, state_key)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS room_memberships ("
+            " room_id TEXT NOT NULL,"
+            " user_id TEXT NOT NULL,"
+            " membership TEXT NOT NULL,"
+            " PRIMARY KEY (room_id, user_id)"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_memberships_user ON room_memberships (user_id)",
+            "CREATE TABLE IF NOT EXISTS event_txns ("
+            " user_id TEXT NOT NULL,"
+            " txn_id TEXT NOT NULL,"
+            " event_id TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, txn_id)"
+            ")",
+        ),
+    ),
 )
 
 

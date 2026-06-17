@@ -225,7 +225,46 @@ device deletion behind UIA — added with the broader UIA work later); no rate
 limiting, password-policy, 3PID, SSO/MAS, or guest accounts yet; UIA sessions are
 in-memory (don't survive restart).
 
+## HS-2 — Rooms, events & auth rules — ✅ core built
+
+The heart of the homeserver: rooms with spec-enforced authorization, on room
+version 11.
+
+- **Storage** (migration 0003): `rooms`, `events` (with `stream_ordering` +
+  `depth`), `current_state`, `room_memberships`, `event_txns` (idempotency).
+  Data-access in `storage/rooms.py`.
+- **Event model** (`rooms/events.py`): `Event` dataclass + client rendering;
+  opaque `$…` event IDs (federation-grade reference-hash IDs deferred to HS-7 —
+  IDs are opaque to clients). Redaction algorithm (`rooms/versions.py`).
+- **Auth rules** (`rooms/authrules.py`): the spec's authorization rules for
+  create, every membership transition (join/invite/leave/kick/ban with
+  join-rule + power-level checks), power-level changes, and the generic
+  power-level gate for all other events. Single-server, so current state *is* the
+  auth context (no state resolution).
+- **Domain** (`rooms/service.py`): `createRoom` (presets, power-level defaults,
+  name/topic/invites/initial_state), send message/state events, membership ops,
+  redaction (applies the redaction algorithm + `unsigned.redacted_because`), and
+  reads.
+- **Endpoints** (`api/client_rooms.py`): `POST /createRoom`;
+  `PUT …/send/{type}/{txn}`; `PUT/GET …/state/{type}[/{key}]`;
+  `POST …/{join,leave,invite,kick,ban,unban}` and `POST /join/{roomId}`;
+  `PUT …/redact/{eventId}/{txn}`; `GET …/state`, `…/event/{id}`,
+  `…/messages` (v3 **and** v1, paginated), `…/joined_members`,
+  `GET /joined_rooms`.
+
+Acceptance criterion met: rooms enforce the spec's auth rules and messages
+send/read correctly — verified by 11 unit tests (create/state/membership/power
+levels/kick/ban/redaction/idempotency) plus a live uvicorn run (power-level
+denial returned the right 403) and a `neuron_core` `MatrixClient.joined_rooms()`
+compat test. ruff + mypy clean; 92 unit tests pass.
+
+Honest scope / deferred: room aliases & directory, knock/restricted joins,
+guests, third-party invites, room upgrades, `/messages` filtering, and
+federation-grade event hashing/signing + state resolution (HS-7). Power-levels
+change validation uses the well-known "can't set/change a level above your own"
+approximation rather than the full per-key delta rules.
+
 ### Next gate
-HS-2 — rooms, events & per-room-version auth rules (createRoom, core state
-events, send/read messages, `/state`, `/messages`, redactions, event
-hashing/signing). The substantial one.
+HS-3 — sync: `GET /sync` (initial + incremental — timeline, state, account_data,
+to_device, device_lists, since-tokens) so a real client and the Neuron auditor
+see live messages.

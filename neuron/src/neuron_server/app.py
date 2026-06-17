@@ -28,9 +28,11 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from neuron_core import configure_logging, get_logger
 from neuron_server.api.client_auth import router as client_auth_router
+from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.auth.service import AuthService
 from neuron_server.config import NeuronServerSettings
 from neuron_server.errors import MatrixError, unrecognized
+from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
 from neuron_server.storage.database import Database, connect_database
 from neuron_server.storage.metadata import get_metadata, set_metadata
@@ -73,6 +75,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         await _ensure_server_identity(db, settings)
         app.state.db = db
         app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
+        app.state.rooms = RoomService(db, settings.name)
         try:
             yield
         finally:
@@ -103,6 +106,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     # Client-Server API routers (registered before the catch-all so their
     # specific routes match first).
     app.include_router(client_auth_router)
+    app.include_router(client_rooms_router)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.
