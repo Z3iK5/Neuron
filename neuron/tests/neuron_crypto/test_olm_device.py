@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Offline tests for the automatic E2EE key-receipt pipeline (real libolm).
 
 Simulates a *sending* device that claims the bot's one-time key, opens an Olm

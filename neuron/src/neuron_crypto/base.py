@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """E2EE decryption interface — the olm-free part.
 
 This module deliberately has **no dependency on libolm**, so services can import

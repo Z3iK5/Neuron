@@ -5,7 +5,7 @@
 <div class="card narrow">
   <p class="muted">Sends a message to a user from the server notices account (the user
   sees it in a dedicated "Server Notices" room). Requires server notices to be enabled
-  in Synapse.</p>
+  on the homeserver.</p>
   <form method="post" action="/server-notice">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="user_id">User ID</label>

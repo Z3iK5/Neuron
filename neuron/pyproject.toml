@@ -1,9 +1,8 @@
 # Neuron — Python project definition.
 #
-# This is the project file for ALL Neuron services and shared libraries. It is
-# deliberately SEPARATE from Synapse's own pyproject.toml at the repository root:
-# Neuron is additive software that runs *around* a stock Synapse, so it keeps its
-# own dependencies and never interferes with Synapse's packaging.
+# This is the project file for ALL Neuron services and shared libraries: the
+# operator tooling (admin console, bots, crypto) and, in progress, Neuron's own
+# homeserver (`neuron_server`). See HOMESERVER-PLAN.md at the repository root.
 #
 # Layout uses the conventional "src/" pattern: importable packages live under
 # src/ (e.g. src/neuron_core). Tests live under tests/.
@@ -15,17 +14,17 @@ build-backend = "hatchling.build"
 [project]
 name = "neuron"
 version = "0.0.1"
-description = "Neuron — clean-room services around a stock Synapse (ESS Pro-equivalent features)"
+description = "Neuron — a clean-room, all-in-one Matrix platform (operator tooling + homeserver)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "AGPL-3.0-or-later"
+license = "Apache-2.0"
 authors = [{ name = "Neuron contributors" }]
 
 # Runtime dependencies shared across services. Each new service may add its own
 # extras later (e.g. matrix-nio for the bots, fastapi for the web services); the
 # shared library (neuron_core) only needs an HTTP client + config/validation.
 dependencies = [
-    "httpx>=0.27,<1.0",          # modern async HTTP client used to call Synapse
+    "httpx>=0.27,<1.0",          # modern async HTTP client used to call the homeserver
     "pydantic>=2.7,<3.0",        # data validation + typed models
     "pydantic-settings>=2.3,<3.0", # load configuration from env vars / .env
     "PyYAML>=6.0",               # read optional YAML config files
@@ -56,6 +55,14 @@ e2e = [
     "python-olm>=3.1",           # Python bindings for libolm (Olm/Megolm)
 ]
 
+# Neuron's own homeserver (`neuron_server`). Install with:  pip install -e ".[server]"
+server = [
+    "fastapi>=0.111,<1.0",       # ASGI framework for the Client-Server API
+    "uvicorn[standard]>=0.30",   # ASGI server used to run the homeserver
+    "aiosqlite>=0.20",           # async SQLite driver (development backend)
+    "asyncpg>=0.29",             # async PostgreSQL driver (production backend)
+]
+
 # Everything needed for development + CI (includes the service extras above so
 # the whole codebase is importable and testable).
 # Install with:  pip install -e ".[dev]"
@@ -63,6 +70,7 @@ dev = [
     "neuron[console]",           # pull in all service runtime deps
     "neuron[auditor]",           # boto3 for the S3 sink
     "neuron[e2e]",               # python-olm for E2EE decryption
+    "neuron[server]",            # fastapi/uvicorn + DB drivers for neuron_server
     "pytest>=8.0",
     "pytest-asyncio>=0.23",      # lets us write async test functions
     "ruff>=0.5",                 # linter + formatter
@@ -79,6 +87,7 @@ packages = [
     "src/neuron_supervisor",
     "src/neuron_auditor",
     "src/neuron_crypto",
+    "src/neuron_server",
 ]
 
 # ---------------------------------------------------------------------------
@@ -102,7 +111,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor", "neuron_crypto"]
+packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor", "neuron_crypto", "neuron_server"]
 mypy_path = "src"
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -111,8 +120,8 @@ no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 # These ship little/no type information; treat them as untyped.
-#   boto3   — S3 sink; olm — libolm bindings for E2EE.
-module = ["boto3", "botocore.*", "olm"]
+#   boto3 — S3 sink; olm — libolm bindings for E2EE; aiosqlite/asyncpg — DB drivers.
+module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

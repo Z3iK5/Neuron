@@ -1,37 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
 """neuron_core — shared building blocks for every Neuron service.
 
-This small library exists so that the logic for talking to Synapse, loading
-configuration, and emitting structured logs is written **once** and reused by
-all services (the admin console, the bots, the directory-sync service, etc.).
+This small library exists so that the logic for talking to the homeserver,
+loading configuration, and emitting structured logs is written **once** and
+reused by all services (the admin console, the bots, the directory-sync service,
+etc.).
 
 Public API (the things services import):
 
-- ``SynapseAdminClient`` — a typed client for the open Synapse Admin API.
+- ``AdminClient`` — a typed client for the homeserver Admin API.
 - ``MatrixClient`` — a typed client for the Client-Server API (used by bots).
 - ``NeuronCoreSettings`` — base configuration loaded from environment variables.
 - ``configure_logging`` / ``get_logger`` — structured logging helpers.
-- ``NeuronError`` / ``MatrixApiError`` / ``SynapseAdminError`` / ``MatrixError`` —
+- ``NeuronError`` / ``MatrixApiError`` / ``AdminApiError`` / ``MatrixError`` —
   the exception types we raise.
 """
 
 from neuron_core.admin_client import (
+    AdminClient,
     EventReportPage,
     RoomListPage,
-    SynapseAdminClient,
     UserListPage,
 )
 from neuron_core.config import NeuronCoreSettings
 from neuron_core.csapi_client import MatrixClient
 from neuron_core.errors import (
+    AdminApiError,
     MatrixApiError,
     MatrixError,
     NeuronError,
-    SynapseAdminError,
 )
 from neuron_core.logging import configure_logging, get_logger
 
 __all__ = [
-    "SynapseAdminClient",
+    "AdminClient",
     "MatrixClient",
     "UserListPage",
     "RoomListPage",
@@ -39,7 +41,7 @@ __all__ = [
     "NeuronCoreSettings",
     "NeuronError",
     "MatrixApiError",
-    "SynapseAdminError",
+    "AdminApiError",
     "MatrixError",
     "configure_logging",
     "get_logger",

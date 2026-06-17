@@ -1,7 +1,8 @@
-"""neuron_supervisor — a privileged moderation bot for a stock Synapse.
+# SPDX-License-Identifier: Apache-2.0
+"""neuron_supervisor — a privileged moderation bot for a Matrix homeserver.
 
 The supervisor keeps a bot account promoted to room-admin in every room (using
-the Synapse Admin API's ``make_room_admin``) so that an operator can always
+the homeserver Admin API's ``make_room_admin``) so that an operator can always
 moderate any room — even one where all human admins have left or demoted
 themselves. It performs membership moderation (kick/ban) as the bot via the
 Client-Server API, and content moderation (redacting a user's messages) via the

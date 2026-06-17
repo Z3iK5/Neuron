@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
 """Durable state for the auditor: the /sync pagination token.
 
 Persisting the ``since`` token means that if the bot restarts, it resumes from
-where it left off — Synapse only re-sends events after that token — so the audit
-log has no gaps and no duplicates across restarts.
+where it left off — the homeserver only re-sends events after that token — so the
+audit log has no gaps and no duplicates across restarts.
 """
 
 from __future__ import annotations

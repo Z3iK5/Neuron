@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """E2EEManager — receive Megolm keys via to-device, then decrypt room events.
 
 This ties together the halves of automatic E2EE:

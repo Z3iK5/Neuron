@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Command-line runner for the supervision bot.
 
 Usage (with the environment configured — see neuron/README.md)::
@@ -15,7 +16,7 @@ import argparse
 import asyncio
 import contextlib
 
-from neuron_core import MatrixClient, SynapseAdminClient, configure_logging, get_logger
+from neuron_core import AdminClient, MatrixClient, configure_logging, get_logger
 from neuron_supervisor.config import SupervisorSettings
 from neuron_supervisor.core import Supervisor
 
@@ -24,16 +25,16 @@ log = get_logger("neuron_supervisor")
 
 def _build_supervisor(
     settings: SupervisorSettings,
-) -> tuple[Supervisor, SynapseAdminClient, MatrixClient | None]:
-    admin = SynapseAdminClient(
-        settings.synapse_base_url,
-        settings.synapse_admin_token.get_secret_value(),
+) -> tuple[Supervisor, AdminClient, MatrixClient | None]:
+    admin = AdminClient(
+        settings.homeserver_url,
+        settings.homeserver_admin_token.get_secret_value(),
         timeout=settings.http_timeout_seconds,
     )
     bot: MatrixClient | None = None
     if settings.has_bot_token():
         bot = MatrixClient(
-            settings.synapse_base_url,
+            settings.homeserver_url,
             settings.supervisor_bot_token.get_secret_value(),
             timeout=settings.http_timeout_seconds,
         )

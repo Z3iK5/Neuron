@@ -1,14 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
 """The Auditor: a /sync loop that records room events to a sink.
 
 Flow of one poll:
 
-1. Ask Synapse for everything since our saved token (``GET /sync?since=…``).
+1. Ask the homeserver for everything since our saved token (``GET /sync?since=…``).
 2. Optionally auto-join rooms we've been invited to.
 3. Write every timeline event from joined rooms to the sink as an audit record.
 4. Save the new token so a restart resumes with no gaps and no duplicates.
 
-The token persistence (see ``state.py``) is what makes restarts safe: Synapse
-only re-sends events *after* the token.
+The token persistence (see ``state.py``) is what makes restarts safe: the
+homeserver only re-sends events *after* the token.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ log = get_logger(__name__)
 
 
 class Auditor:
-    """Streams room events from Synapse into a durable sink."""
+    """Streams room events from the homeserver into a durable sink."""
 
     def __init__(
         self,

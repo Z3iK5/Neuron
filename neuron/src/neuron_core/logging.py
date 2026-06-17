@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Structured logging for Neuron services.
 
 Why structured logs? When services run in containers, logs are usually shipped

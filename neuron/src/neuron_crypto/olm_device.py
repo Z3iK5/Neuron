@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The bot's Olm device identity, and Olm (to-device) decryption.
 
 To receive Megolm room keys automatically, a bot needs an **Olm device**: a

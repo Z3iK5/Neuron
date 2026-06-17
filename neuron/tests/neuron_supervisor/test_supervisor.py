@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the Supervisor orchestration logic (uses lightweight fakes)."""
 
 from __future__ import annotations
@@ -7,7 +8,7 @@ from typing import Any
 import pytest
 
 from neuron_core import RoomListPage
-from neuron_core.errors import SynapseAdminError
+from neuron_core.errors import AdminApiError
 from neuron_supervisor.core import Supervisor, SupervisorError
 
 BOT = "@supervisor:hs.test"
@@ -29,7 +30,7 @@ class FakeAdmin:
     async def make_room_admin(self, room_id: str, user_id: str) -> dict[str, Any]:
         self.calls.append(("make_room_admin", room_id, user_id))
         if room_id == self._fail_room:
-            raise SynapseAdminError(403, errcode="M_FORBIDDEN", message="nope")
+            raise AdminApiError(403, errcode="M_FORBIDDEN", message="nope")
         return {}
 
     async def redact_user_events(self, user_id: str, *, rooms: Any = None) -> str:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Output sinks for audited events, plus the stable JSON record schema.
 
 A *sink* is anything with a ``write(record)`` method. We ship two:

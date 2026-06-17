@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Offline tests for cross-signing (real Ed25519 signatures verified with libolm)."""
 
 from __future__ import annotations

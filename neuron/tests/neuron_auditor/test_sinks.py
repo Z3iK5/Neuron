@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the audit record schema and the sinks."""
 
 from __future__ import annotations

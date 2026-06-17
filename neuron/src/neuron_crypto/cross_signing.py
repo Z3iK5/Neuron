@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Cross-signing keys for the bot's verifiable identity.
 
 Matrix "cross-signing" gives a user three Ed25519 keys:

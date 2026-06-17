@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Shared dependencies and helpers for the console's request handlers.
 
 FastAPI "dependencies" are small functions that run before a route handler and
@@ -13,7 +14,7 @@ from starlette.requests import Request
 
 from neuron_console.config import ConsoleSettings
 from neuron_console.security import verify_csrf
-from neuron_core import SynapseAdminClient
+from neuron_core import AdminClient
 from neuron_supervisor import Supervisor
 
 
@@ -39,13 +40,13 @@ def get_settings(request: Request) -> ConsoleSettings:
     return settings
 
 
-def get_admin(request: Request) -> SynapseAdminClient:
-    """Return the shared Synapse Admin API client.
+def get_admin(request: Request) -> AdminClient:
+    """Return the shared homeserver Admin API client.
 
     Tests override this dependency to inject a fake client, so no real
     homeserver is needed to test the console's request handling.
     """
-    admin: SynapseAdminClient = request.app.state.admin
+    admin: AdminClient = request.app.state.admin
     return admin
 
 

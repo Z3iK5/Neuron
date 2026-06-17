@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Lightweight CSRF protection for the console's state-changing forms.
 
 Because the console performs destructive admin actions using a cookie-based

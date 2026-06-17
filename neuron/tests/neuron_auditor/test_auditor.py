@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the Auditor sync/record loop (uses fakes; no live server)."""
 
 from __future__ import annotations

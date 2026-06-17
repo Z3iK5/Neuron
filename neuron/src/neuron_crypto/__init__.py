@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """neuron_crypto — end-to-end-encryption (E2EE) helpers for Neuron bots.
 
 Matrix encrypts room messages with **Megolm** (`m.megolm.v1.aes-sha2`): each
