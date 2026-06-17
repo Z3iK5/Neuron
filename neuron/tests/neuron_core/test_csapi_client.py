@@ -61,6 +61,28 @@ async def test_error_raises_matrix_error() -> None:
     assert excinfo.value.errcode == "M_FORBIDDEN"
 
 
+async def test_sync_passes_since_and_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/_matrix/client/v3/sync"
+        assert request.url.params["since"] == "tok1"
+        assert request.url.params["timeout"] == "0"
+        return httpx.Response(200, json={"next_batch": "tok2", "rooms": {}})
+
+    async with _client(handler) as bot:
+        result = await bot.sync(since="tok1", timeout_ms=0)
+    assert result["next_batch"] == "tok2"
+
+
+async def test_join_room() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == f"/_matrix/client/v3/join/{ROOM}"
+        return httpx.Response(200, json={"room_id": ROOM})
+
+    async with _client(handler) as bot:
+        assert (await bot.join_room(ROOM))["room_id"] == ROOM
+
+
 def test_auth_header_is_set() -> None:
     bot = MatrixClient(BASE, "bot-token")
     assert bot._client.headers["Authorization"] == "Bearer bot-token"

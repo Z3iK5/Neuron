@@ -22,3 +22,8 @@ dist/
 # Local dev stack data (generated Synapse config, signing keys, DB volumes if bind-mounted)
 deploy/compose/synapse-data/
 deploy/compose/data/
+
+# Auditor runtime artifacts (resume token + local audit log)
+auditor-state.json
+auditor-state.json.tmp
+audit-log.jsonl

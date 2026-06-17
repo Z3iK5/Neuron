@@ -57,9 +57,14 @@ class MatrixClient:
         await self.aclose()
 
     async def _request(
-        self, method: str, path: str, *, json: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        response = await self._client.request(method, path, json=json)
+        response = await self._client.request(method, path, json=json, params=params)
         return ok_json(response, MatrixError)
 
     # --- identity -----------------------------------------------------------
@@ -72,6 +77,42 @@ class MatrixClient:
         body = await self._request("GET", "/_matrix/client/v3/joined_rooms")
         rooms: list[str] = body.get("joined_rooms", [])
         return rooms
+
+    # --- syncing & membership ----------------------------------------------
+    async def sync(
+        self,
+        *,
+        since: str | None = None,
+        timeout_ms: int = 30000,
+        filter_id: str | None = None,
+    ) -> dict[str, Any]:
+        """``GET /_matrix/client/v3/sync`` — long-poll for new events.
+
+        Pass the previous response's ``next_batch`` as ``since`` to get only what
+        happened since. With no ``since`` this returns the current state (an
+        initial sync).
+        """
+        params: dict[str, Any] = {"timeout": timeout_ms}
+        if since is not None:
+            params["since"] = since
+        if filter_id is not None:
+            params["filter"] = filter_id
+        return await self._request("GET", "/_matrix/client/v3/sync", params=params)
+
+    async def join_room(self, room_id_or_alias: str) -> dict[str, Any]:
+        """``POST /_matrix/client/v3/join/{roomIdOrAlias}`` — join a room."""
+        return await self._request("POST", f"/_matrix/client/v3/join/{room_id_or_alias}")
+
+    async def messages(
+        self, room_id: str, *, from_token: str | None = None, direction: str = "b", limit: int = 100
+    ) -> dict[str, Any]:
+        """``GET /_matrix/client/v1/rooms/{roomId}/messages`` — page through history."""
+        params: dict[str, Any] = {"dir": direction, "limit": limit}
+        if from_token is not None:
+            params["from"] = from_token
+        return await self._request(
+            "GET", f"/_matrix/client/v1/rooms/{room_id}/messages", params=params
+        )
 
     # --- membership moderation ---------------------------------------------
     async def kick(
