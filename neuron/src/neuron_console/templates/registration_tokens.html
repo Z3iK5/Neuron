@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Registration tokens — Neuron Console{% endblock %}
+{% block content %}
+<h1>Registration tokens</h1>
+
+<div class="card narrow">
+  <h2>Create a token</h2>
+  <form method="post" action="/registration-tokens/new">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="uses_allowed">Uses allowed (blank = unlimited)</label>
+    <input type="number" id="uses_allowed" name="uses_allowed" min="1" placeholder="unlimited">
+    <button type="submit">Create token</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Token</th><th>Uses</th><th>Pending</th><th>Completed</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for t in tokens %}
+      <tr>
+        <td><code>{{ t.get('token') }}</code></td>
+        <td>{{ t.get('uses_allowed') if t.get('uses_allowed') is not none else '∞' }}</td>
+        <td>{{ t.get('pending', 0) }}</td>
+        <td>{{ t.get('completed', 0) }}</td>
+        <td>
+          <form method="post" action="/registration-tokens/{{ t.get('token') }}/delete"
+                onsubmit="return confirm('Delete this token?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="danger small">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">No registration tokens.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Rooms — Neuron Console{% endblock %}
+{% block content %}
+<h1>Rooms <span class="muted">({{ page.total_rooms }} total)</span></h1>
+
+<form method="get" action="/rooms" class="search">
+  <input type="search" name="search" value="{{ search }}" placeholder="Search room name or ID">
+  <input type="hidden" name="limit" value="{{ limit }}">
+  <button type="submit">Search</button>
+</form>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Room ID</th><th>Members</th><th>Version</th></tr>
+    </thead>
+    <tbody>
+      {% for r in page.rooms %}
+      <tr>
+        <td>{{ r.get('name') or '(no name)' }}</td>
+        <td><a href="/rooms/{{ r.get('room_id') }}">{{ r.get('room_id') }}</a></td>
+        <td>{{ r.get('joined_members', 0) }}</td>
+        <td>{{ r.get('version', '') }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">No rooms found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="pager">
+  {% if page.prev_batch is not none %}
+  <a href="/rooms?limit={{ limit }}{% if search %}&search={{ search }}{% endif %}&from_offset={{ page.prev_batch }}">← Previous</a>
+  {% endif %}
+  {% if page.next_batch is not none %}
+  <a href="/rooms?limit={{ limit }}{% if search %}&search={{ search }}{% endif %}&from_offset={{ page.next_batch }}">Next →</a>
+  {% endif %}
+</p>
+{% endblock %}

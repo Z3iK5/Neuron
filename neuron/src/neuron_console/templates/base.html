@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Neuron Console{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Neuron Console</span>
+    {% if request.session.get('authenticated') %}
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/users">Users</a>
+      <a href="/rooms">Rooms</a>
+      <a href="/supervision">Supervision</a>
+      <a href="/registration-tokens">Tokens</a>
+      <a href="/server-notice">Notice</a>
+      <a href="/reports">Reports</a>
+      <a href="/logout" class="logout">Log out</a>
+    </nav>
+    {% endif %}
+  </header>
+  <main>
+    {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    Neuron — admin console for a stock Synapse (open Admin API).
+  </footer>
+</body>
+</html>

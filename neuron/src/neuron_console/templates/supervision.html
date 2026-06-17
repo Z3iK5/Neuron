@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Supervision — Neuron Console{% endblock %}
+{% block content %}
+<h1>Supervision</h1>
+
+<div class="card">
+  <table>
+    <tr><th>Bot user ID</th><td>{{ bot_user_id or '(not set — set NEURON_SUPERVISOR_BOT_USER_ID)' }}</td></tr>
+    <tr><th>Bot token configured</th><td>{{ 'yes' if bot_token_configured else 'no (kick/ban disabled)' }}</td></tr>
+  </table>
+</div>
+
+<div class="card narrow">
+  <h2>Promote bot into all rooms</h2>
+  <p class="muted">Grants the supervision bot the highest available power level in
+  every room on the server, so it can always moderate. Run this after creating
+  new rooms (the background loop does it automatically on a timer).</p>
+  {% if bot_user_id %}
+  <form method="post" action="/supervision/promote-all">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Promote bot everywhere</button>
+  </form>
+  {% else %}
+  <p class="warning">Set <code>NEURON_SUPERVISOR_BOT_USER_ID</code> to enable promotion.</p>
+  {% endif %}
+</div>
+{% endblock %}

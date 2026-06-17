@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Neuron Console{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<div class="cards">
+  <div class="card stat">
+    <div class="stat-number">{{ user_count }}</div>
+    <div class="stat-label"><a href="/users">Users</a></div>
+  </div>
+  <div class="card stat">
+    <div class="stat-number">{{ room_count }}</div>
+    <div class="stat-label"><a href="/rooms">Rooms</a></div>
+  </div>
+</div>
+<div class="card">
+  <h2>Server</h2>
+  <table>
+    <tr><th>Synapse version</th><td>{{ version.get('server_version', 'unknown') }}</td></tr>
+    <tr><th>Python version</th><td>{{ version.get('python_version', 'unknown') }}</td></tr>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Reports — Neuron Console{% endblock %}
+{% block content %}
+<h1>Content reports <span class="muted">({{ page.total }} total)</span></h1>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Room</th><th>Reported by</th><th>Reason</th></tr>
+    </thead>
+    <tbody>
+      {% for r in page.event_reports %}
+      <tr>
+        <td>{{ r.get('id') }}</td>
+        <td>{{ r.get('room_id') }}</td>
+        <td>{{ r.get('user_id') }}</td>
+        <td>{{ r.get('reason') or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">No reports.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

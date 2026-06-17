@@ -1,0 +1,78 @@
+/* Minimal, dependency-free styling for the Neuron console. */
+:root {
+  --bg: #f6f7f9;
+  --fg: #1f2430;
+  --muted: #6b7280;
+  --accent: #2f6fed;
+  --border: #e2e5ea;
+  --card: #ffffff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+.topbar {
+  display: flex; align-items: center; gap: 1.5rem;
+  background: var(--card); border-bottom: 1px solid var(--border);
+  padding: 0.75rem 1.25rem;
+}
+.brand { font-weight: 700; }
+.topbar nav { display: flex; gap: 1rem; margin-left: auto; }
+.topbar nav a { text-decoration: none; color: var(--fg); }
+.topbar nav a:hover { color: var(--accent); }
+.topbar nav a.logout { color: var(--muted); }
+main { max-width: 960px; margin: 1.5rem auto; padding: 0 1.25rem; }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.1rem; margin-top: 0; }
+.muted { color: var(--muted); font-weight: normal; }
+.error { color: #b00020; }
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+}
+.card.narrow { max-width: 420px; }
+.cards { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.card.stat { flex: 1; text-align: center; min-width: 140px; }
+.stat-number { font-size: 2rem; font-weight: 700; }
+.stat-label a { text-decoration: none; color: var(--accent); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+a { color: var(--accent); }
+.search { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.search input[type=search] { flex: 1; }
+input, button {
+  padding: 0.5rem 0.7rem; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 1rem; background: #fff;
+}
+button { background: var(--accent); color: #fff; border: none; cursor: pointer; }
+button:hover { opacity: 0.92; }
+form label { display: block; margin-bottom: 0.3rem; font-weight: 600; }
+form input { width: 100%; margin-bottom: 0.8rem; }
+.pager { margin-top: 1rem; display: flex; gap: 1.5rem; }
+.members { columns: 2; list-style: none; padding-left: 0; }
+.footer { max-width: 960px; margin: 2rem auto; padding: 0 1.25rem; color: var(--muted); font-size: 0.85rem; }
+
+/* Buttons styled as links, danger actions, action rows */
+.button-link {
+  display: inline-block; padding: 0.5rem 0.8rem; border-radius: 6px;
+  background: var(--accent); color: #fff; text-decoration: none;
+}
+.button-link.danger, button.danger { background: #b00020; }
+button.small { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
+.actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.actions form { margin: 0; }
+.checkbox { display: flex; align-items: center; gap: 0.5rem; font-weight: normal; margin: 0.6rem 0; }
+.checkbox input { width: auto; margin: 0; }
+.flash {
+  background: #e7f5ec; border: 1px solid #b6e0c4; color: #1a6b3a;
+  padding: 0.6rem 0.9rem; border-radius: 6px; margin-bottom: 1rem;
+}
+.warning {
+  background: #fff4e5; border: 1px solid #ffd8a8; color: #8a5300;
+  padding: 0.6rem 0.9rem; border-radius: 6px;
+}
+code { background: #eef0f3; padding: 0.1rem 0.3rem; border-radius: 4px; }

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ room_id }} — Neuron Console{% endblock %}
+{% block content %}
+<p><a href="/rooms">← Back to rooms</a></p>
+<h1>{{ room.get('name') or room_id }}</h1>
+
+<div class="card">
+  <table>
+    <tr><th>Room ID</th><td>{{ room_id }}</td></tr>
+    <tr><th>Canonical alias</th><td>{{ room.get('canonical_alias') or '' }}</td></tr>
+    <tr><th>Creator</th><td>{{ room.get('creator') or '' }}</td></tr>
+    <tr><th>Joined members</th><td>{{ room.get('joined_members', 0) }}</td></tr>
+    <tr><th>Version</th><td>{{ room.get('room_version', room.get('version', '')) }}</td></tr>
+    <tr><th>Encryption</th><td>{{ room.get('encryption') or 'none' }}</td></tr>
+    <tr><th>Federatable</th><td>{{ 'yes' if room.get('federatable') else 'no' }}</td></tr>
+    <tr><th>Public</th><td>{{ 'yes' if room.get('public') else 'no' }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Moderation</h2>
+  <div class="actions">
+    <form method="post" action="/rooms/{{ room_id }}/block">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="block" value="true">
+      <button type="submit">Block room</button>
+    </form>
+    <form method="post" action="/rooms/{{ room_id }}/block">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="block" value="false">
+      <button type="submit">Unblock room</button>
+    </form>
+    <a class="button-link danger" href="/rooms/{{ room_id }}/delete">Delete room…</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Supervision</h2>
+  {% if bot_user_id %}
+  <p class="muted">Supervision bot: <code>{{ bot_user_id }}</code></p>
+  <form method="post" action="/rooms/{{ room_id }}/promote-bot">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Promote bot to admin here</button>
+  </form>
+  {% else %}
+  <p class="warning">Set <code>NEURON_SUPERVISOR_BOT_USER_ID</code> to enable supervision.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Members <span class="muted">({{ members|length }})</span></h2>
+  <table>
+    <thead><tr><th>User</th>{% if bot_token_configured %}<th>Moderate</th>{% endif %}</tr></thead>
+    <tbody>
+      {% for m in members %}
+      <tr>
+        <td><a href="/users/{{ m }}">{{ m }}</a></td>
+        {% if bot_token_configured %}
+        <td class="actions">
+          <form method="post" action="/rooms/{{ room_id }}/kick"
+                onsubmit="return confirm('Kick {{ m }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="user_id" value="{{ m }}">
+            <button type="submit" class="small">Kick</button>
+          </form>
+          <form method="post" action="/rooms/{{ room_id }}/ban"
+                onsubmit="return confirm('Ban {{ m }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="user_id" value="{{ m }}">
+            <button type="submit" class="small danger">Ban</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+      {% else %}
+      <tr><td class="muted">No members.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>State events <span class="muted">({{ state|length }})</span></h2>
+  <table>
+    <thead><tr><th>Type</th><th>State key</th><th>Sender</th></tr></thead>
+    <tbody>
+      {% for ev in state %}
+      <tr>
+        <td>{{ ev.get('type') }}</td>
+        <td>{{ ev.get('state_key') }}</td>
+        <td>{{ ev.get('sender') }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">No state.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

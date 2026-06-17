@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Users — Neuron Console{% endblock %}
+{% block content %}
+<h1>Users <span class="muted">({{ page.total }} total)</span></h1>
+
+<p><a class="button-link" href="/users/new">+ Create user</a></p>
+
+<form method="get" action="/users" class="search">
+  <input type="search" name="search" value="{{ search }}" placeholder="Search user ID or display name">
+  <input type="hidden" name="limit" value="{{ limit }}">
+  <button type="submit">Search</button>
+</form>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>User ID</th><th>Display name</th><th>Admin</th><th>Deactivated</th></tr>
+    </thead>
+    <tbody>
+      {% for u in page.users %}
+      <tr>
+        <td><a href="/users/{{ u.get('name') }}">{{ u.get('name') }}</a></td>
+        <td>{{ u.get('displayname') or '' }}</td>
+        <td>{{ 'yes' if u.get('admin') else 'no' }}</td>
+        <td>{{ 'yes' if u.get('deactivated') else 'no' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">No users found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if next_token %}
+<p class="pager">
+  <a href="/users?limit={{ limit }}{% if search %}&search={{ search }}{% endif %}&from_token={{ next_token }}">Next page →</a>
+</p>
+{% endif %}
+{% endblock %}

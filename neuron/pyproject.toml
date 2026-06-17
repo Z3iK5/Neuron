@@ -1,0 +1,96 @@
+# Neuron — Python project definition.
+#
+# This is the project file for ALL Neuron services and shared libraries. It is
+# deliberately SEPARATE from Synapse's own pyproject.toml at the repository root:
+# Neuron is additive software that runs *around* a stock Synapse, so it keeps its
+# own dependencies and never interferes with Synapse's packaging.
+#
+# Layout uses the conventional "src/" pattern: importable packages live under
+# src/ (e.g. src/neuron_core). Tests live under tests/.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neuron"
+version = "0.0.1"
+description = "Neuron — clean-room services around a stock Synapse (ESS Pro-equivalent features)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "Neuron contributors" }]
+
+# Runtime dependencies shared across services. Each new service may add its own
+# extras later (e.g. matrix-nio for the bots, fastapi for the web services); the
+# shared library (neuron_core) only needs an HTTP client + config/validation.
+dependencies = [
+    "httpx>=0.27,<1.0",          # modern async HTTP client used to call Synapse
+    "pydantic>=2.7,<3.0",        # data validation + typed models
+    "pydantic-settings>=2.3,<3.0", # load configuration from env vars / .env
+    "PyYAML>=6.0",               # read optional YAML config files
+]
+
+[project.optional-dependencies]
+# The admin console service (FastAPI + server-rendered templates).
+# Install with:  pip install -e ".[console]"
+console = [
+    "fastapi>=0.111,<1.0",
+    "uvicorn[standard]>=0.30",   # ASGI server used to run the app
+    "jinja2>=3.1",               # HTML templating
+    "python-multipart>=0.0.9",   # parse HTML form submissions (login form)
+    "itsdangerous>=2.2",         # signs the session cookie (Starlette SessionMiddleware)
+    "httpx>=0.27",               # also used by Starlette's TestClient
+]
+
+# Everything needed for development + CI (includes the service extras above so
+# the whole codebase is importable and testable).
+# Install with:  pip install -e ".[dev]"
+dev = [
+    "neuron[console]",           # pull in all service runtime deps
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",      # lets us write async test functions
+    "ruff>=0.5",                 # linter + formatter
+    "mypy>=1.10",                # static type checker
+    "types-PyYAML",              # type stubs for PyYAML (helps mypy)
+]
+
+[tool.hatch.build.targets.wheel]
+# Tell the build tool which package(s) ship in the wheel. As we add services
+# (neuron_gateway, neuron_auditor, ...) we list them here too.
+packages = ["src/neuron_core", "src/neuron_console", "src/neuron_supervisor"]
+
+# ---------------------------------------------------------------------------
+# Tooling configuration (kept in one place so `ruff`, `mypy`, `pytest` just work)
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+# A friendly-but-useful rule set: pycodestyle (E), pyflakes (F), isort (I),
+# bugbear (B), pyupgrade (UP). Easy to read for a beginner, catches real bugs.
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's documented style puts Depends()/Form() in parameter defaults, which
+# is safe. Tell bugbear (B008) to treat these calls as immutable defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["neuron_core", "neuron_console", "neuron_supervisor"]
+mypy_path = "src"
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+
+[tool.pytest.ini_options]
+# asyncio_mode = "auto" means we can write `async def test_...()` without extra
+# decorators — pytest-asyncio runs them on an event loop automatically.
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra"

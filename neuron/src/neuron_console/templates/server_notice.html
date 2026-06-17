@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Server notice — Neuron Console{% endblock %}
+{% block content %}
+<h1>Send a server notice</h1>
+<div class="card narrow">
+  <p class="muted">Sends a message to a user from the server notices account (the user
+  sees it in a dedicated "Server Notices" room). Requires server notices to be enabled
+  in Synapse.</p>
+  <form method="post" action="/server-notice">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="user_id">User ID</label>
+    <input type="text" id="user_id" name="user_id" placeholder="@alice:{{ server_name or 'example.org' }}" required>
+    <label for="message">Message</label>
+    <input type="text" id="message" name="message" required>
+    <button type="submit">Send notice</button>
+  </form>
+</div>
+{% endblock %}

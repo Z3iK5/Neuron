@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Delete room — Neuron Console{% endblock %}
+{% block content %}
+<p><a href="/rooms/{{ room_id }}">← Back to room</a></p>
+<h1>Delete room</h1>
+<div class="card narrow">
+  <p class="warning">This removes all local members from the room and (by default)
+  purges its history from the database. This is <strong>largely irreversible</strong>.</p>
+  <p class="muted">Room: <code>{{ room_id }}</code></p>
+  <form method="post" action="/rooms/{{ room_id }}/delete">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="checkbox"><input type="checkbox" name="purge" value="true" checked> Purge history from the database</label>
+    <label class="checkbox"><input type="checkbox" name="block" value="true"> Block the room (prevent re-joining)</label>
+    <button type="submit" class="danger">Delete room</button>
+    <a class="button-link" href="/rooms/{{ room_id }}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

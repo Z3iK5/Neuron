@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ user_id }} — Neuron Console{% endblock %}
+{% block content %}
+<p><a href="/users">← Back to users</a></p>
+<h1>{{ user_id }}</h1>
+
+<div class="card">
+  <table>
+    <tr><th>Display name</th><td>{{ user.get('displayname') or '' }}</td></tr>
+    <tr><th>Admin</th><td>{{ 'yes' if user.get('admin') else 'no' }}</td></tr>
+    <tr><th>Deactivated</th><td>{{ 'yes' if user.get('deactivated') else 'no' }}</td></tr>
+    <tr><th>Locked</th><td>{{ 'yes' if user.get('locked') else 'no' }}</td></tr>
+    <tr><th>Shadow-banned</th><td>{{ 'yes' if user.get('shadow_banned') else 'no' }}</td></tr>
+    <tr><th>User type</th><td>{{ user.get('user_type') or 'regular' }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Edit profile</h2>
+  <form method="post" action="/users/{{ user_id }}/modify">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="displayname">Display name</label>
+    <input type="text" id="displayname" name="displayname" value="{{ user.get('displayname') or '' }}">
+    {% if not mas_enabled %}
+    <label class="checkbox">
+      <input type="checkbox" name="make_admin" value="true" {{ 'checked' if user.get('admin') else '' }}>
+      Server admin
+    </label>
+    {% else %}
+    <p class="muted">Admin flag is managed by the authentication service (MAS).</p>
+    {% endif %}
+    <button type="submit">Save</button>
+  </form>
+</div>
+
+{% if not mas_enabled %}
+<div class="card">
+  <h2>Reset password</h2>
+  <form method="post" action="/users/{{ user_id }}/reset-password">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="new_password">New password</label>
+    <input type="password" id="new_password" name="new_password" required>
+    <label class="checkbox"><input type="checkbox" name="logout_devices" value="true" checked> Log out all devices</label>
+    <button type="submit">Reset password</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Moderation</h2>
+  <div class="actions">
+    <form method="post" action="/users/{{ user_id }}/shadow-ban">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if user.get('shadow_banned') %}
+      <input type="hidden" name="banned" value="false">
+      <button type="submit">Remove shadow-ban</button>
+      {% else %}
+      <input type="hidden" name="banned" value="true">
+      <button type="submit">Shadow-ban</button>
+      {% endif %}
+    </form>
+    <form method="post" action="/users/{{ user_id }}/redact"
+          onsubmit="return confirm('Redact all messages from this user in all rooms?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="danger">Redact all messages</button>
+    </form>
+    <a class="button-link danger" href="/users/{{ user_id }}/deactivate">Deactivate…</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Contact addresses (3PIDs)</h2>
+  <table>
+    <thead><tr><th>Medium</th><th>Address</th></tr></thead>
+    <tbody>
+      {% for t in user.get('threepids', []) %}
+      <tr><td>{{ t.get('medium') }}</td><td>{{ t.get('address') }}</td></tr>
+      {% else %}
+      <tr><td colspan="2" class="muted">None</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>External IDs (SSO)</h2>
+  <table>
+    <thead><tr><th>Auth provider</th><th>External ID</th></tr></thead>
+    <tbody>
+      {% for e in user.get('external_ids', []) %}
+      <tr><td>{{ e.get('auth_provider') }}</td><td>{{ e.get('external_id') }}</td></tr>
+      {% else %}
+      <tr><td colspan="2" class="muted">None</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

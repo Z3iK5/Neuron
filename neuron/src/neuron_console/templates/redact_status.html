@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Redaction status — Neuron Console{% endblock %}
+{% block head %}
+{% if status.get('status') not in ('complete', 'failed') %}<meta http-equiv="refresh" content="3">{% endif %}
+{% endblock %}
+{% block content %}
+<h1>Redaction</h1>
+<div class="card narrow">
+  <table>
+    <tr><th>Redaction ID</th><td>{{ redact_id }}</td></tr>
+    <tr><th>Status</th><td>{{ status.get('status', 'unknown') }}</td></tr>
+  </table>
+  {% if status.get('status') not in ('complete', 'failed') %}
+  <p class="muted">This page refreshes automatically until the redaction finishes.</p>
+  {% elif status.get('status') == 'complete' %}
+  <p>Redaction complete.</p>
+  {% else %}
+  <p class="error">Redaction failed.</p>
+  {% endif %}
+  <p><a href="/users">← Back to users</a></p>
+</div>
+{% endblock %}

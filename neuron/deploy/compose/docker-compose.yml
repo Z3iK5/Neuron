@@ -1,0 +1,111 @@
+# Neuron — local development stack.
+#
+# Brings up a STOCK, unmodified Synapse homeserver with PostgreSQL and Redis so
+# Neuron services have something real to talk to during development. This is a
+# THROWAWAY dev environment — not a production deployment.
+#
+# Secrets handling: nothing secret is committed. All secrets come from a
+# git-ignored `.env` file (copy `.env.example` to `.env`). Synapse's signing
+# keys and generated config live in the `synapse-data` volume, also not
+# committed. The Postgres password and Synapse registration secret are passed in
+# from the environment and written into a runtime config file inside the volume.
+#
+# Quick start:  see ./README.md
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-synapse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      # Synapse requires this specific locale/encoding for its database.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    # Present for later phases (worker replication / HA testing). Harmless now.
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  synapse:
+    image: ghcr.io/element-hq/synapse:latest   # pin to a specific tag for reproducibility
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SYNAPSE_SERVER_NAME: ${SYNAPSE_SERVER_NAME:-neuron.local}
+      POSTGRES_USER: ${POSTGRES_USER:-synapse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      REGISTRATION_SHARED_SECRET: ${REGISTRATION_SHARED_SECRET:?set REGISTRATION_SHARED_SECRET in .env}
+    ports:
+      - "8008:8008"     # Synapse client + admin API (HTTP, dev only)
+    volumes:
+      - synapse-data:/data
+    # On first start we generate Synapse's base config + signing keys (into the
+    # git-ignored volume), then write a small override file that points Synapse
+    # at PostgreSQL and injects the registration secret from the environment.
+    # Synapse merges multiple --config-path arguments (later files win).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ ! -f /data/homeserver.yaml ]; then
+          echo "Generating Synapse config + signing keys..."
+          python -m synapse.app.homeserver \
+            --server-name "$$SYNAPSE_SERVER_NAME" \
+            --config-path /data/homeserver.yaml \
+            --generate-config --report-stats=no
+        fi
+        mkdir -p /data/conf.d
+        cat > /data/conf.d/10-neuron-dev.yaml <<EOF
+        # Generated at container start from environment variables. Not committed.
+        database:
+          name: psycopg2
+          args:
+            user: "$$POSTGRES_USER"
+            password: "$$POSTGRES_PASSWORD"
+            dbname: "$$POSTGRES_DB"
+            host: postgres
+            cp_min: 5
+            cp_max: 10
+        listeners:
+          - port: 8008
+            tls: false
+            type: http
+            x_forwarded: true
+            bind_addresses: ['0.0.0.0']
+            resources:
+              - names: [client, federation]
+                compress: false
+        registration_shared_secret: "$$REGISTRATION_SHARED_SECRET"
+        enable_registration: false
+        report_stats: false
+        suppress_key_server_warning: true
+        EOF
+        echo "Starting Synapse..."
+        exec python -m synapse.app.homeserver \
+          --config-path /data/homeserver.yaml \
+          --config-path /data/conf.d
+    healthcheck:
+      # Synapse exposes a simple health endpoint on each listener.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8008/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  postgres-data:
+  synapse-data:

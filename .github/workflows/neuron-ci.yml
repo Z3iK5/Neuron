@@ -1,0 +1,52 @@
+# CI for the Neuron services (separate from Synapse's own CI).
+#
+# Runs only when files under neuron/ change, so it never interferes with the
+# upstream Synapse workflows in this repository.
+
+name: Neuron CI
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "neuron/**"
+      - ".github/workflows/neuron-ci.yml"
+  pull_request:
+    paths:
+      - "neuron/**"
+      - ".github/workflows/neuron-ci.yml"
+
+# Avoid running duplicate jobs for the same ref.
+concurrency:
+  group: neuron-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: neuron
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Neuron with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy
+
+      - name: Unit tests (pytest)
+        # Integration tests under tests/integration are skipped automatically
+        # unless NEURON_SYNAPSE_BASE_URL / NEURON_SYNAPSE_ADMIN_TOKEN are set.
+        run: pytest -q

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Room deletion status — Neuron Console{% endblock %}
+{% block head %}
+{% if status.get('status') not in ('complete', 'failed') %}<meta http-equiv="refresh" content="3">{% endif %}
+{% endblock %}
+{% block content %}
+<h1>Room deletion</h1>
+<div class="card narrow">
+  <table>
+    <tr><th>Delete ID</th><td>{{ delete_id }}</td></tr>
+    <tr><th>Status</th><td>{{ status.get('status', 'unknown') }}</td></tr>
+    {% if status.get('error') %}<tr><th>Error</th><td>{{ status.get('error') }}</td></tr>{% endif %}
+  </table>
+  {% if status.get('status') not in ('complete', 'failed') %}
+  <p class="muted">This page refreshes automatically until the deletion finishes.</p>
+  {% elif status.get('status') == 'complete' %}
+  <p>Room deletion complete.</p>
+  {% else %}
+  <p class="error">Room deletion failed.</p>
+  {% endif %}
+  <p><a href="/rooms">← Back to rooms</a></p>
+</div>
+{% endblock %}

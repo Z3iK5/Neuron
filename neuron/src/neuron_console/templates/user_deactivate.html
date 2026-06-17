@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Deactivate {{ user_id }} — Neuron Console{% endblock %}
+{% block content %}
+<p><a href="/users/{{ user_id }}">← Back to user</a></p>
+<h1>Deactivate {{ user_id }}</h1>
+<div class="card narrow">
+  <p class="warning">This deactivates the account and removes it from rooms. It cannot
+  log in afterwards. This action is <strong>not reversible</strong> through this console.</p>
+  <form method="post" action="/users/{{ user_id }}/deactivate">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="checkbox">
+      <input type="checkbox" name="erase" value="true">
+      Also <strong>erase</strong> the user (GDPR erasure — clears profile/messages markers)
+    </label>
+    <button type="submit" class="danger">Deactivate account</button>
+    <a class="button-link" href="/users/{{ user_id }}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

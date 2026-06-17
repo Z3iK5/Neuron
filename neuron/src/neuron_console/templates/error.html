@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Error — Neuron Console{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>Something went wrong</h1>
+  <p>The homeserver returned an error when we tried to load this page.</p>
+  <table>
+    <tr><th>Status</th><td>{{ status }}</td></tr>
+    {% if errcode %}<tr><th>Error code</th><td>{{ errcode }}</td></tr>{% endif %}
+    {% if message %}<tr><th>Message</th><td>{{ message }}</td></tr>{% endif %}
+  </table>
+  <p class="muted">A common cause is a missing or invalid server-admin token, or the
+  account not being a Synapse admin.</p>
+  <p><a href="/">← Back to dashboard</a></p>
+</div>
+{% endblock %}
