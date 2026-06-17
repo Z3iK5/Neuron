@@ -93,7 +93,49 @@ restart. When happy, we proceed to **Phase 5 — E2EE for auditor & supervisor**
 (the hard phase).
 
 ---
-## Phase 5 — E2EE for auditor & supervisor — ⬜ not started
+## Phase 5 — E2EE for auditor & supervisor — ✅ crypto core built, awaiting review gate
+
+**Goal:** read/audit **encrypted** room messages, with honest limits.
+
+### Delivered
+- **`neuron_crypto` package (new):** `base.py` (no libolm dependency) with the
+  `Decryptor` protocol, `DecryptResult`, and `NullDecryptor`; `megolm.py` (needs
+  libolm via the `e2e` extra) with `MegolmSessionStore` (import keys from an
+  `m.room_key` content or a JSON key file; pickle persistence) and
+  `MegolmDecryptor`, which decrypts `m.room.encrypted` (`m.megolm.v1.aes-sha2`)
+  events to the inner cleartext.
+- **Auditor integration:** `Auditor` takes an optional `decryptor`; encrypted
+  events are decrypted when a key is available (record carries the inner
+  type/content + `decrypted: true`), else recorded as an **undecryptable
+  envelope** with a `decryption_error` reason — never dropped. Keys are imported
+  from `NEURON_AUDITOR_E2E_KEY_FILE` when set.
+- **Packaging:** `e2e` extra (`python-olm`); needs system `libolm`.
+
+### Verified locally (offline, with libolm)
+- `ruff` clean, `mypy` clean (27 source files), `pytest` → **49 passed,
+  3 skipped**. Includes **real Megolm round-trips** (outbound session → encrypt →
+  import inbound key → decrypt → cleartext recovered), persistence, key-file
+  import, and an auditor test that records the decrypted inner message.
+
+### Honest scope / not done here
+- **Automatic live key receipt is not implemented yet** (Phase 5b): a live bot
+  gets Megolm keys via Olm-encrypted to-device `m.room_key` (needs device-key
+  upload, OTK claiming, Olm sessions, cross-signing/verification) and/or
+  server-side key backup — all of which need a running homeserver. For now keys
+  are **imported** (operator key file / future key backup), which the crypto core
+  fully supports and is validated offline.
+- **Forward-only (protocol limit):** messages sent before the bot held the key
+  can't be read unless their keys are imported; such events are recorded as
+  envelopes, not dropped.
+- **Security:** the audit store is plaintext and the key file can decrypt
+  messages — both must be access-controlled.
+
+### Review gate
+Proceed to **Phase 5b** (automatic live key receipt: device keys + to-device Olm
++ cross-signing, validated against the dev Synapse), or accept import-based
+decryption and move to **Phase 6 — media scanner**.
+
+---
 ## Phase 6 — neuron-mediascan (ClamAV) — ⬜ not started
 ## Phase 7 — neuron-directory (IAM / GroupSync) — ⬜ not started
 ## Phase 8 — neuron-gateway (federation firewall) — ⬜ not started

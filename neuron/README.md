@@ -29,6 +29,8 @@ tracked in [`PROGRESS.md`](./PROGRESS.md).
 - **Phase 3 — Supervision bot**: `neuron_supervisor` promotes a bot to room
   admin and moderates (kick/ban/redact).
 - **Phase 4 — Audit bot**: `neuron_auditor` streams room events to filesystem/S3.
+- **Phase 5 — E2EE (crypto core)**: `neuron_crypto` decrypts Megolm messages so
+  the audit bot can read encrypted rooms when it holds the keys.
 
 ## Repository layout
 
@@ -129,8 +131,28 @@ appear as JSON lines in `audit-log.jsonl`. A resume token is persisted, so
 restarting the bot continues without gaps or duplicates. For S3/MinIO, set
 `NEURON_AUDITOR_SINK=s3` (or `both`) and the `NEURON_AUDITOR_S3_*` variables.
 
-> Plaintext only for now: messages in **encrypted** rooms are recorded as
-> undecryptable envelopes (not dropped). Decryption arrives in Phase 5.
+### End-to-end encryption (Phase 5)
+
+The auditor can decrypt **encrypted** rooms when it holds the Megolm keys. Install
+the E2EE extra (needs system `libolm`, e.g. `apt-get install libolm-dev`) and
+point the bot at a key file:
+
+```bash
+pip install -e ".[e2e]"
+export NEURON_AUDITOR_E2E_KEY_FILE=/path/to/room-keys.json   # JSON array of {session_key}
+python -m neuron_auditor run
+```
+
+Events the bot can decrypt are recorded with their cleartext type/content and
+`"decrypted": true`; events it can't (key not available) are recorded as
+envelopes with a `decryption_error` reason — **never dropped**.
+
+> **Honest limits.** Decryption is *forward-only*: messages sent before the bot
+> held the key can't be read unless those keys are imported. Automatic live key
+> receipt (to-device Olm `m.room_key`, cross-signing/verification, server-side key
+> backup) is the remaining live integration; today keys are imported via the key
+> file. The audit store holds **plaintext** and the key file can decrypt
+> messages — protect both like the secrets they are.
 
 ## Configuration & secrets
 

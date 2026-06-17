@@ -19,6 +19,7 @@ from neuron_auditor.sinks import Sink, build_audit_record
 from neuron_auditor.state import StateStore
 from neuron_core import MatrixClient, get_logger
 from neuron_core.errors import MatrixError
+from neuron_crypto.base import Decryptor
 
 log = get_logger(__name__)
 
@@ -32,6 +33,7 @@ class Auditor:
         sink: Sink,
         state: StateStore,
         *,
+        decryptor: Decryptor | None = None,
         auto_join: bool = True,
         sync_timeout_ms: int = 30000,
         retry_seconds: float = 5.0,
@@ -39,6 +41,7 @@ class Auditor:
         self.client = client
         self.sink = sink
         self.state = state
+        self.decryptor = decryptor
         self.auto_join = auto_join
         self.sync_timeout_ms = sync_timeout_ms
         self.retry_seconds = retry_seconds
@@ -85,6 +88,9 @@ class Auditor:
             timeline = room_data.get("timeline", {})
             events = timeline.get("events", []) if isinstance(timeline, dict) else []
             for event in events:
-                self.sink.write(build_audit_record(room_id, event))
+                decrypt = None
+                if self.decryptor is not None and event.get("type") == "m.room.encrypted":
+                    decrypt = self.decryptor.decrypt(event)
+                self.sink.write(build_audit_record(room_id, event, decrypt))
                 count += 1
         return count

@@ -34,10 +34,22 @@ async def _amain(command: str) -> None:
         settings.auditor_bot_token.get_secret_value(),
         timeout=settings.http_timeout_seconds,
     )
+
+    # If a key file is configured, enable E2EE decryption (needs the 'e2e' extra).
+    decryptor = None
+    if settings.auditor_e2e_key_file:
+        from neuron_crypto.megolm import MegolmDecryptor, MegolmSessionStore
+
+        store = MegolmSessionStore()
+        imported = store.import_key_file(settings.auditor_e2e_key_file)
+        log.info("imported room keys", extra={"count": imported})
+        decryptor = MegolmDecryptor(store)
+
     auditor = Auditor(
         client,
         make_sink(settings),
         StateStore(settings.auditor_state_path),
+        decryptor=decryptor,
         auto_join=settings.auditor_auto_join,
     )
     try:
