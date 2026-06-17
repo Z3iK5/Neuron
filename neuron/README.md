@@ -29,6 +29,8 @@ tracked in [`PROGRESS.md`](./PROGRESS.md).
 - **Phase 3 — Supervision bot**: `neuron_supervisor` promotes a bot to room
   admin and moderates (kick/ban/redact).
 - **Phase 4 — Audit bot**: `neuron_auditor` streams room events to filesystem/S3.
+- **Phase 5 — E2EE (crypto core)**: `neuron_crypto` decrypts Megolm messages so
+  the audit bot can read encrypted rooms when it holds the keys.
 
 ## Repository layout
 
@@ -129,8 +131,37 @@ appear as JSON lines in `audit-log.jsonl`. A resume token is persisted, so
 restarting the bot continues without gaps or duplicates. For S3/MinIO, set
 `NEURON_AUDITOR_SINK=s3` (or `both`) and the `NEURON_AUDITOR_S3_*` variables.
 
-> Plaintext only for now: messages in **encrypted** rooms are recorded as
-> undecryptable envelopes (not dropped). Decryption arrives in Phase 5.
+### End-to-end encryption (Phase 5)
+
+The auditor can decrypt **encrypted** rooms. Install the E2EE extra (needs system
+`libolm`, e.g. `apt-get install libolm-dev`): `pip install -e ".[e2e]"`. Two modes:
+
+**Automatic (recommended)** — the bot gets a persistent Olm device, publishes its
+keys on startup, and ingests room keys sent to it via to-device messages:
+
+```bash
+export NEURON_AUDITOR_E2E_DEVICE_STORE=/path/to/auditor-device.json
+python -m neuron_auditor run
+```
+
+**Import-only** — decrypt rooms whose Megolm keys you provide in a file:
+
+```bash
+export NEURON_AUDITOR_E2E_KEY_FILE=/path/to/room-keys.json   # JSON array of {session_key}
+python -m neuron_auditor run
+```
+
+Events the bot can decrypt are recorded with their cleartext type/content and
+`"decrypted": true`; events it can't are recorded as envelopes with a
+`decryption_error` reason — **never dropped**.
+
+> **Honest limits.** Decryption is *forward-only* (messages sent before the bot
+> held the key can't be read). For automatic mode to work in practice, clients
+> must agree to share keys with the bot, which usually means its device is
+> **verified/cross-signed** — verification/cross-signing is not yet automated, so
+> verify the bot's device (or allow sharing with it) operationally. The device
+> store, key file, and the audit store (plaintext) can all expose message
+> content — protect them like the secrets they are.
 
 ## Configuration & secrets
 

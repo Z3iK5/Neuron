@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
+import olm
+
 from neuron_auditor.core import Auditor
 from neuron_auditor.state import StateStore
+from neuron_crypto.base import DecryptResult
+from neuron_crypto.megolm import MEGOLM_ALGORITHM, MegolmDecryptor, MegolmSessionStore
 
 
 class FakeClient:
@@ -32,6 +37,20 @@ class RecordingSink:
 
     def write(self, record: dict[str, Any]) -> None:
         self.records.append(record)
+
+
+class CapturingDecryptor:
+    """A decryptor that records the to-device batches the auditor hands it."""
+
+    def __init__(self) -> None:
+        self.to_device_batches: list[list[dict[str, Any]]] = []
+
+    def handle_to_device(self, events: list[dict[str, Any]]) -> int:
+        self.to_device_batches.append(events)
+        return len(events)
+
+    def decrypt(self, event: dict[str, Any]) -> DecryptResult:
+        return DecryptResult(decrypted=False, reason="test")
 
 
 def _sync_with_message(next_batch: str) -> dict[str, Any]:
@@ -112,3 +131,63 @@ async def test_encrypted_event_is_recorded_not_dropped(tmp_path: Path) -> None:
     await auditor.poll_once()
     assert sink.records[0]["encrypted"] is True
     assert sink.records[0]["decrypted"] is False
+
+
+async def test_auditor_decrypts_when_key_is_available(tmp_path: Path) -> None:
+    # The "sender" creates a Megolm session and we hand its key to the auditor,
+    # mimicking a key the bot received/imported. The auditor should record the
+    # decrypted inner message.
+    outbound = olm.OutboundGroupSession()
+    store = MegolmSessionStore()
+    store.import_session_key(outbound.session_key)
+
+    payload = json.dumps(
+        {"type": "m.room.message", "content": {"body": "secret"}, "room_id": "!r:hs"}
+    )
+    enc_event = {
+        "event_id": "$e",
+        "type": "m.room.encrypted",
+        "sender": "@a:hs",
+        "content": {
+            "algorithm": MEGOLM_ALGORITHM,
+            "sender_key": "K",
+            "session_id": outbound.id,
+            "ciphertext": outbound.encrypt(payload),
+        },
+    }
+    response = {
+        "next_batch": "s1",
+        "rooms": {"join": {"!r:hs": {"timeline": {"events": [enc_event]}}}},
+    }
+    sink = RecordingSink()
+    auditor = Auditor(
+        FakeClient([response]),  # type: ignore[arg-type]
+        sink,
+        StateStore(str(tmp_path / "s.json")),
+        decryptor=MegolmDecryptor(store),
+    )
+    await auditor.poll_once()
+
+    rec = sink.records[0]
+    assert rec["encrypted"] is True
+    assert rec["decrypted"] is True
+    assert rec["type"] == "m.room.message"
+    assert rec["content"] == {"body": "secret"}
+
+
+async def test_to_device_events_passed_to_decryptor(tmp_path: Path) -> None:
+    response = {
+        "next_batch": "s1",
+        "to_device": {"events": [{"type": "m.room.encrypted", "content": {}}]},
+        "rooms": {},
+    }
+    decryptor = CapturingDecryptor()
+    auditor = Auditor(
+        FakeClient([response]),  # type: ignore[arg-type]
+        RecordingSink(),
+        StateStore(str(tmp_path / "s.json")),
+        decryptor=decryptor,
+    )
+    await auditor.poll_once()
+    assert len(decryptor.to_device_batches) == 1
+    assert len(decryptor.to_device_batches[0]) == 1

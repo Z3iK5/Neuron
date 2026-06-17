@@ -19,8 +19,46 @@ from neuron_auditor.core import Auditor
 from neuron_auditor.sinks import make_sink
 from neuron_auditor.state import StateStore
 from neuron_core import MatrixClient, configure_logging, get_logger
+from neuron_crypto.base import Decryptor
 
 log = get_logger("neuron_auditor")
+
+
+async def _build_decryptor(client: MatrixClient, settings: AuditorSettings) -> Decryptor | None:
+    """Construct the right decryptor for the configured E2EE mode (or None)."""
+    if settings.auditor_e2e_device_store:
+        # Full E2EE: a persistent Olm device that publishes keys and auto-ingests
+        # room keys sent to it via to-device messages.
+        from neuron_crypto.manager import E2EEManager
+        from neuron_crypto.megolm import MegolmSessionStore
+        from neuron_crypto.olm_device import OlmDevice
+
+        whoami = await client.whoami()
+        user_id = whoami.get("user_id", "")
+        device_id = whoami.get("device_id") or "NEURON_AUDITOR"
+        device = OlmDevice.load(
+            settings.auditor_e2e_device_store, user_id, device_id
+        ) or OlmDevice(user_id, device_id)
+        one_time_keys = device.generate_one_time_keys(settings.auditor_e2e_one_time_keys)
+        await client.keys_upload(device_keys=device.device_keys(), one_time_keys=one_time_keys)
+        device.save(settings.auditor_e2e_device_store)
+
+        store = MegolmSessionStore()
+        if settings.auditor_e2e_key_file:
+            store.import_key_file(settings.auditor_e2e_key_file)
+        log.info("e2ee enabled (automatic key receipt)", extra={"device_id": device_id})
+        return E2EEManager(device, store)
+
+    if settings.auditor_e2e_key_file:
+        # Import-only: decrypt rooms whose keys are provided in a key file.
+        from neuron_crypto.megolm import MegolmDecryptor, MegolmSessionStore
+
+        store = MegolmSessionStore()
+        imported = store.import_key_file(settings.auditor_e2e_key_file)
+        log.info("imported room keys", extra={"count": imported})
+        return MegolmDecryptor(store)
+
+    return None
 
 
 async def _amain(command: str) -> None:
@@ -34,10 +72,17 @@ async def _amain(command: str) -> None:
         settings.auditor_bot_token.get_secret_value(),
         timeout=settings.http_timeout_seconds,
     )
+
+    # E2EE (needs the 'e2e' extra + libolm). Two modes:
+    #  - device store set -> full E2EE: publish keys + auto-receive room keys.
+    #  - only a key file   -> decrypt rooms whose keys were imported manually.
+    decryptor = await _build_decryptor(client, settings)
+
     auditor = Auditor(
         client,
         make_sink(settings),
         StateStore(settings.auditor_state_path),
+        decryptor=decryptor,
         auto_join=settings.auditor_auto_join,
     )
     try:

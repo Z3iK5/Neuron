@@ -19,6 +19,7 @@ from neuron_auditor.sinks import Sink, build_audit_record
 from neuron_auditor.state import StateStore
 from neuron_core import MatrixClient, get_logger
 from neuron_core.errors import MatrixError
+from neuron_crypto.base import Decryptor
 
 log = get_logger(__name__)
 
@@ -32,6 +33,7 @@ class Auditor:
         sink: Sink,
         state: StateStore,
         *,
+        decryptor: Decryptor | None = None,
         auto_join: bool = True,
         sync_timeout_ms: int = 30000,
         retry_seconds: float = 5.0,
@@ -39,6 +41,7 @@ class Auditor:
         self.client = client
         self.sink = sink
         self.state = state
+        self.decryptor = decryptor
         self.auto_join = auto_join
         self.sync_timeout_ms = sync_timeout_ms
         self.retry_seconds = retry_seconds
@@ -48,6 +51,10 @@ class Auditor:
         since = self.state.get_since()
         response = await self.client.sync(since=since, timeout_ms=self.sync_timeout_ms)
         rooms = response.get("rooms", {})
+
+        # Ingest any room keys the bot was sent via to-device messages BEFORE
+        # decrypting this batch's room events (the decryptor may know how).
+        self._handle_to_device(response.get("to_device", {}).get("events", []))
 
         if self.auto_join:
             await self._accept_invites(rooms.get("invite", {}))
@@ -71,6 +78,14 @@ class Auditor:
                 log.exception("poll failed; retrying")
                 await asyncio.sleep(self.retry_seconds)
 
+    def _handle_to_device(self, events: list[dict[str, object]]) -> None:
+        """Pass to-device events to the decryptor if it can ingest room keys."""
+        handler = getattr(self.decryptor, "handle_to_device", None)
+        if events and callable(handler):
+            imported = handler(events)
+            if imported:
+                log.info("imported room keys from to-device", extra={"count": imported})
+
     async def _accept_invites(self, invites: dict[str, object]) -> None:
         for room_id in invites:
             try:
@@ -85,6 +100,9 @@ class Auditor:
             timeline = room_data.get("timeline", {})
             events = timeline.get("events", []) if isinstance(timeline, dict) else []
             for event in events:
-                self.sink.write(build_audit_record(room_id, event))
+                decrypt = None
+                if self.decryptor is not None and event.get("type") == "m.room.encrypted":
+                    decrypt = self.decryptor.decrypt(event)
+                self.sink.write(build_audit_record(room_id, event, decrypt))
                 count += 1
         return count

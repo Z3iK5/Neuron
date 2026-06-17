@@ -26,6 +26,21 @@ class AuditorSettings(NeuronCoreSettings):
     # Automatically accept room invites so the bot starts auditing new rooms.
     auditor_auto_join: bool = True
 
+    # Optional path to a JSON file of Megolm session keys to import at startup
+    # (enables decrypting E2EE rooms whose keys are provided). Requires the 'e2e'
+    # extra (libolm). Such a file can decrypt messages — protect it accordingly.
+    auditor_e2e_key_file: str = ""
+
+    # Path to persist the bot's Olm device (account + Olm sessions). When set, the
+    # bot publishes device + one-time keys on startup and automatically ingests
+    # room keys it is sent via to-device messages — full E2EE. Requires 'e2e'.
+    # This file is the device's secret identity — protect it.
+    auditor_e2e_device_store: str = ""
+
+    # How many one-time keys to publish on startup (so senders can establish Olm
+    # sessions to share room keys with the bot).
+    auditor_e2e_one_time_keys: int = 50
+
     # Where to persist the /sync pagination token (so a restart resumes without
     # gaps or duplicates). Relative paths are fine for local dev.
     auditor_state_path: str = "auditor-state.json"

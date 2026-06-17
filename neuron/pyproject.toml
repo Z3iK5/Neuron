@@ -49,12 +49,20 @@ auditor = [
     "boto3>=1.34",               # S3-compatible object storage client
 ]
 
+# End-to-end-encryption support (Megolm decryption). Requires the system libolm
+# library to be installed (e.g. `apt-get install libolm-dev`).
+# Install with:  pip install -e ".[e2e]"
+e2e = [
+    "python-olm>=3.1",           # Python bindings for libolm (Olm/Megolm)
+]
+
 # Everything needed for development + CI (includes the service extras above so
 # the whole codebase is importable and testable).
 # Install with:  pip install -e ".[dev]"
 dev = [
     "neuron[console]",           # pull in all service runtime deps
     "neuron[auditor]",           # boto3 for the S3 sink
+    "neuron[e2e]",               # python-olm for E2EE decryption
     "pytest>=8.0",
     "pytest-asyncio>=0.23",      # lets us write async test functions
     "ruff>=0.5",                 # linter + formatter
@@ -70,6 +78,7 @@ packages = [
     "src/neuron_console",
     "src/neuron_supervisor",
     "src/neuron_auditor",
+    "src/neuron_crypto",
 ]
 
 # ---------------------------------------------------------------------------
@@ -93,7 +102,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor"]
+packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor", "neuron_crypto"]
 mypy_path = "src"
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -101,8 +110,9 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 
 [[tool.mypy.overrides]]
-# boto3 ships only partial type information; treat it as untyped.
-module = ["boto3", "botocore.*"]
+# These ship little/no type information; treat them as untyped.
+#   boto3   — S3 sink; olm — libolm bindings for E2EE.
+module = ["boto3", "botocore.*", "olm"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

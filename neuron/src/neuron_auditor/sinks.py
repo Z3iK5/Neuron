@@ -16,12 +16,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from neuron_crypto.base import DecryptResult
 
-def build_audit_record(room_id: str, event: dict[str, Any]) -> dict[str, Any]:
+
+def build_audit_record(
+    room_id: str, event: dict[str, Any], decrypt: DecryptResult | None = None
+) -> dict[str, Any]:
     """Build the stable audit envelope for one Matrix event.
 
-    Encrypted events (``m.room.encrypted``) are still recorded — with
-    ``"decrypted": false`` — rather than dropped; Phase 5 will add decryption.
+    For an ``m.room.encrypted`` event, pass the ``decrypt`` result:
+    - if it decrypted, the record carries the *inner* (cleartext) type/content and
+      ``"decrypted": true``;
+    - otherwise the record keeps the encrypted envelope, ``"decrypted": false``,
+      and a ``"decryption_error"`` reason — encrypted events are recorded, never
+      silently dropped.
     """
     event_type = event.get("type", "")
     is_encrypted = event_type == "m.room.encrypted"
@@ -29,13 +37,26 @@ def build_audit_record(room_id: str, event: dict[str, Any]) -> dict[str, Any]:
         "audited_at": datetime.now(tz=UTC).isoformat(),
         "room_id": room_id,
         "event_id": event.get("event_id"),
-        "type": event_type,
         "sender": event.get("sender"),
         "origin_server_ts": event.get("origin_server_ts"),
-        "content": event.get("content"),
         "encrypted": is_encrypted,
-        "decrypted": not is_encrypted,
     }
+
+    if is_encrypted and decrypt is not None and decrypt.decrypted:
+        record["type"] = decrypt.event_type or event_type
+        record["content"] = decrypt.content
+        record["decrypted"] = True
+    elif is_encrypted:
+        record["type"] = event_type
+        record["content"] = event.get("content")
+        record["decrypted"] = False
+        if decrypt is not None and decrypt.reason:
+            record["decryption_error"] = decrypt.reason
+    else:
+        record["type"] = event_type
+        record["content"] = event.get("content")
+        record["decrypted"] = True
+
     if "state_key" in event:
         record["state_key"] = event["state_key"]
     return record

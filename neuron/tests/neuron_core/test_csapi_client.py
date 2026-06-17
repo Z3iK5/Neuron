@@ -83,6 +83,22 @@ async def test_join_room() -> None:
         assert (await bot.join_room(ROOM))["room_id"] == ROOM
 
 
+async def test_keys_upload_sends_device_and_one_time_keys() -> None:
+    import json as _json
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/_matrix/client/v3/keys/upload"
+        body = _json.loads(request.content)
+        assert "device_keys" in body
+        assert "one_time_keys" in body
+        return httpx.Response(200, json={"one_time_key_counts": {"signed_curve25519": 5}})
+
+    async with _client(handler) as bot:
+        result = await bot.keys_upload(device_keys={"user_id": "@b:hs"}, one_time_keys={"k": 1})
+    assert result["one_time_key_counts"]["signed_curve25519"] == 5
+
+
 def test_auth_header_is_set() -> None:
     bot = MatrixClient(BASE, "bot-token")
     assert bot._client.headers["Authorization"] == "Bearer bot-token"
