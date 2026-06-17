@@ -41,6 +41,12 @@ class AuditorSettings(NeuronCoreSettings):
     # sessions to share room keys with the bot).
     auditor_e2e_one_time_keys: int = 50
 
+    # Set up cross-signing for the bot (publish master/self-signing/user-signing
+    # keys and self-sign the device) so it presents a verifiable identity. The
+    # upload usually needs interactive auth — see the README. Seeds are persisted
+    # next to the device store and are highly sensitive.
+    auditor_e2e_cross_signing: bool = False
+
     # Where to persist the /sync pagination token (so a restart resumes without
     # gaps or duplicates). Relative paths are fine for local dev.
     auditor_state_path: str = "auditor-state.json"

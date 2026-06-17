@@ -24,14 +24,10 @@ from typing import Any
 
 import olm
 
+from neuron_crypto.signing import canonical_json as _canonical_json
+
 OLM_ALGORITHM = "m.olm.v1.curve25519-aes-sha2"
 MEGOLM_ALGORITHM = "m.megolm.v1.aes-sha2"
-
-
-def _canonical_json(obj: dict[str, Any]) -> str:
-    """Matrix canonical JSON for signing (sorted keys, no spaces, no signatures)."""
-    to_sign = {k: v for k, v in obj.items() if k not in ("signatures", "unsigned")}
-    return json.dumps(to_sign, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 class OlmDevice:

@@ -93,9 +93,10 @@ restart. When happy, we proceed to **Phase 5 — E2EE for auditor & supervisor**
 (the hard phase).
 
 ---
-## Phase 5 + 5b — E2EE for auditor — ✅ built (offline-validated), awaiting review gate
+## Phase 5 + 5b + 5c — E2EE for auditor — ✅ built (offline-validated), awaiting review gate
 
-**Goal:** read/audit **encrypted** room messages, including automatic key receipt.
+**Goal:** read/audit **encrypted** room messages, including automatic key receipt,
+cross-signing identity, and one-time-key replenishment.
 
 ### Delivered — Phase 5 (Megolm decryption core)
 - **`neuron_crypto` package:** `base.py` (no libolm dependency) with the
@@ -121,34 +122,41 @@ restart. When happy, we proceed to **Phase 5 — E2EE for auditor & supervisor**
   recording, so keys are ingested automatically. Full E2EE mode is enabled by
   `NEURON_AUDITOR_E2E_DEVICE_STORE` (persistent device; publishes keys on startup).
 
-### Verified locally (offline, with libolm)
-- `ruff` clean, `mypy` clean (29 source files), `pytest` → **55 passed,
-  3 skipped**. Includes the **full automatic pipeline end-to-end**: a sending
-  device claims the bot's one-time key → sends an Olm to-device `m.room_key` →
-  the manager ingests it → a Megolm room message then decrypts — plus Megolm
-  round-trips, persistence, key-file import, `keys_upload` shape, and the auditor
-  to-device wiring.
+### Delivered — Phase 5c (trust + key lifecycle)
+- **Cross-signing** (`cross_signing.py`): `CrossSigning` generates the master /
+  self-signing / user-signing keys, builds the signed
+  `keys/device_signing/upload` body, and **self-signs the bot's device** for
+  `keys/signatures/upload`; seeds persist. `MatrixClient.upload_cross_signing_keys`
+  + `upload_signatures` (the upload usually needs interactive auth — handled
+  gracefully). Enabled by `NEURON_AUDITOR_E2E_CROSS_SIGNING`.
+- **One-time-key replenishment:** `E2EEManager.maybe_generate_one_time_keys`
+  tops keys up when the server reports them low; the auditor calls it each sync
+  and re-uploads. Received room keys + Olm sessions are now **persisted** as they
+  arrive (so a restart keeps them).
 
-### Honest scope / what needs a live homeserver
-- **Server-side validation:** `/keys/upload` acceptance and a *real* client
-  choosing to share keys can only be exercised against a running Synapse + a
-  cooperating client. The crypto is validated offline; the wire calls are
-  unit-tested for shape.
-- **Trust / verification:** well-behaved clients typically share keys only with
-  **verified / cross-signed** devices. Cross-signing setup + verification is not
-  implemented; the bot's device should be verified by the operator (or the
-  deployment must allow sharing with it). This is the main operational
-  prerequisite for automatic decryption in practice.
-- **OTK replenishment:** a batch of one-time keys is published at startup;
-  ongoing replenishment from sync's key counts is a refinement, not yet added.
-- **Forward-only (protocol limit):** messages sent before the bot held the key
-  can't be read unless imported. **Security:** the audit store is plaintext and
-  device/key files can decrypt messages — all must be access-controlled.
+### Verified locally (offline, with libolm)
+- `ruff` clean, `mypy` clean (31 source files), `pytest` → **59 passed,
+  3 skipped**. Includes the **full automatic pipeline end-to-end** (claim OTK →
+  Olm to-device `m.room_key` → ingest → Megolm message decrypts), Megolm
+  round-trips + persistence, **cross-signing signatures verified with
+  `olm.ed25519_verify`** (master→subkeys, self-signing→device), OTK replenishment
+  logic, `keys_upload` shape, and the auditor to-device wiring.
+
+### Honest scope / what still needs a live homeserver
+- **Server-side + trust handshake:** `/keys/upload` and
+  `/keys/device_signing/upload` acceptance (the latter typically needs UIA), and a
+  *real* client *choosing* to share keys with the bot, can only be exercised
+  against a running Synapse + a cooperating, trusting client. The crypto and
+  payloads are validated offline; the wire calls are unit-tested for shape.
+- **Verification is identity, not yet interactive trust:** the bot now publishes a
+  proper cross-signed identity, but interactive (SAS) verification and a
+  client/policy that shares with it remain operational. Forward-only still applies.
+- **Security:** the audit store is plaintext; the device store, megolm session
+  store, and cross-signing seeds can all decrypt messages — protect them.
 
 ### Review gate
-Validate against the dev Synapse (or accept offline validation), then choose:
-add **verification/cross-signing + OTK replenishment** to finish live E2EE, or
-move to **Phase 6 — media scanner**.
+Validate against the dev Synapse (or accept the offline validation), then move to
+**Phase 6 — media scanner**.
 
 ---
 ## Phase 6 — neuron-mediascan (ClamAV) — ⬜ not started

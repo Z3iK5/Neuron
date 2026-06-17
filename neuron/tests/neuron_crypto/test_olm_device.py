@@ -107,3 +107,14 @@ def test_device_persistence(tmp_path: Path) -> None:
     reloaded = OlmDevice.load(path, "@bot:hs", "BOTDEV")
     assert reloaded is not None
     assert reloaded.curve25519 == curve
+
+
+def test_one_time_key_replenishment() -> None:
+    manager = E2EEManager(OlmDevice("@bot:hs", "BOTDEV"), otk_target=10, otk_minimum=5)
+    # Plenty of keys server-side -> nothing to do.
+    assert manager.maybe_generate_one_time_keys(8) is None
+    # Running low -> generate up to the target (10 - 2 = 8 new keys).
+    keys = manager.maybe_generate_one_time_keys(2)
+    assert keys is not None
+    assert len(keys) == 8
+    assert all(k.startswith("signed_curve25519:") for k in keys)

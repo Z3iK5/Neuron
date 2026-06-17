@@ -61,6 +61,10 @@ class Auditor:
 
         written = self._record_joined(rooms.get("join", {}))
 
+        # Top up one-time keys if the server says they're running low, so senders
+        # can keep establishing Olm sessions to share room keys with us.
+        await self._replenish_one_time_keys(response.get("device_one_time_keys_count", {}))
+
         next_batch = response.get("next_batch")
         if next_batch:
             self.state.set_since(next_batch)
@@ -85,6 +89,16 @@ class Auditor:
             imported = handler(events)
             if imported:
                 log.info("imported room keys from to-device", extra={"count": imported})
+
+    async def _replenish_one_time_keys(self, counts: dict[str, int]) -> None:
+        """If the decryptor manages one-time keys, top them up when low."""
+        generator = getattr(self.decryptor, "maybe_generate_one_time_keys", None)
+        if not callable(generator):
+            return
+        keys = generator(counts.get("signed_curve25519", 0))
+        if keys:
+            await self.client.keys_upload(one_time_keys=keys)
+            log.info("replenished one-time keys", extra={"count": len(keys)})
 
     async def _accept_invites(self, invites: dict[str, object]) -> None:
         for room_id in invites:

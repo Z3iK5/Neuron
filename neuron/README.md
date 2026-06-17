@@ -141,8 +141,13 @@ keys on startup, and ingests room keys sent to it via to-device messages:
 
 ```bash
 export NEURON_AUDITOR_E2E_DEVICE_STORE=/path/to/auditor-device.json
+export NEURON_AUDITOR_E2E_CROSS_SIGNING=true   # publish a cross-signed identity (optional)
 python -m neuron_auditor run
 ```
+
+In this mode the bot also **replenishes its one-time keys** automatically as they
+are consumed, and (with cross-signing on) publishes master/self-signing/user-signing
+keys and self-signs its device so it presents a verifiable identity.
 
 **Import-only** — decrypt rooms whose Megolm keys you provide in a file:
 
@@ -156,12 +161,13 @@ Events the bot can decrypt are recorded with their cleartext type/content and
 `decryption_error` reason — **never dropped**.
 
 > **Honest limits.** Decryption is *forward-only* (messages sent before the bot
-> held the key can't be read). For automatic mode to work in practice, clients
-> must agree to share keys with the bot, which usually means its device is
-> **verified/cross-signed** — verification/cross-signing is not yet automated, so
-> verify the bot's device (or allow sharing with it) operationally. The device
-> store, key file, and the audit store (plaintext) can all expose message
-> content — protect them like the secrets they are.
+> held the key can't be read). The bot can publish a cross-signed identity, but
+> for automatic mode to work in practice a sending client must still *choose* to
+> share keys with it — typically after its device is **verified** (interactive
+> verification and the share decision are the sender's, and need a live setup).
+> Uploading cross-signing keys usually needs interactive auth. The device store,
+> session store, cross-signing seeds, key file, and the audit store (plaintext)
+> can all expose message content — protect them like the secrets they are.
 
 ## Configuration & secrets
 

@@ -122,6 +122,27 @@ class MatrixClient:
             body["one_time_keys"] = one_time_keys
         return await self._request("POST", "/_matrix/client/v3/keys/upload", json=body)
 
+    async def upload_cross_signing_keys(
+        self, payload: dict[str, Any], *, auth: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """``POST /_matrix/client/v3/keys/device_signing/upload`` — publish cross-signing keys.
+
+        Note: the homeserver usually requires user-interactive auth (UIA) for this,
+        supplied via ``auth``; without it the server replies 401 with a UIA flow.
+        """
+        body = dict(payload)
+        if auth is not None:
+            body["auth"] = auth
+        return await self._request(
+            "POST", "/_matrix/client/v3/keys/device_signing/upload", json=body
+        )
+
+    async def upload_signatures(self, signatures: dict[str, Any]) -> dict[str, Any]:
+        """``POST /_matrix/client/v3/keys/signatures/upload`` — publish key signatures."""
+        return await self._request(
+            "POST", "/_matrix/client/v3/keys/signatures/upload", json=signatures
+        )
+
     async def messages(
         self, room_id: str, *, from_token: str | None = None, direction: str = "b", limit: int = 100
     ) -> dict[str, Any]:
