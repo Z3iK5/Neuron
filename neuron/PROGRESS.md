@@ -291,6 +291,37 @@ sync filters, `full_state`, presence/ephemeral/account-data payloads, and
 gappy-sync state catch-up. The notifier wakes all waiters on any event (fine for
 single-server); a smarter per-user/room notifier is a later optimization.
 
+## HS-4 — Media repository — ✅ built
+
+Authenticated media upload/download/thumbnail/config.
+
+- **Blob store** (`media/store.py`): a `MediaStore` interface with a filesystem
+  backend (sharded by media-ID prefix; disk I/O off the event loop via
+  `asyncio.to_thread`). S3 backend can slot in later.
+- **Metadata** (migration 0004, `storage/media.py`): the `media` table
+  (content type, name, size, uploader).
+- **Service** (`media/service.py`): upload (size-gated → `mxc://` URI),
+  download (local only — remote/federated media is HS-7), thumbnail (Pillow,
+  scale/crop, falls back to the original for non-images), config. Media IDs are
+  validated against a strict charset to prevent path traversal. Downloads set a
+  safe `Content-Disposition` (`inline` only for image/audio/video, else
+  `attachment`) to avoid content-sniffing XSS.
+- **Endpoints** (`api/client_media.py`): `POST /_matrix/media/v3/upload`;
+  config, download and thumbnail under both the newer authenticated
+  `/_matrix/client/v1/media/...` paths and the legacy `/_matrix/media/v3/...`
+  paths. **All require an access token** (we don't serve unauthenticated media).
+
+Acceptance criterion met: media round-trips — verified by 7 unit tests
+(upload/download byte-match, auth required, config, thumbnail resize, unknown →
+404, remote → 404, oversize → 413) and a live uvicorn run (upload → download
+byte-identical, 16×16 thumbnail, 401 without a token). ruff + mypy clean (69
+files); 105 unit tests pass.
+
+Honest scope / deferred: remote (federated) media (HS-7), async upload
+(`/media/v1/create` + `PUT upload`), `preview_url`, per-media quotas/retention,
+and the S3 blob backend (filesystem only for now).
+
 ### Next gate
-HS-4 — media repository: authenticated upload/download/thumbnail/config
-(`/_matrix/media` + the newer authenticated `/_matrix/client/v1/media`).
+HS-5 — E2EE server support: device keys upload/query/claim, one-time keys, key
+backup (`/room_keys`), `sendToDevice`, device-list tracking — store/relay only
+(the server never decrypts).

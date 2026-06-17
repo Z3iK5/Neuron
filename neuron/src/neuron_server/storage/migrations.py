@@ -120,6 +120,20 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=4,
+        name="media_repository",
+        statements=(
+            "CREATE TABLE IF NOT EXISTS media ("
+            " media_id TEXT PRIMARY KEY,"
+            " content_type TEXT NOT NULL,"
+            " upload_name TEXT,"
+            " size INTEGER NOT NULL,"
+            " uploader TEXT NOT NULL,"
+            " created_ts INTEGER NOT NULL"
+            ")",
+        ),
+    ),
 )
 
 

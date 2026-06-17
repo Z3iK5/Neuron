@@ -59,6 +59,19 @@ class NeuronServerSettings(BaseSettings):
         description="Allow open account registration via POST /_matrix/client/v3/register.",
     )
 
+    # --- Media repository ---------------------------------------------------
+    # Directory where uploaded media blobs are stored (filesystem backend).
+    media_store_path: str = Field(
+        default="./neuron-media",
+        description="Filesystem directory for stored media blobs.",
+    )
+    # Maximum accepted upload size, in bytes (default 50 MiB).
+    max_upload_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        gt=0,
+        description="Maximum media upload size in bytes.",
+    )
+
     # Where the ASGI server binds when run via `python -m neuron_server`.
     bind_host: str = Field(default="127.0.0.1", description="ASGI bind host.")
     bind_port: int = Field(default=8008, gt=0, description="ASGI bind port.")

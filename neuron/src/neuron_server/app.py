@@ -28,11 +28,14 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from neuron_core import configure_logging, get_logger
 from neuron_server.api.client_auth import router as client_auth_router
+from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
 from neuron_server.auth.service import AuthService
 from neuron_server.config import NeuronServerSettings
 from neuron_server.errors import MatrixError, unrecognized
+from neuron_server.media.service import MediaService
+from neuron_server.media.store import FilesystemMediaStore
 from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
 from neuron_server.storage.database import Database, connect_database
@@ -81,6 +84,12 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
         app.state.rooms = RoomService(db, settings.name, notify=notifier.notify)
         app.state.sync = SyncService(db, notifier)
+        app.state.media = MediaService(
+            FilesystemMediaStore(settings.media_store_path),
+            db,
+            settings.name,
+            settings.max_upload_bytes,
+        )
         try:
             yield
         finally:
@@ -113,6 +122,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_auth_router)
     app.include_router(client_rooms_router)
     app.include_router(client_sync_router)
+    app.include_router(client_media_router)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.
