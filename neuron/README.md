@@ -172,6 +172,34 @@ Events the bot can decrypt are recorded with their cleartext type/content and
 > session store, cross-signing seeds, key file, and the audit store (plaintext)
 > can all expose message content — protect them like the secrets they are.
 
+### Neuron homeserver — `neuron_server` (HS-0, in progress)
+
+Neuron is growing its **own** clean-room Matrix homeserver (see
+[`HOMESERVER-PLAN.md`](../HOMESERVER-PLAN.md)) so the project becomes one
+self-owned, all-in-one product instead of services around someone else's server.
+It is built strictly from the open Matrix spec/MSCs and will replace the
+transitional upstream backend once it reaches parity (phase HS-6).
+
+The **HS-0 foundation** is in place: an ASGI app, an async storage layer (SQLite
+for dev / PostgreSQL for prod) with migrations, and the spec-discovery endpoints.
+Run it with the `server` extra (no Docker needed; defaults to a local SQLite file):
+
+```bash
+pip install -e ".[server]"
+export NEURON_SERVER_NAME=neuron.local
+export NEURON_SERVER_PUBLIC_BASE_URL=http://localhost:8008
+export NEURON_SERVER_DATABASE_URL=sqlite:///./neuron_server.db   # or postgresql://…
+python -m neuron_server                      # serves on 127.0.0.1:8008
+
+curl -s http://localhost:8008/_matrix/client/versions
+curl -s http://localhost:8008/.well-known/matrix/client
+```
+
+> **Honest status.** HS-0 is the foundation only — there is **no** registration,
+> login, rooms, sync, media, or E2EE yet (those are phases HS-1..HS-5). Real
+> clients can't log in until HS-1+. Until then, run the Neuron services against
+> the transitional backend in `deploy/compose/` as described above.
+
 ## Configuration & secrets
 
 All configuration is read from environment variables prefixed with `NEURON_`

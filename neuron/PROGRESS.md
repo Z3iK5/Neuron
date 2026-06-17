@@ -163,3 +163,39 @@ Validate against the dev homeserver (or accept the offline validation), then mov
 ## Phase 7 — neuron-directory (IAM / GroupSync) — ⬜ not started
 ## Phase 8 — neuron-gateway (federation firewall) — ⬜ not started
 ## Phase 9 — neuron-scale (HA blueprint) + hardening — ⬜ not started
+
+---
+
+# Homeserver — `neuron_server` (clean-room, see `HOMESERVER-PLAN.md`)
+
+Neuron's own Matrix homeserver, built strictly from the open Matrix spec/MSCs
+(never from another server's source). Replaces the transitional upstream backend
+once it reaches parity (HS-6). Milestone order: HS-0..HS-6 (non-federating MVP),
+then HS-7 (federation) as a separate epic.
+
+## HS-0 — Foundation & spec harness — ✅ built
+
+New package `neuron_server` (`pip install -e ".[server]"`): a FastAPI/ASGI
+skeleton; an async storage layer (`storage/`) with a backend-agnostic `Database`
+interface — **SQLite** (`aiosqlite`, dev) and **PostgreSQL** (`asyncpg`, prod) —
+and an idempotent migration runner (`schema_migrations`); the spec-discovery
+endpoints `GET /_matrix/client/versions` and `GET /.well-known/matrix/client`,
+a `/health` probe, and a spec-correct `M_UNRECOGNIZED` catch-all for unknown
+`/_matrix` requests. On startup the server records its `server_name` in
+`server_metadata` and refuses to start if a database is later pointed at a
+different name. Run with `python -m neuron_server`.
+
+Acceptance criterion met: a client sees a valid Matrix server (`/versions`,
+`.well-known`) and DB migrations run. Verified live (uvicorn on a temp SQLite DB:
+discovery endpoints serve, migrations applied, identity persisted) plus unit
+tests (`tests/neuron_server/`). ruff + mypy clean; 67 unit tests pass.
+
+Honest scope: HS-0 is foundation only — no auth, rooms, sync, media or E2EE yet
+(those are HS-1..HS-5). `/versions` advertises *target* spec compatibility; real
+clients can't log in until HS-1+. Single DB connection (pooling is HS-8). The
+`asyncpg` path is implemented but its live exercise waits for a Postgres run; the
+SQLite path is fully tested.
+
+### Next gate
+HS-1 — identity & auth (register/login/logout/whoami, access tokens, devices),
+so `neuron_core`'s client can authenticate against `neuron_server`.

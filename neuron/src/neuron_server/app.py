@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The ``neuron_server`` ASGI application (HS-0 foundation).
+
+Wires together:
+
+- a **lifespan** that connects the database, runs migrations, and records/guards
+  the server's identity;
+- the spec-discovery endpoints (``GET /_matrix/client/versions`` and
+  ``GET /.well-known/matrix/client``) and a ``/health`` probe;
+- a catch-all that returns the spec's ``M_UNRECOGNIZED`` error for any other
+  ``/_matrix`` request, so unknown endpoints fail in the documented way.
+
+Run locally::
+
+    NEURON_SERVER_NAME=neuron.local \\
+    NEURON_SERVER_DATABASE_URL=sqlite:///./neuron_server.db \\
+    python -m neuron_server
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, Request
+from starlette.responses import JSONResponse, PlainTextResponse
+
+from neuron_core import configure_logging, get_logger
+from neuron_server.config import NeuronServerSettings
+from neuron_server.errors import MatrixError, unrecognized
+from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
+from neuron_server.storage.database import Database, connect_database
+from neuron_server.storage.metadata import get_metadata, set_metadata
+from neuron_server.storage.migrations import run_migrations
+
+log = get_logger(__name__)
+
+_SERVER_NAME_KEY = "server_name"
+
+
+async def _ensure_server_identity(db: Database, settings: NeuronServerSettings) -> None:
+    """Record the server name on first init; refuse to start if it changed.
+
+    A homeserver's server name is permanent — its Matrix IDs and (later) signing
+    keys depend on it. Binding a database to a different name would corrupt those
+    relationships, so we fail fast instead.
+    """
+    existing = await get_metadata(db, _SERVER_NAME_KEY)
+    if existing is None:
+        await set_metadata(db, _SERVER_NAME_KEY, settings.name)
+        log.info("initialized server identity", extra={"server_name": settings.name})
+    elif existing != settings.name:
+        raise RuntimeError(
+            f"database belongs to server_name={existing!r} but configured "
+            f"NEURON_SERVER_NAME={settings.name!r}; refusing to start"
+        )
+
+
+def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
+    """Build and configure the homeserver application."""
+    settings = settings or NeuronServerSettings()
+    configure_logging(level=settings.log_level, fmt=settings.log_format)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        db = connect_database(settings.database_url)
+        await db.connect()
+        newly = await run_migrations(db)
+        log.info("database ready", extra={"newly_applied_migrations": newly})
+        await _ensure_server_identity(db, settings)
+        app.state.db = db
+        try:
+            yield
+        finally:
+            await db.disconnect()
+
+    app = FastAPI(title="Neuron Server", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app.state.settings = settings
+
+    @app.exception_handler(MatrixError)
+    async def _on_matrix_error(request: Request, exc: MatrixError) -> JSONResponse:
+        return exc.to_response()
+
+    @app.get("/_matrix/client/versions")
+    async def versions() -> dict[str, Any]:
+        return {
+            "versions": list(SUPPORTED_SPEC_VERSIONS),
+            "unstable_features": dict(UNSTABLE_FEATURES),
+        }
+
+    @app.get("/.well-known/matrix/client")
+    async def well_known_client() -> dict[str, Any]:
+        return {"m.homeserver": {"base_url": settings.public_base_url}}
+
+    @app.get("/health")
+    async def health() -> PlainTextResponse:
+        return PlainTextResponse("OK")
+
+    # Anything else under /_matrix is an unknown endpoint: the spec says reply
+    # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.
+    @app.api_route(
+        "/_matrix/{_path:path}",
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    )
+    async def matrix_unrecognized(_path: str) -> JSONResponse:
+        raise unrecognized()
+
+    return app

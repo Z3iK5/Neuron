@@ -55,6 +55,14 @@ e2e = [
     "python-olm>=3.1",           # Python bindings for libolm (Olm/Megolm)
 ]
 
+# Neuron's own homeserver (`neuron_server`). Install with:  pip install -e ".[server]"
+server = [
+    "fastapi>=0.111,<1.0",       # ASGI framework for the Client-Server API
+    "uvicorn[standard]>=0.30",   # ASGI server used to run the homeserver
+    "aiosqlite>=0.20",           # async SQLite driver (development backend)
+    "asyncpg>=0.29",             # async PostgreSQL driver (production backend)
+]
+
 # Everything needed for development + CI (includes the service extras above so
 # the whole codebase is importable and testable).
 # Install with:  pip install -e ".[dev]"
@@ -62,6 +70,7 @@ dev = [
     "neuron[console]",           # pull in all service runtime deps
     "neuron[auditor]",           # boto3 for the S3 sink
     "neuron[e2e]",               # python-olm for E2EE decryption
+    "neuron[server]",            # fastapi/uvicorn + DB drivers for neuron_server
     "pytest>=8.0",
     "pytest-asyncio>=0.23",      # lets us write async test functions
     "ruff>=0.5",                 # linter + formatter
@@ -78,6 +87,7 @@ packages = [
     "src/neuron_supervisor",
     "src/neuron_auditor",
     "src/neuron_crypto",
+    "src/neuron_server",
 ]
 
 # ---------------------------------------------------------------------------
@@ -101,7 +111,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor", "neuron_crypto"]
+packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor", "neuron_crypto", "neuron_server"]
 mypy_path = "src"
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -110,8 +120,8 @@ no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 # These ship little/no type information; treat them as untyped.
-#   boto3   — S3 sink; olm — libolm bindings for E2EE.
-module = ["boto3", "botocore.*", "olm"]
+#   boto3 — S3 sink; olm — libolm bindings for E2EE; aiosqlite/asyncpg — DB drivers.
+module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
