@@ -196,6 +196,36 @@ clients can't log in until HS-1+. Single DB connection (pooling is HS-8). The
 `asyncpg` path is implemented but its live exercise waits for a Postgres run; the
 SQLite path is fully tested.
 
+## HS-1 — Identity & auth — ✅ built
+
+Local accounts on `neuron_server`: registration, login, logout, `whoami`, and
+device management, built from the Client-Server API.
+
+- **Storage** (migration 0002): `users` (PBKDF2-SHA256 password hashes),
+  `devices`, `access_tokens`. Data-access in `storage/accounts.py`.
+- **Domain** (`auth/`): `AuthService` (register/login/logout/lookup-token/device
+  ops), stdlib PBKDF2 password hashing (`passwords.py`), ID/localpart helpers
+  (`ids.py`), and an in-memory UIA session store (`uia.py`).
+- **Endpoints** (`api/client_auth.py`): `POST /register` (UIA `m.login.dummy`
+  flow, `inhibit_login`, `kind=guest` rejected, `registration_enabled` gate),
+  `GET /register/available`, `GET`+`POST /login` (`m.login.password`),
+  `POST /logout` + `/logout/all`, `GET /account/whoami`, and
+  `GET/PUT/DELETE /devices[/{id}]`. A bearer-token dependency resolves tokens and
+  returns `M_MISSING_TOKEN` / `M_UNKNOWN_TOKEN`.
+
+Acceptance criterion met: you can register + log in via our server, **and
+`neuron_core`'s `MatrixClient` authenticates against it** (`whoami` returns the
+right user) — verified by an in-process ASGI test plus a live uvicorn run
+(register → login → whoami → devices → bad-password 403). ruff + mypy clean;
+80 unit tests pass.
+
+Honest scope / simplifications: open registration defaults **on** (gate it in
+prod); device update/delete are token-authenticated only (the spec also gates
+device deletion behind UIA — added with the broader UIA work later); no rate
+limiting, password-policy, 3PID, SSO/MAS, or guest accounts yet; UIA sessions are
+in-memory (don't survive restart).
+
 ### Next gate
-HS-1 — identity & auth (register/login/logout/whoami, access tokens, devices),
-so `neuron_core`'s client can authenticate against `neuron_server`.
+HS-2 — rooms, events & per-room-version auth rules (createRoom, core state
+events, send/read messages, `/state`, `/messages`, redactions, event
+hashing/signing). The substantial one.

@@ -51,6 +51,14 @@ class NeuronServerSettings(BaseSettings):
         description="Async database URL (sqlite:///... or postgresql://...).",
     )
 
+    # Whether open registration (POST /register) is allowed. Convenient for a
+    # fresh MVP server so you can create the first account; gate this in
+    # production (or front it with the admin API once HS-6 lands).
+    registration_enabled: bool = Field(
+        default=True,
+        description="Allow open account registration via POST /_matrix/client/v3/register.",
+    )
+
     # Where the ASGI server binds when run via `python -m neuron_server`.
     bind_host: str = Field(default="127.0.0.1", description="ASGI bind host.")
     bind_port: int = Field(default=8008, gt=0, description="ASGI bind port.")

@@ -41,6 +41,37 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=2,
+        name="auth_accounts",
+        statements=(
+            # Local user accounts. ``name`` is the full @localpart:server_name.
+            "CREATE TABLE IF NOT EXISTS users ("
+            " name TEXT PRIMARY KEY,"
+            " password_hash TEXT,"
+            " admin INTEGER NOT NULL DEFAULT 0,"
+            " deactivated INTEGER NOT NULL DEFAULT 0,"
+            " created_ts INTEGER NOT NULL"
+            ")",
+            # A user's logged-in devices.
+            "CREATE TABLE IF NOT EXISTS devices ("
+            " user_id TEXT NOT NULL,"
+            " device_id TEXT NOT NULL,"
+            " display_name TEXT,"
+            " created_ts INTEGER NOT NULL,"
+            " PRIMARY KEY (user_id, device_id)"
+            ")",
+            # Bearer access tokens, each bound to a (user, device).
+            "CREATE TABLE IF NOT EXISTS access_tokens ("
+            " token TEXT PRIMARY KEY,"
+            " user_id TEXT NOT NULL,"
+            " device_id TEXT NOT NULL,"
+            " created_ts INTEGER NOT NULL"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tokens_user ON access_tokens (user_id)",
+        ),
+    ),
 )
 
 

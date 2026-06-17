@@ -180,9 +180,10 @@ self-owned, all-in-one product instead of services around someone else's server.
 It is built strictly from the open Matrix spec/MSCs and will replace the
 transitional upstream backend once it reaches parity (phase HS-6).
 
-The **HS-0 foundation** is in place: an ASGI app, an async storage layer (SQLite
-for dev / PostgreSQL for prod) with migrations, and the spec-discovery endpoints.
-Run it with the `server` extra (no Docker needed; defaults to a local SQLite file):
+Built so far: **HS-0** (ASGI app, async SQLite/PostgreSQL storage with
+migrations, spec-discovery endpoints) and **HS-1** (identity & auth: registration,
+login, logout, `whoami`, devices). Run it with the `server` extra (no Docker
+needed; defaults to a local SQLite file):
 
 ```bash
 pip install -e ".[server]"
@@ -191,14 +192,18 @@ export NEURON_SERVER_PUBLIC_BASE_URL=http://localhost:8008
 export NEURON_SERVER_DATABASE_URL=sqlite:///./neuron_server.db   # or postgresql://…
 python -m neuron_server                      # serves on 127.0.0.1:8008
 
-curl -s http://localhost:8008/_matrix/client/versions
-curl -s http://localhost:8008/.well-known/matrix/client
+# Register a user (UIA m.login.dummy flow), then check who you are:
+S=$(curl -s -XPOST localhost:8008/_matrix/client/v3/register \
+     -d '{"username":"alice","password":"choose-a-password"}' | jq -r .session)
+curl -s -XPOST localhost:8008/_matrix/client/v3/register \
+  -d "{\"username\":\"alice\",\"password\":\"choose-a-password\",\"auth\":{\"type\":\"m.login.dummy\",\"session\":\"$S\"}}"
 ```
 
-> **Honest status.** HS-0 is the foundation only — there is **no** registration,
-> login, rooms, sync, media, or E2EE yet (those are phases HS-1..HS-5). Real
-> clients can't log in until HS-1+. Until then, run the Neuron services against
-> the transitional backend in `deploy/compose/` as described above.
+> **Honest status.** There are **no rooms, sync, media, or E2EE yet** (those are
+> phases HS-2..HS-5), so a full Matrix client still can't do much against it.
+> Registration defaults to **open** (gate `NEURON_SERVER_REGISTRATION_ENABLED` in
+> production). Until parity, keep running the Neuron services against the
+> transitional backend in `deploy/compose/` as described above.
 
 ## Configuration & secrets
 
