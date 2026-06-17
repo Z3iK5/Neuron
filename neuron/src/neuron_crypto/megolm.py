@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Megolm decryption: an inbound group-session store + a Decryptor.
 
 Requires libolm (installed via the ``e2e`` extra: ``pip install -e ".[e2e]"``).

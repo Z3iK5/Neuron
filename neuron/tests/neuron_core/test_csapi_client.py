@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for neuron_core.csapi_client.MatrixClient (uses a mock transport)."""
 
 from __future__ import annotations

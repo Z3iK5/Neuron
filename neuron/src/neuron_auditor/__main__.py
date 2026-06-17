@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Command-line runner for the audit bot.
 
 Usage (with the environment configured — see neuron/README.md)::

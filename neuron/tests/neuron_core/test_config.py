@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for neuron_core.config — configuration loading from the environment."""
 
 from __future__ import annotations

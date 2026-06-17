@@ -179,5 +179,8 @@ production.
 
 ## License
 
-The Neuron code in this directory is licensed under **AGPL-3.0-or-later**,
-consistent with the surrounding Synapse codebase and the wider Matrix ecosystem.
+Neuron is licensed under the **Apache License, Version 2.0** (see the `LICENSE`
+and `NOTICE` files at the repository root). It is an independent, clean-room
+implementation built only from public documentation and the open Matrix
+specification — it contains no third-party homeserver source and no Element
+proprietary code.

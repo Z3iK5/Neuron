@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The neuron-console FastAPI application.
 
 Phase 1 added read-only browsing. Phase 2 adds **write actions** (create/modify/

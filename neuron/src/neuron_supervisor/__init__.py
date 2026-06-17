@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """neuron_supervisor — a privileged moderation bot for a stock Synapse.
 
 The supervisor keeps a bot account promoted to room-admin in every room (using

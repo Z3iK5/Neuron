@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the admin console (read + write).
 
 These use FastAPI's ``TestClient`` with a fake admin client that records calls,

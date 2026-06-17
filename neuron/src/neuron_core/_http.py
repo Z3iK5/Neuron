@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Internal HTTP helpers shared by the Matrix API clients.
 
 Both the Synapse Admin API client and the Client-Server API client need to turn

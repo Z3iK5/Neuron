@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Configuration for the admin console service.
 
 Extends ``NeuronCoreSettings`` (which provides the Synapse connection + logging

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Durable state for the auditor: the /sync pagination token.
 
 Persisting the ``since`` token means that if the bot restarts, it resumes from

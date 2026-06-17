@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Shared dependencies and helpers for the console's request handlers.
 
 FastAPI "dependencies" are small functions that run before a route handler and

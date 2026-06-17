@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The Supervisor: keeps a bot promoted to room-admin and moderates rooms.
 
 The class is deliberately transport-agnostic and side-effect-light so it can be

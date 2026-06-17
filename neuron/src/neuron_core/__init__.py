@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """neuron_core — shared building blocks for every Neuron service.
 
 This small library exists so that the logic for talking to Synapse, loading

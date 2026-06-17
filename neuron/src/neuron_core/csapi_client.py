@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """A minimal **Matrix Client-Server API** client used by Neuron bots.
 
 The Admin API (``SynapseAdminClient``) lets a server admin manage the server, but

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Configuration loading for Neuron services.
 
 We use ``pydantic-settings`` so configuration can come from **environment

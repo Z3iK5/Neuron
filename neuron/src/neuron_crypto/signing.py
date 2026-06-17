@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Canonical JSON for Matrix signatures.
 
 Matrix signs the *canonical* JSON form of an object (keys sorted, no insignificant

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """neuron_console — a web admin console over the open Synapse Admin API.
 
 Phase 1 is **read-only**: it lets an operator log in and browse users, rooms,

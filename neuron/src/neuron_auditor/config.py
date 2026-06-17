@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Configuration for the audit bot."""
 
 from __future__ import annotations

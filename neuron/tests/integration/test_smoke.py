@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Integration smoke test against a LIVE Synapse.
 
 Unlike the unit tests, this talks to a real homeserver. It is automatically

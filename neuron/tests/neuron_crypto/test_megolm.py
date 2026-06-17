@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Offline tests for Megolm decryption (real libolm round-trips).
 
 These create a real outbound Megolm session (the "sender"), encrypt an event,

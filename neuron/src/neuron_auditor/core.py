@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The Auditor: a /sync loop that records room events to a sink.
 
 Flow of one poll:

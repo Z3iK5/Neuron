@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for neuron_core.admin_client.
 
 These tests do NOT need a running Synapse: we use httpx's ``MockTransport`` to

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """A small, typed client for the open **Synapse Admin API**.
 
 The Synapse Admin API is documented in this repository under
