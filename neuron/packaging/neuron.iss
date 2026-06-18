@@ -6,7 +6,7 @@
 ; and optional desktop shortcuts and an uninstaller. Build from the `neuron\`
 ; directory (so SourceDir=.. resolves to it):
 ;     ISCC.exe packaging\neuron.iss
-; Output: Neuron-Setup-x64.exe. Code signing is a follow-up (see DESKTOP-PLAN.md D4).
+; Output: Neuron-Setup-x64.exe. Code signing is a follow-up (see docs/desktop.md).
 
 #define MyAppName "Neuron"
 #define MyAppVersion "0.0.1"

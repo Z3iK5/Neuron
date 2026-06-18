@@ -1,8 +1,8 @@
 # Neuron — Python project definition.
 #
 # This is the project file for ALL Neuron services and shared libraries: the
-# operator tooling (admin console, bots, crypto) and, in progress, Neuron's own
-# homeserver (`neuron_server`). See HOMESERVER-PLAN.md at the repository root.
+# Matrix homeserver (`neuron_server`) and the operator tooling (admin console,
+# bots, crypto, desktop app).
 #
 # Layout uses the conventional "src/" pattern: importable packages live under
 # src/ (e.g. src/neuron_core). Tests live under tests/.
@@ -14,7 +14,7 @@ build-backend = "hatchling.build"
 [project]
 name = "neuron"
 version = "0.0.1"
-description = "Neuron — a clean-room, all-in-one Matrix platform (operator tooling + homeserver)"
+description = "Neuron — an all-in-one, self-hosted Matrix platform (homeserver + operator tooling)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -32,7 +32,7 @@ dependencies = [
 
 # Console commands installed on `pip install`/`pipx install`. `neuron-server`
 # runs the homeserver (needs the `server` extra); this is what makes Neuron an
-# installable program on macOS/Windows/Linux (see DESKTOP-PLAN.md).
+# installable program on macOS/Windows/Linux (see docs/desktop.md).
 [project.scripts]
 neuron-server = "neuron_server.__main__:main"
 neuron-desktop = "neuron_desktop.cli:main"

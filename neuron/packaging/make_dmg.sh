@@ -9,7 +9,7 @@
 # Usage:
 #     bash packaging/make_dmg.sh [output.dmg]   # default: Neuron-macos.dmg
 #
-# Signing / notarization are follow-ups (see DESKTOP-PLAN.md D4); an unsigned .dmg
+# Signing / notarization are follow-ups (see docs/desktop.md); an unsigned .dmg
 # installs fine but Gatekeeper will warn on first launch.
 set -euo pipefail
 

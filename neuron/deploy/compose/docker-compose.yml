@@ -1,16 +1,14 @@
-# Neuron — local development stack.
+# Neuron — optional local interop stack.
 #
-# Brings up a TRANSITIONAL backend homeserver with PostgreSQL and Redis so Neuron
-# services have something real to talk to during development. This is a THROWAWAY
-# dev environment — not a production deployment.
+# Brings up a standard Matrix homeserver image with PostgreSQL and Redis so Neuron's
+# console and bots can be tested against a separate server. This is a THROWAWAY dev
+# environment — not a production deployment. Neuron's own homeserver
+# (`neuron-server`) is the primary target and needs no Docker.
 #
-# NOTE ON THE BACKEND: until Neuron's own homeserver (`neuron_server`) reaches
-# parity, the `homeserver` service runs a STOCK, unmodified upstream image as an
-# opaque black box. Neuron contains no homeserver source and is not derived from
-# it (see the repository NOTICE and HOMESERVER-PLAN.md). The image-specific
-# settings below (image name, `SYNAPSE_*` env vars, `synapse.app.homeserver`
-# entrypoint) are the upstream image's own contract and will go away once we cut
-# over to `neuron_server`.
+# NOTE: the `homeserver` service runs a standard Matrix homeserver image; the
+# image-specific settings below (image name, `SYNAPSE_*` env vars,
+# `synapse.app.homeserver` entrypoint) are that image's own contract. Neuron talks
+# to it only over the public Matrix and Admin APIs.
 #
 # Secrets handling: nothing secret is committed. All secrets come from a
 # git-ignored `.env` file (copy `.env.example` to `.env`). The backend's signing
@@ -46,10 +44,10 @@ services:
       timeout: 5s
       retries: 10
 
-  # Transitional backend homeserver. Runs a stock, unmodified upstream image as
-  # an opaque black box until `neuron_server` reaches parity and replaces it.
-  # The image name, `SYNAPSE_*` env vars and `synapse.app.homeserver` entrypoint
-  # are the upstream image's own contract — not Neuron code.
+  # A standard Matrix homeserver image, for optional cross-server interop testing
+  # of Neuron's console and bots. The image name, `SYNAPSE_*` env vars and
+  # `synapse.app.homeserver` entrypoint are that image's own contract — not Neuron
+  # code; Neuron talks to it only over the public Matrix and Admin APIs.
   homeserver:
     image: ghcr.io/element-hq/synapse:latest   # pin to a specific tag for reproducibility
     depends_on:

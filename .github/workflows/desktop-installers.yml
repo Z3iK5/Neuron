@@ -4,7 +4,7 @@
 # This must run on each OS — PyInstaller cannot cross-compile — so GitHub's macOS,
 # Windows and Ubuntu runners each build their own bundle, then wrap it into a native
 # installer: macOS `.dmg`, Linux `.AppImage`, Windows `.exe` (Inno Setup). Code
-# signing / notarization are follow-ups (see DESKTOP-PLAN.md D4).
+# signing / notarization are follow-ups (see docs/desktop.md).
 
 name: Desktop installers
 

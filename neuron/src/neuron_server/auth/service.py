@@ -5,7 +5,7 @@ Orchestrates registration, login, logout, token lookup and device management on
 top of the storage layer. It raises :class:`MatrixError` directly so the HTTP
 layer can return spec-correct error bodies without an extra translation step.
 
-Clean-room: behaviour follows the Matrix Client-Server API (registration with the
+Behaviour follows the Matrix Client-Server API (registration with the
 ``m.login.dummy`` UIA stage; ``m.login.password`` login; ``account/whoami``;
 device endpoints).
 """

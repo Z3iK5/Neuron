@@ -6,10 +6,9 @@ server is compatible with, so clients know which features and endpoints they may
 use (Matrix CS API: "GET /_matrix/client/versions").
 
 These values declare the spec revisions ``neuron_server`` *targets* for
-compatibility. Endpoint coverage is being implemented incrementally per phase
-(HS-0..HS-6, see ``HOMESERVER-PLAN.md``): advertising a version here reflects the
-intended client-facing contract, not a guarantee that every endpoint introduced
-in that revision is already live. The list grows as phases land.
+compatibility. Endpoint coverage is implemented incrementally: advertising a
+version here reflects the intended client-facing contract, not a guarantee that
+every endpoint introduced in that revision is already live.
 """
 
 from __future__ import annotations
