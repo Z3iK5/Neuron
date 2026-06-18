@@ -40,7 +40,11 @@ vendors no homeserver source and is not derived from any other homeserver.
 cd neuron
 pip install -e ".[server]"
 neuron-server          # serves on 127.0.0.1:8008 → open http://localhost:8008
+neuron-server doctor   # preflight: config, database, keys, reachability
 ```
+
+New here? Open `http://localhost:8008` and hit **Get started** to create an account
+right in the browser, or share an invite link / QR from the admin console.
 
 Prefer an app? `pipx install "neuron[desktop]" && neuron-desktop` runs a first-run
 wizard, then starts the server with all state in a per-user data directory.

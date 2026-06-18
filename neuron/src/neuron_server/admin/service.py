@@ -177,6 +177,14 @@ class AdminService:
         await admin_store.delete_registration_token(self._db, token)
         return {}
 
+    async def registration_token_valid(self, token: str) -> bool:
+        """True if ``token`` can currently be redeemed (unexpired, uses left)."""
+        return await admin_store.registration_token_valid(self._db, token, _now_ms())
+
+    async def consume_registration_token(self, token: str) -> bool:
+        """Claim one use of ``token``; False if it is invalid, expired or spent."""
+        return await admin_store.consume_registration_token(self._db, token, _now_ms())
+
     # --- stubs (spec-shaped; backing work deferred) -----------------------
 
     async def list_event_reports(self) -> dict[str, Any]:

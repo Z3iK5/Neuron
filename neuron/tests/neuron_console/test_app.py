@@ -292,6 +292,39 @@ def test_create_registration_token() -> None:
         assert call is not None and call[1]["uses_allowed"] == 5
 
 
+def test_registration_tokens_show_invite_link() -> None:
+    with make_client() as (client, _):
+        _login(client)
+        page = client.get("/registration-tokens")
+        assert page.status_code == 200
+        # The shareable onboarding link (carrying the token) is rendered, plus QR.
+        assert "/get-started?token=EXISTING" in page.text
+        assert "/registration-tokens/EXISTING/qr.svg" in page.text
+
+
+def test_invite_link_uses_public_url_override() -> None:
+    with make_client(homeserver_public_url="https://chat.example.org") as (client, _):
+        _login(client)
+        page = client.get("/registration-tokens")
+        assert "https://chat.example.org/get-started?token=EXISTING" in page.text
+
+
+def test_invite_qr_is_served_as_svg() -> None:
+    with make_client() as (client, _):
+        _login(client)
+        qr = client.get("/registration-tokens/EXISTING/qr.svg")
+        assert qr.status_code == 200
+        assert qr.headers["content-type"].startswith("image/svg+xml")
+        assert qr.text.lstrip().startswith("<svg")
+
+
+def test_invite_qr_requires_login() -> None:
+    with make_client() as (client, _):
+        resp = client.get("/registration-tokens/EXISTING/qr.svg", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/login"
+
+
 def test_room_block_and_delete_flow() -> None:
     with make_client() as (client, fake):
         _login(client)

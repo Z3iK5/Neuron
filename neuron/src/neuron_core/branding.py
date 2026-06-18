@@ -9,6 +9,7 @@ so the brand stays consistent across surfaces.
 
 from __future__ import annotations
 
+import html
 import urllib.parse
 
 # --- palette ---------------------------------------------------------------
@@ -100,49 +101,167 @@ def favicon_data_uri(color: str = NAVY) -> str:
 
 def landing_page_html(server_name: str) -> str:
     """A branded landing page for a homeserver, served at ``GET /``."""
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{NAME} · {server_name}</title>
-<meta name="description" content="{DESCRIPTION}">
-<link rel="icon" href="{favicon_data_uri()}">
-{FONTS_LINK}
-<style>
-  *{{box-sizing:border-box}}
-  html,body{{margin:0;height:100%}}
-  body{{background:{DEEP};color:{WHITE};font-family:{SANS};font-weight:300;
-    display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px}}
-  @keyframes neuronPulse{{
-    0%,100%{{transform:scale(1);opacity:.94}}50%{{transform:scale(1.05);opacity:1}}}}
-  .wrap{{max-width:560px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:26px}}
-  .mark{{width:104px;height:104px;color:{WHITE};animation:neuronPulse 2.6s ease-in-out infinite}}
-  .name{{font-family:{SERIF};font-weight:600;letter-spacing:.1em;font-size:46px;line-height:1;margin:0}}
-  .tag{{letter-spacing:.34em;text-transform:lowercase;color:{ON_DARK};font-size:14px;margin-top:14px}}
-  .desc{{color:#B7C6D6;font-size:17px;line-height:1.6;max-width:30em;margin:0}}
-  .host{{margin-top:6px;font-size:14px;color:{ON_DARK}}}
-  .host code{{color:{WHITE};background:rgba(143,166,188,.14);padding:.15em .5em;border-radius:6px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}
-  .links{{display:flex;gap:22px;margin-top:6px;font-size:13px;letter-spacing:.04em}}
-  .links a{{color:{ACCENT};text-decoration:none}}
-  .links a:hover{{text-decoration:underline}}
-</style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="mark">{mark_svg(WHITE)}</div>
-    <div>
-      <h1 class="name">{NAME}</h1>
-      <div class="tag">{TAGLINE}</div>
-    </div>
-    <p class="desc">{DESCRIPTION}</p>
-    <div class="host">This is the Matrix homeserver for <code>{server_name}</code>.</div>
-    <div class="links">
-      <a href="/_matrix/client/versions">Client API</a>
-      <a href="/_matrix/key/v2/server">Server keys</a>
-      <a href="https://github.com/Z3iK5/Neuron">Source</a>
-    </div>
+    inner = f"""<div class="hero">
+  <div class="mark">{mark_svg(WHITE)}</div>
+  <div><h1 class="name">{NAME}</h1><div class="tag">{TAGLINE}</div></div>
+  <p class="desc">{DESCRIPTION}</p>
+  <a class="cta" href="/get-started">Get started</a>
+  <div class="host">Matrix homeserver for <code>{html.escape(server_name)}</code></div>
+  <div class="links">
+    <a href="/_matrix/client/versions">Client API</a>
+    <a href="/_matrix/key/v2/server">Server keys</a>
+    <a href="https://github.com/Z3iK5/Neuron">Source</a>
   </div>
-</body>
-</html>"""
+</div>"""
+    return _shell(f"{NAME} · {server_name}", inner)
+
+
+def get_started_html(
+    server_name: str,
+    *,
+    can_register: bool,
+    token: str | None = None,
+    error: str | None = None,
+    username: str = "",
+) -> str:
+    """The 'Get started' page: create an account (if allowed) + connect-a-client guide.
+
+    ``can_register`` is the computed gate — true when open registration is on *or* a
+    valid invite ``token`` was supplied. A supplied ``token`` is carried through the
+    form (hidden field) so the submission stays authorised.
+    """
+    if can_register:
+        err = f'<div class="error">{html.escape(error)}</div>' if error else ""
+        hidden = (
+            f'<input type="hidden" name="token" value="{html.escape(token)}">'
+            if token
+            else ""
+        )
+        invited = (
+            '<p class="note" style="margin-bottom:1rem">You were invited to this '
+            "server. Create your account below.</p>"
+            if token
+            else ""
+        )
+        body = f"""<h2>Create your account</h2>{err}{invited}
+  <form method="post" action="/get-started">{hidden}
+    <label for="u">Username</label>
+    <input id="u" name="username" value="{html.escape(username)}" placeholder="alice"
+      autocapitalize="none" autocorrect="off" autofocus required>
+    <label for="p">Password</label>
+    <input id="p" name="password" type="password" placeholder="choose a password" required>
+    <button type="submit">Create account</button>
+  </form>
+  <p class="note" style="margin-top:.85rem">Your Matrix ID will be
+    <code>@username:{html.escape(server_name)}</code>.</p>"""
+    else:
+        body = (
+            '<h2>Accounts</h2><p class="note">Open registration is disabled on this '
+            "server. Ask the administrator for an invite link, or to create an account "
+            "for you, then connect a chat app below.</p>"
+        )
+    inner = (
+        f'<div class="card">{_card_head()}<div class="card-body">'
+        f"{body}{_connect_html(server_name)}</div></div>"
+    )
+    return _shell(f"Get started · {NAME}", inner)
+
+
+def welcome_html(server_name: str, user_id: str) -> str:
+    """The success page after an account is created in the browser."""
+    body = f"""<div class="success">&#10003; Account created</div>
+  <p class="note">This is your Matrix ID — sign in with it and your password:</p>
+  <div class="idbox">{html.escape(user_id)}</div>
+  {_connect_html(server_name)}
+  <div class="foot"><a href="/get-started">Create another account</a></div>"""
+    inner = f'<div class="card">{_card_head()}<div class="card-body">{body}</div></div>'
+    return _shell(f"Welcome · {NAME}", inner)
+
+
+def _card_head() -> str:
+    return (
+        f'<div class="card-head"><div class="mark">{mark_svg(WHITE)}</div>'
+        f'<div><div class="name">{NAME}</div><div class="tag">{TAGLINE}</div></div></div>'
+    )
+
+
+def _connect_html(server_name: str) -> str:
+    safe = html.escape(server_name)
+    return f"""<div class="connect">
+  <h2>Connect a chat app</h2>
+  <p class="note">Your account works in any Matrix client. When it asks for a homeserver, enter:</p>
+  <div class="idbox">{safe}</div>
+  <ol>
+    <li>Open a Matrix app — <a href="https://element.io/download">Element</a> or FluffyChat.</li>
+    <li>Choose <strong>Sign in</strong> &rarr; <strong>Edit / Other homeserver</strong>
+      and enter <code>{safe}</code>.</li>
+    <li>Sign in with your Matrix ID and password.</li>
+  </ol>
+</div>"""
+
+
+def _shell(title: str, inner: str) -> str:
+    return (
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{html.escape(title)}</title>"
+        f'<meta name="description" content="{DESCRIPTION}">'
+        f'<link rel="icon" href="{favicon_data_uri()}">{FONTS_LINK}'
+        f"<style>{_PAGE_CSS}</style></head><body>{inner}</body></html>"
+    )
+
+
+_PAGE_CSS = """
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:#0E2740;color:#fff;font-family:'Jost',system-ui,-apple-system,sans-serif;
+  font-weight:300;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px}
+a{color:#7FA8CC}
+@keyframes neuronPulse{0%,100%{transform:scale(1);opacity:.94}50%{transform:scale(1.05);opacity:1}}
+.hero{max-width:560px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:24px}
+.hero .mark{width:104px;height:104px;color:#fff;animation:neuronPulse 2.6s ease-in-out infinite}
+.name{font-family:'Cinzel',Georgia,serif;font-weight:600;letter-spacing:.1em;font-size:46px;
+  line-height:1;margin:0}
+.tag{letter-spacing:.34em;text-transform:lowercase;color:#8FA6BC;font-size:14px;margin-top:14px}
+.desc{color:#B7C6D6;font-size:17px;line-height:1.6;max-width:30em;margin:0}
+.host{font-size:14px;color:#8FA6BC}
+.host code{color:#fff;background:rgba(143,166,188,.16);padding:.15em .5em;border-radius:6px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}
+.links{display:flex;gap:22px;font-size:13px;letter-spacing:.04em}
+.links a{text-decoration:none}
+.cta{display:inline-block;background:#7FA8CC;color:#0E2740;font-weight:500;text-decoration:none;
+  padding:.7rem 1.6rem;border-radius:10px;letter-spacing:.04em}
+.cta:hover{background:#9FB9D6}
+.card{background:#fff;color:#16324F;width:100%;max-width:460px;border-radius:18px;overflow:hidden;
+  box-shadow:0 18px 50px rgba(0,0,0,.32)}
+.card-head{background:#0E2740;color:#fff;padding:2rem 2rem 1.6rem;text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:.75rem}
+.card-head .mark{width:52px;height:52px;color:#fff}
+.card-head .name{font-family:'Cinzel',Georgia,serif;font-weight:600;letter-spacing:.12em;
+  font-size:1.7rem}
+.card-head .tag{margin-top:0}
+.card-body{padding:1.6rem 1.9rem 2rem}
+.card-body h2{font-family:'Cinzel',Georgia,serif;font-weight:600;color:#1C3D5F;font-size:1.15rem;
+  margin:0 0 1rem}
+label{display:block;font-weight:500;margin:0 0 .3rem;font-size:.92rem;color:#16324F}
+input{width:100%;padding:.6rem .75rem;border:1px solid #DEDCD6;border-radius:10px;font-size:1rem;
+  margin-bottom:1rem;font-family:inherit;color:#16324F}
+button{width:100%;background:#1C3D5F;color:#fff;border:none;border-radius:10px;padding:.72rem;
+  font-size:1rem;font-weight:500;letter-spacing:.03em;cursor:pointer}
+button:hover{background:#0E2740}
+.error{background:#fdecef;border:1px solid #f5c2cb;color:#b00020;padding:.6rem .8rem;
+  border-radius:10px;margin-bottom:1rem;font-size:.92rem}
+.note{color:#5A6B7C;font-size:.92rem;line-height:1.55;margin:0}
+.card-body code{color:#1C3D5F;background:#ECEAE4;padding:.12em .45em;border-radius:5px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}
+.connect{border-top:1px solid #EDEBE5;margin-top:1.4rem;padding-top:1.3rem}
+.connect ol{margin:.5rem 0 0;padding-left:1.2rem;color:#16324F;line-height:1.7;font-size:.94rem}
+.connect a{color:#1C3D5F}
+.success{display:flex;align-items:center;gap:.5rem;color:#1a6b3a;font-weight:600;
+  font-size:1.05rem;margin-bottom:.8rem}
+.idbox{background:#ECEAE4;border:1px solid #DEDCD6;border-radius:10px;padding:.7rem .8rem;
+  margin:.4rem 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#1C3D5F;
+  word-break:break-all}
+.foot{margin-top:1.4rem;font-size:.85rem;color:#7C8896;text-align:center}
+.foot a{color:#5A6B7C}
+"""

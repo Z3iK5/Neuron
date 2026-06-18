@@ -179,6 +179,68 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     async def favicon() -> Response:
         return Response(branding.mark_svg(branding.NAVY), media_type="image/svg+xml")
 
+    async def _can_register(auth: AuthService, admin: AdminService, token: str | None) -> bool:
+        """Onboarding is open when registration is on, or a valid invite token is held."""
+        if auth.registration_enabled:
+            return True
+        return bool(token) and await admin.registration_token_valid(token or "")
+
+    @app.get("/get-started", include_in_schema=False)
+    async def get_started(request: Request) -> HTMLResponse:
+        auth: AuthService = app.state.auth
+        admin: AdminService = app.state.admin
+        token = request.query_params.get("token") or None
+        can = await _can_register(auth, admin, token)
+        return HTMLResponse(
+            branding.get_started_html(settings.name, can_register=can, token=token)
+        )
+
+    @app.post("/get-started", include_in_schema=False)
+    async def get_started_submit(request: Request) -> HTMLResponse:
+        auth: AuthService = app.state.auth
+        admin: AdminService = app.state.admin
+        form = await request.form()
+        token = str(form.get("token") or "").strip() or None
+        username = str(form.get("username") or "").strip()
+        password = str(form.get("password") or "")
+
+        # Re-check the gate at submit time (an open server, or a token still valid).
+        if not await _can_register(auth, admin, token):
+            return HTMLResponse(
+                branding.get_started_html(settings.name, can_register=False),
+                status_code=403,
+            )
+
+        try:
+            result = await auth.register(
+                localpart=username or None,
+                password=password or None,
+                device_id=None,
+                initial_device_display_name=None,
+                inhibit_login=True,
+            )
+        except MatrixError as exc:
+            # The account was not created, so the invite token is untouched — the
+            # user can fix the error (e.g. a taken username) and submit again.
+            return HTMLResponse(
+                branding.get_started_html(
+                    settings.name,
+                    can_register=True,
+                    token=token,
+                    error=exc.error,
+                    username=username,
+                ),
+                status_code=exc.status_code,
+            )
+
+        # Only now claim a use of the invite (when the server is closed, the token is
+        # what authorised this account). On an open server the token is just a link.
+        if token and not auth.registration_enabled:
+            await admin.consume_registration_token(token)
+
+        user_id = result["user_id"] if isinstance(result, dict) else result.user_id
+        return HTMLResponse(branding.welcome_html(settings.name, user_id))
+
     # Client-Server API routers (registered before the catch-all so their
     # specific routes match first).
     app.include_router(client_auth_router)

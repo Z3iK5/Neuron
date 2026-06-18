@@ -38,6 +38,18 @@ class ConsoleSettings(NeuronCoreSettings):
     # Cookie name for the session.
     session_cookie_name: str = "neuron_console_session"
 
+    # The homeserver's public base URL — the address end users reach (used to build
+    # shareable invite links). Often the same as the URL the console uses to reach
+    # the homeserver, but split out for deployments where they differ (e.g. the
+    # console talks to the homeserver over a private network). Falls back to
+    # ``homeserver_url`` when unset.
+    homeserver_public_url: str = ""
+
+    def public_base_url(self) -> str:
+        """Public base URL for end users, used to build invite links (no trailing /)."""
+        base = self.homeserver_public_url or self.homeserver_url
+        return base.rstrip("/")
+
     # Optional supervision-bot wiring (Phase 3). If a bot token is set, the
     # console's Supervision tab can kick/ban as the bot; promotion only needs the
     # bot's user ID + the server-admin token.

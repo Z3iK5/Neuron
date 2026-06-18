@@ -1,7 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Registration tokens — Neuron Console{% endblock %}
+{% block title %}Registration tokens — NEURON Console{% endblock %}
 {% block content %}
-<h1>Registration tokens</h1>
+<h1>Registration tokens &amp; invite links</h1>
+<p class="muted">Share an invite link (or its QR code) to let someone create an
+account on <code>{{ invite_base }}</code> — even when open registration is off.
+Each link carries a token; set <em>uses allowed</em> to limit how many accounts it
+can create.</p>
 
 <div class="card narrow">
   <h2>Create a token</h2>
@@ -13,30 +17,48 @@
   </form>
 </div>
 
-<div class="card">
-  <table>
-    <thead>
-      <tr><th>Token</th><th>Uses</th><th>Pending</th><th>Completed</th><th></th></tr>
-    </thead>
-    <tbody>
-      {% for t in tokens %}
-      <tr>
-        <td><code>{{ t.get('token') }}</code></td>
-        <td>{{ t.get('uses_allowed') if t.get('uses_allowed') is not none else '∞' }}</td>
-        <td>{{ t.get('pending', 0) }}</td>
-        <td>{{ t.get('completed', 0) }}</td>
-        <td>
-          <form method="post" action="/registration-tokens/{{ t.get('token') }}/delete"
-                onsubmit="return confirm('Delete this token?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="danger small">Delete</button>
-          </form>
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5" class="muted">No registration tokens.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+{% for t in tokens %}
+<div class="card invite">
+  <div class="invite-main">
+    <div class="invite-meta">
+      <code>{{ t.get('token') }}</code>
+      <span class="muted">
+        uses {{ t.get('uses_allowed') if t.get('uses_allowed') is not none else '∞' }}
+        · pending {{ t.get('pending', 0) }}
+        · completed {{ t.get('completed', 0) }}
+      </span>
+    </div>
+    <label for="link-{{ loop.index }}">Invite link</label>
+    <div class="invite-link">
+      <input id="link-{{ loop.index }}" type="text" readonly value="{{ t.get('invite_url') }}"
+             onfocus="this.select()">
+      <button type="button" class="small copy" data-copy="{{ t.get('invite_url') }}">Copy</button>
+    </div>
+    <form method="post" action="/registration-tokens/{{ t.get('token') }}/delete"
+          onsubmit="return confirm('Delete this token? Its invite link will stop working.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="danger small">Delete</button>
+    </form>
+  </div>
+  <a class="invite-qr" href="/registration-tokens/{{ t.get('token') }}/qr.svg" target="_blank"
+     title="Open QR code">
+    <img src="/registration-tokens/{{ t.get('token') }}/qr.svg" alt="QR code for invite link"
+         width="120" height="120">
+  </a>
 </div>
+{% else %}
+<div class="card"><p class="muted">No registration tokens yet. Create one above to
+get a shareable invite link.</p></div>
+{% endfor %}
+
+<script>
+document.querySelectorAll('button.copy').forEach(function (b) {
+  b.addEventListener('click', function () {
+    navigator.clipboard.writeText(b.dataset.copy).then(function () {
+      var was = b.textContent; b.textContent = 'Copied'; b.disabled = true;
+      setTimeout(function () { b.textContent = was; b.disabled = false; }, 1200);
+    });
+  });
+});
+</script>
 {% endblock %}
