@@ -618,5 +618,34 @@ server, no forks), so **state resolution v2** is still required for conflict
 handling and for applying transaction-ingested events to room state; also pending
 are leave/invite over federation, backfill, and EDUs.
 
-Next steps in HS-7: **state resolution v2** (the algorithmic core) and durable
-state application; then backfill, federated leave/invite, and EDUs.
+### Step 6c — State resolution v2 (library) — ✅ built (provisional)
+
+The algorithmic core of federation: resolving conflicting room state from forked
+DAGs into a single state map.
+
+- **`rooms/state_resolution.py`**: the room-v2+ algorithm — `separate`
+  (unconflicted vs conflicted), `auth_difference`, `is_power_event`, the
+  **reverse-topological power sort** (ties by sender power level / `origin_server_ts`
+  / event id), **mainline ordering** off the resolved power-levels event, and
+  **iterative auth checks** that keep only events the auth rules accept. Pure
+  (operates on an in-memory event map), so it is storage-independent and directly
+  testable.
+
+Tested on scenarios whose outcome is unambiguous: unconflicted passthrough,
+`separate`/`auth_difference`/`is_power_event` directly, a timestamp-tie-break
+between two authorized events, **auth rules overriding ordering** (an unauthorized
+later event loses to an authorized earlier one), and an **unauthorized power-level
+change being rejected**. 7 tests; ruff + mypy clean (98 files); 163 tests pass
+overall.
+
+> ⚠️ **Honest status — provisional.** This is **spec-guided and scenario-tested**,
+> but **not yet validated against the official Complement / sytest state-resolution
+> vectors**, so byte-exact conformance in adversarial tie-break cases is not
+> guaranteed. It is intentionally **not yet wired into the live path** (our
+> single-resident joins never fork, so there's nothing to resolve yet); it is the
+> tested foundation that the conflict-handling and event-application paths will use
+> once it is vector-verified.
+
+Next steps in HS-7: validate state res v2 against conformance vectors, then wire it
+into **durable state application** (applying transaction-ingested events and
+resolving forks on join); then backfill, federated leave/invite, and EDUs.
