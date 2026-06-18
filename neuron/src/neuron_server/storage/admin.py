@@ -135,3 +135,31 @@ async def create_registration_token(
 
 async def delete_registration_token(db: Database, token: str) -> None:
     await db.execute("DELETE FROM registration_tokens WHERE token = ?", (token,))
+
+
+def _token_usable(row: dict[str, Any], now_ms: int) -> bool:
+    """True if ``row`` is unexpired and still has at least one use remaining."""
+    expiry = row["expiry_time"]
+    if expiry is not None and now_ms > expiry:
+        return False
+    allowed = row["uses_allowed"]
+    return allowed is None or int(row["completed"]) < allowed
+
+
+async def registration_token_valid(db: Database, token: str, now_ms: int) -> bool:
+    """True if ``token`` exists, is unexpired and has a use left (no consumption)."""
+    row = await get_registration_token(db, token)
+    return row is not None and _token_usable(row, now_ms)
+
+
+async def consume_registration_token(db: Database, token: str, now_ms: int) -> bool:
+    """Claim one use of ``token`` atomically. Returns False if invalid/expired/spent."""
+    async with db.transaction():
+        row = await get_registration_token(db, token)
+        if row is None or not _token_usable(row, now_ms):
+            return False
+        await db.execute(
+            "UPDATE registration_tokens SET completed = completed + 1 WHERE token = ?",
+            (token,),
+        )
+        return True

@@ -879,5 +879,35 @@ account can then log in via `/_matrix/client/v3/login`; duplicate username shows
 the error; `POST` is forbidden when registration is closed. ruff + mypy clean
 (118 files); full suite 202 passed, 3 integration skips.
 
-Next QoL steps: (2) shareable registration invite links / QR from the admin
-console; (3) a `neuron-server doctor` preflight/health command.
+---
+
+## QoL — Invite links + QR (step 2 of 3) — ✅ built
+
+Lets an operator hand out a self-service signup link — even on a server with open
+registration **off** — by turning the (previously inert) registration-token store
+into working invite links.
+
+- **Homeserver: token-gated onboarding.** `GET`/`POST /get-started` now honour an
+  optional `?token=…`. The onboarding form is shown when open registration is on
+  *or* a valid (existing, unexpired, not-spent) invite token is supplied; the token
+  is carried through the form. On a closed server a valid token authorises exactly
+  the account it creates: a use is claimed **only after** the account is created
+  (so a typo / taken-username never burns the invite), and an exhausted/expired/
+  unknown token is refused with `403`. New storage primitives
+  (`registration_token_valid`, `consume_registration_token` — atomic SELECT-then-
+  increment in a transaction) and matching `AdminService` methods.
+- **Console: shareable links + QR.** The *Registration tokens* page is now
+  *Registration tokens & invite links*: each token shows its full invite URL
+  (read-only field + one-click **Copy**) and a scannable QR (`segno`, pure-Python,
+  rendered in NEURON navy and served from `/registration-tokens/{token}/qr.svg`,
+  login-gated). Links are built from a new `NEURON_HOMESERVER_PUBLIC_URL` setting
+  (falls back to `homeserver_url`) so deployments where the console reaches the
+  homeserver privately still emit the correct public address.
+
+Tests: homeserver — invite opens the form on a closed server and creates a
+loginable account, single-use exhaustion, unknown token refused, a failed
+registration does **not** consume the token; console — invite link rendered, public
+URL override, QR served as `image/svg+xml`, QR route requires login. ruff + mypy
+clean (119 files); full suite 210 passed, 3 integration skips.
+
+Next QoL step: (3) a `neuron-server doctor` preflight/health command.

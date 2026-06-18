@@ -18,6 +18,7 @@ Run locally::
 
 from __future__ import annotations
 
+import urllib.parse
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -41,6 +42,7 @@ from neuron_console.deps import (
     get_supervisor,
     require_login,
 )
+from neuron_console.qr import qr_svg
 from neuron_console.security import get_csrf_token
 from neuron_core import AdminClient, MatrixClient, branding, configure_logging, get_logger
 from neuron_core.errors import AdminApiError
@@ -128,6 +130,12 @@ def _render(
 def _flash(request: Request, message: str) -> None:
     """Store a one-shot message shown on the next rendered page."""
     request.session["flash"] = message
+
+
+def _invite_url(settings: ConsoleSettings, token: str) -> str:
+    """The shareable onboarding link that carries a registration ``token``."""
+    quoted = urllib.parse.quote(token, safe="")
+    return f"{settings.public_base_url()}/get-started?token={quoted}"
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
@@ -525,9 +533,25 @@ def _register_routes(app: FastAPI) -> None:
         request: Request,
         _: None = Depends(require_login),
         admin: AdminClient = Depends(get_admin),
+        settings: ConsoleSettings = Depends(get_settings),
     ) -> Response:
         tokens = await admin.list_registration_tokens()
-        return _render(request, "registration_tokens.html", tokens=tokens)
+        for t in tokens:
+            t["invite_url"] = _invite_url(settings, str(t.get("token", "")))
+        return _render(
+            request,
+            "registration_tokens.html",
+            tokens=tokens,
+            invite_base=settings.public_base_url(),
+        )
+
+    @app.get("/registration-tokens/{token}/qr.svg")
+    async def token_qr(
+        token: str,
+        _: None = Depends(require_login),
+        settings: ConsoleSettings = Depends(get_settings),
+    ) -> Response:
+        return Response(qr_svg(_invite_url(settings, token)), media_type="image/svg+xml")
 
     @app.post("/registration-tokens/new")
     async def tokens_new(

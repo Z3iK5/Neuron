@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from neuron_server.app import create_app
@@ -12,6 +14,24 @@ from neuron_server.config import NeuronServerSettings
 
 _GET_STARTED = "/get-started"
 _LOGIN = "/_matrix/client/v3/login"
+
+
+def _closed_app(tmp_path: Path) -> FastAPI:
+    return create_app(
+        NeuronServerSettings(
+            name="neuron.local",
+            database_url=f"sqlite:///{tmp_path / 'hs.db'}",
+            registration_enabled=False,
+        )
+    )
+
+
+async def _make_token(app: FastAPI, *, uses_allowed: int | None = None) -> str:
+    """Mint a registration token directly via the live AdminService (same loop/DB)."""
+    created = await app.state.admin.create_registration_token(
+        token=None, uses_allowed=uses_allowed, expiry_time=None
+    )
+    return str(created["token"])
 
 
 def _client(tmp_path: Path, *, registration_enabled: bool = True) -> TestClient:
@@ -107,3 +127,112 @@ def test_post_when_closed_is_forbidden(tmp_path: Path) -> None:
         )
         assert resp.status_code == 403
         assert "registration is disabled" in resp.text.lower()
+
+
+# --- invite tokens: let people self-register on a closed server -------------
+
+
+async def test_invite_token_opens_form_and_creates_account(tmp_path: Path) -> None:
+    app = _closed_app(tmp_path)
+    async with app.router.lifespan_context(app):
+        token = await _make_token(app, uses_allowed=2)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://hs") as c:
+            # Without a token the closed server hides the form...
+            assert "Create your account" not in (await c.get(_GET_STARTED)).text
+            # ...but a valid invite token reveals it (and carries the token through).
+            page = await c.get(_GET_STARTED, params={"token": token})
+            assert page.status_code == 200
+            assert "Create your account" in page.text
+            assert f'value="{token}"' in page.text
+
+            created = await c.post(
+                _GET_STARTED,
+                data={"token": token, "username": "erin", "password": "s3cret-password"},
+            )
+            assert created.status_code == 200
+            assert "@erin:neuron.local" in created.text
+
+        # The created account can log in.
+        async with httpx.AsyncClient(transport=transport, base_url="http://hs") as c:
+            login = await c.post(
+                _LOGIN,
+                json={
+                    "type": "m.login.password",
+                    "identifier": {"type": "m.id.user", "user": "erin"},
+                    "password": "s3cret-password",
+                },
+            )
+            assert login.status_code == 200
+
+        # One use was consumed (2 allowed → 1 completed).
+        tokens = (await app.state.admin.list_registration_tokens())["registration_tokens"]
+        row = next(t for t in tokens if t["token"] == token)
+        assert row["completed"] == 1
+
+
+async def test_invite_token_single_use_is_exhausted(tmp_path: Path) -> None:
+    app = _closed_app(tmp_path)
+    async with app.router.lifespan_context(app):
+        token = await _make_token(app, uses_allowed=1)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://hs") as c:
+            first = await c.post(
+                _GET_STARTED,
+                data={"token": token, "username": "frank", "password": "s3cret-password"},
+            )
+            assert first.status_code == 200 and "@frank:neuron.local" in first.text
+
+            # The single use is spent: the link no longer opens the form or registers.
+            assert "Create your account" not in (
+                await c.get(_GET_STARTED, params={"token": token})
+            ).text
+            second = await c.post(
+                _GET_STARTED,
+                data={"token": token, "username": "grace", "password": "s3cret-password"},
+            )
+            assert second.status_code == 403
+
+
+async def test_unknown_invite_token_is_rejected(tmp_path: Path) -> None:
+    app = _closed_app(tmp_path)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://hs") as c:
+            assert "Create your account" not in (
+                await c.get(_GET_STARTED, params={"token": "not-a-real-token"})
+            ).text
+            resp = await c.post(
+                _GET_STARTED,
+                data={"token": "not-a-real-token", "username": "h", "password": "pw-123456"},
+            )
+            assert resp.status_code == 403
+
+
+async def test_invite_typo_does_not_burn_the_token(tmp_path: Path) -> None:
+    """A failed registration (taken username) must not consume the invite."""
+    app = _closed_app(tmp_path)
+    async with app.router.lifespan_context(app):
+        token = await _make_token(app, uses_allowed=1)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://hs") as c:
+            # Seed an existing account via the same token, then try to reuse the name.
+            await c.post(
+                _GET_STARTED,
+                data={"token": await _make_token(app), "username": "ivy", "password": "pw-123456"},
+            )
+            dup = await c.post(
+                _GET_STARTED,
+                data={"token": token, "username": "ivy", "password": "pw-123456"},
+            )
+            assert dup.status_code == 400
+            assert 'value="ivy"' in dup.text
+            # The token still has its use available...
+            assert (
+                await c.get(_GET_STARTED, params={"token": token})
+            ).text.count("Create your account") >= 1
+            ok = await c.post(
+                _GET_STARTED,
+                data={"token": token, "username": "jade", "password": "pw-123456"},
+            )
+            assert ok.status_code == 200 and "@jade:neuron.local" in ok.text

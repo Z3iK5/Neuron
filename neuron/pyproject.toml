@@ -47,6 +47,7 @@ console = [
     "python-multipart>=0.0.9",   # parse HTML form submissions (login form)
     "itsdangerous>=2.2",         # signs the session cookie (Starlette SessionMiddleware)
     "httpx>=0.27",               # also used by Starlette's TestClient
+    "segno>=1.6",                # pure-Python QR codes for shareable invite links
 ]
 
 # The audit bot's optional S3 sink.
@@ -147,8 +148,9 @@ no_implicit_optional = true
 
 [[tool.mypy.overrides]]
 # These ship little/no type information; treat them as untyped.
-#   boto3 — S3 sink; olm — libolm bindings for E2EE; aiosqlite/asyncpg — DB drivers.
-module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg", "PIL", "PIL.*", "nacl", "nacl.*", "pystray", "pystray.*"]
+#   boto3 — S3 sink; olm — libolm bindings for E2EE; aiosqlite/asyncpg — DB drivers;
+#   segno — QR codes for console invite links.
+module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg", "PIL", "PIL.*", "nacl", "nacl.*", "pystray", "pystray.*", "segno", "segno.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

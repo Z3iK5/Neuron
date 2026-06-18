@@ -119,15 +119,32 @@ def landing_page_html(server_name: str) -> str:
 def get_started_html(
     server_name: str,
     *,
-    registration_enabled: bool,
+    can_register: bool,
+    token: str | None = None,
     error: str | None = None,
     username: str = "",
 ) -> str:
-    """The 'Get started' page: create an account (if open) + connect-a-client guide."""
-    if registration_enabled:
+    """The 'Get started' page: create an account (if allowed) + connect-a-client guide.
+
+    ``can_register`` is the computed gate — true when open registration is on *or* a
+    valid invite ``token`` was supplied. A supplied ``token`` is carried through the
+    form (hidden field) so the submission stays authorised.
+    """
+    if can_register:
         err = f'<div class="error">{html.escape(error)}</div>' if error else ""
-        body = f"""<h2>Create your account</h2>{err}
-  <form method="post" action="/get-started">
+        hidden = (
+            f'<input type="hidden" name="token" value="{html.escape(token)}">'
+            if token
+            else ""
+        )
+        invited = (
+            '<p class="note" style="margin-bottom:1rem">You were invited to this '
+            "server. Create your account below.</p>"
+            if token
+            else ""
+        )
+        body = f"""<h2>Create your account</h2>{err}{invited}
+  <form method="post" action="/get-started">{hidden}
     <label for="u">Username</label>
     <input id="u" name="username" value="{html.escape(username)}" placeholder="alice"
       autocapitalize="none" autocorrect="off" autofocus required>
@@ -140,8 +157,8 @@ def get_started_html(
     else:
         body = (
             '<h2>Accounts</h2><p class="note">Open registration is disabled on this '
-            "server. Ask the administrator to create an account for you, then connect "
-            "a chat app below.</p>"
+            "server. Ask the administrator for an invite link, or to create an account "
+            "for you, then connect a chat app below.</p>"
         )
     inner = (
         f'<div class="card">{_card_head()}<div class="card-body">'
