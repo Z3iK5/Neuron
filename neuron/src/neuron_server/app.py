@@ -34,6 +34,7 @@ from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_misc import router as client_misc_router
 from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
+from neuron_server.api.federation_backfill import router as federation_backfill_router
 from neuron_server.api.federation_invite import router as federation_invite_router
 from neuron_server.api.federation_join import router as federation_join_router
 from neuron_server.api.federation_keys import router as federation_keys_router
@@ -123,6 +124,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             app.state.federation_client,
             app.state.server_key_resolver,
             notify=notifier.notify,
+            apply_event=app.state.rooms.apply_remote_event,
         )
         app.state.sync = SyncService(db, notifier)
         app.state.media = MediaService(
@@ -175,6 +177,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(federation_join_router)
     app.include_router(federation_leave_router)
     app.include_router(federation_invite_router)
+    app.include_router(federation_backfill_router)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.

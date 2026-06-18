@@ -12,7 +12,7 @@ needs state resolution v2, which is the next sub-step.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from neuron_core import get_logger
@@ -45,6 +45,7 @@ class FederatedMembership:
         client: FederationClient,
         resolver: KeyResolver,
         notify: Callable[[], None] | None = None,
+        apply_event: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
     ) -> None:
         self._db = db
         self._server_name = server_name
@@ -52,6 +53,7 @@ class FederatedMembership:
         self._client = client
         self._resolver = resolver
         self._notify = notify
+        self._apply_event = apply_event
 
     async def join(self, room_id: str, user_id: str, via: list[str]) -> str:
         """Join ``user_id`` to a remote ``room_id`` via one of the ``via`` servers."""
@@ -103,9 +105,33 @@ class FederatedMembership:
         await self._store_room(room_id, room_version, state, auth_chain, signed)
         # The room is now joined locally, so any pending invite is consumed.
         await invite_store.delete_invite(self._db, user_id, room_id)
+        # Pull in recent history so the new member isn't staring at an empty room.
+        await self._backfill(server, room_id, event_id)
         if self._notify is not None:
             self._notify()
         return room_id
+
+    async def _backfill(
+        self, server: str, room_id: str, from_event_id: str, limit: int = 20
+    ) -> None:
+        if self._apply_event is None:
+            return
+        try:
+            response = await self._client.get_json(
+                server,
+                f"/_matrix/federation/v1/backfill/{room_id}?v={from_event_id}&limit={limit}",
+            )
+        except Exception as exc:  # backfill is best effort
+            _logger.warning("backfill from %s failed: %s", server, exc)
+            return
+        pdus = [pdu for pdu in response.get("pdus", []) if isinstance(pdu, dict)]
+        # The transaction lists events newest-first; apply oldest-first.
+        for pdu in reversed(pdus):
+            try:
+                await validate_pdu(pdu, resolver=self._resolver)
+            except PduValidationError:
+                continue
+            await self._apply_event(pdu)
 
     async def leave(self, room_id: str, user_id: str, via: list[str]) -> str:
         """Leave a remote ``room_id`` (via one of the ``via`` servers)."""

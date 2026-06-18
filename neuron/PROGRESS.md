@@ -733,7 +733,28 @@ Honest scope / deferred: message propagation is exact for the common linear case
 wired in (the conflict path), and retries/backfill for missed events are still to
 come.
 
+### Step 6h — Federation backfill — ✅ built
+
+A server that joins a room can now fetch its **history**.
+
+- **Resident side** (`api/federation_backfill.py`,
+  `GET /_matrix/federation/v1/backfill/{roomId}?v=&limit=`): authenticated and
+  in-room-only; returns a transaction of events going backwards in the DAG from the
+  requester's known event(s).
+- **Outbound side** (`FederatedMembership._backfill`): after a successful join, pull
+  recent history from the resident, validate each PDU, and apply it via the
+  injected `apply_event` hook (`RoomService.apply_remote_event`).
+
+Acceptance criterion met — **a backfill test**: Bob posts three messages in his
+room *before* Alice joins from another server; after Alice joins, those messages
+appear in **her `/sync`** (fetched by the automatic post-join backfill). ruff + mypy
+clean (112 files); 183 tests pass.
+
+Honest scope / deferred: backfilled events are appended with current stream
+orderings (so very old history can sort after recent events — Synapse uses negative
+orderings for this); backfill is triggered on join only (not yet on gap detection).
+
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
-into durable state application for forks; then **backfill** and **EDUs**
-(typing/receipts/presence over federation). The cross-server conformance milestone
-(Complement) needs Docker + Go and is tracked as HS-8.
+into durable state application for forks; then **EDUs** (typing/receipts/presence
+over federation) and outbound **retries** for offline destinations. The cross-server
+conformance milestone (Complement) needs Docker + Go and is tracked as HS-8.
