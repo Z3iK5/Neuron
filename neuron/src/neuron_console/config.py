@@ -9,6 +9,7 @@ secret used to sign session cookies. All are read from ``NEURON_*`` env vars.
 from __future__ import annotations
 
 import secrets
+from pathlib import Path
 
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
@@ -49,6 +50,26 @@ class ConsoleSettings(NeuronCoreSettings):
         """Public base URL for end users, used to build invite links (no trailing /)."""
         base = self.homeserver_public_url or self.homeserver_url
         return base.rstrip("/")
+
+    # --- Passkeys (WebAuthn) for console login ------------------------------
+    # The console keeps a little state (the registered-passkeys file) under this
+    # directory. Defaults to ~/.neuron-console; override with NEURON_CONSOLE_DATA_DIR.
+    console_data_dir: str = ""
+    # WebAuthn relying-party id + origin. Leave empty to derive from the request
+    # (correct for localhost / direct access); set them when behind a reverse proxy
+    # so they match the address in the browser (e.g. rp id "chat.example.org",
+    # origin "https://chat.example.org").
+    webauthn_rp_id: str = ""
+    webauthn_origin: str = ""
+
+    def passkey_store_path(self) -> Path:
+        """Where the registered-passkeys JSON file lives."""
+        base = (
+            Path(self.console_data_dir).expanduser()
+            if self.console_data_dir
+            else Path.home() / ".neuron-console"
+        )
+        return base / "passkeys.json"
 
     # Optional supervision-bot wiring (Phase 3). If a bot token is set, the
     # console's Supervision tab can kick/ban as the bot; promotion only needs the

@@ -18,6 +18,7 @@ Run locally::
 
 from __future__ import annotations
 
+import json
 import urllib.parse
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -28,8 +29,9 @@ from fastapi import Depends, FastAPI, Form, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from neuron_console import passkeys as passkeys_mod
 from neuron_console.config import ConsoleSettings
 from neuron_console.deps import (
     CsrfError,
@@ -38,12 +40,14 @@ from neuron_console.deps import (
     csrf_protect,
     ensure_classic_auth,
     get_admin,
+    get_passkeys,
     get_settings,
     get_supervisor,
     require_login,
 )
+from neuron_console.passkeys import PasskeyStore
 from neuron_console.qr import qr_svg
-from neuron_console.security import get_csrf_token
+from neuron_console.security import get_csrf_token, verify_csrf
 from neuron_core import AdminClient, MatrixClient, branding, configure_logging, get_logger
 from neuron_core.errors import AdminApiError
 from neuron_supervisor import Supervisor
@@ -94,6 +98,7 @@ def create_app(settings: ConsoleSettings | None = None) -> FastAPI:
 
     app = FastAPI(title="Neuron Console", lifespan=lifespan)
     app.state.settings = settings
+    app.state.passkeys = PasskeyStore(settings.passkey_store_path())
 
     app.add_middleware(
         SessionMiddleware,
@@ -220,6 +225,101 @@ def _register_routes(app: FastAPI) -> None:
     async def logout(request: Request) -> Response:
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
+
+    # --- passkeys (WebAuthn) ------------------------------------------------
+    def _rp(request: Request, settings: ConsoleSettings) -> tuple[str, str]:
+        """Resolve the WebAuthn relying-party id + expected origin for this request."""
+        rp_id = settings.webauthn_rp_id or (request.url.hostname or "localhost")
+        origin = settings.webauthn_origin or f"{request.url.scheme}://{request.url.netloc}"
+        return rp_id, origin
+
+    @app.get("/passkeys")
+    async def passkeys_page(
+        request: Request,
+        _: None = Depends(require_login),
+        store: PasskeyStore = Depends(get_passkeys),
+    ) -> Response:
+        return _render(request, "passkeys.html", passkeys=store.list())
+
+    @app.post("/passkeys/register/options")
+    async def passkey_register_options(
+        request: Request,
+        _: None = Depends(require_login),
+        settings: ConsoleSettings = Depends(get_settings),
+        store: PasskeyStore = Depends(get_passkeys),
+    ) -> Response:
+        if not verify_csrf(request, request.headers.get("x-csrf-token", "")):
+            raise CsrfError()
+        rp_id, _origin = _rp(request, settings)
+        options_json, challenge = passkeys_mod.registration_options(rp_id, store)
+        request.session["webauthn_reg_challenge"] = challenge
+        return Response(options_json, media_type="application/json")
+
+    @app.post("/passkeys/register/verify")
+    async def passkey_register_verify(
+        request: Request,
+        _: None = Depends(require_login),
+        settings: ConsoleSettings = Depends(get_settings),
+        store: PasskeyStore = Depends(get_passkeys),
+    ) -> Response:
+        if not verify_csrf(request, request.headers.get("x-csrf-token", "")):
+            raise CsrfError()
+        body = await request.json()
+        challenge = str(request.session.pop("webauthn_reg_challenge", ""))
+        rp_id, origin = _rp(request, settings)
+        try:
+            credential = passkeys_mod.verify_registration(
+                json.dumps(body["credential"]),
+                challenge,
+                rp_id,
+                origin,
+                label=str(body.get("label", "")),
+            )
+        except Exception as exc:  # noqa: BLE001 - report any verification failure to the UI
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        store.add(credential)
+        return JSONResponse({"ok": True})
+
+    @app.post("/passkeys/delete")
+    async def passkey_delete(
+        request: Request,
+        _: None = Depends(require_login),
+        __: None = Depends(csrf_protect),
+        store: PasskeyStore = Depends(get_passkeys),
+        credential_id: str = Form(...),
+    ) -> Response:
+        store.remove(credential_id)
+        _flash(request, "Passkey removed.")
+        return RedirectResponse("/passkeys", status_code=303)
+
+    @app.post("/passkeys/login/options")
+    async def passkey_login_options(
+        request: Request,
+        settings: ConsoleSettings = Depends(get_settings),
+        store: PasskeyStore = Depends(get_passkeys),
+    ) -> Response:
+        rp_id, _origin = _rp(request, settings)
+        options_json, challenge = passkeys_mod.authentication_options(rp_id, store)
+        request.session["webauthn_login_challenge"] = challenge
+        return Response(options_json, media_type="application/json")
+
+    @app.post("/passkeys/login/verify")
+    async def passkey_login_verify(
+        request: Request,
+        settings: ConsoleSettings = Depends(get_settings),
+        store: PasskeyStore = Depends(get_passkeys),
+    ) -> Response:
+        body = await request.json()
+        challenge = str(request.session.pop("webauthn_login_challenge", ""))
+        rp_id, origin = _rp(request, settings)
+        try:
+            passkeys_mod.verify_authentication(
+                json.dumps(body["credential"]), challenge, rp_id, origin, store
+            )
+        except Exception as exc:  # noqa: BLE001 - any failure is an auth failure
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        request.session["authenticated"] = True
+        return JSONResponse({"ok": True})
 
     # --- dashboard ----------------------------------------------------------
     @app.get("/")

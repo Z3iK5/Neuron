@@ -76,12 +76,19 @@ uvicorn neuron_console.app:app --port 8080      # open http://localhost:8080
 | `NEURON_CONSOLE_SESSION_SECRET` | _(random)_ | Signs the session cookie; set a stable value in production so sessions survive restarts. |
 | `NEURON_SERVER_NAME` | _(empty)_ | Server name, used to build `@user:server` IDs from a localpart. |
 | `NEURON_AUTH_MODE` | `classic` | `mas` if the homeserver delegates auth to a Matrix Authentication Service (disables some admin actions). |
+| `NEURON_CONSOLE_DATA_DIR` | `~/.neuron-console` | Where the console keeps small state (the registered-passkeys file). |
+| `NEURON_WEBAUTHN_RP_ID` / `NEURON_WEBAUTHN_ORIGIN` | _(from request)_ | WebAuthn relying-party id + origin for passkeys; set these when behind a reverse proxy so they match the browser address (e.g. `chat.example.org` / `https://chat.example.org`). |
 
 The console supports browsing **and** writes (create/modify/deactivate users, reset
 passwords, shadow-ban, registration tokens, server notices, room block/delete,
 redaction), with CSRF protection and confirmation prompts. The **Registration tokens &
 invite links** page generates a shareable signup link and QR for each token — these let
 people self-register even when open registration is disabled.
+
+**Passkeys.** The **Passkeys** page lets an operator enrol a passkey (Touch ID / Windows
+Hello / a security key) and then sign in with it from the login page instead of the
+console password. Passkeys need a secure context — `localhost` or HTTPS. Credentials are
+stored under `NEURON_CONSOLE_DATA_DIR`.
 
 ---
 
