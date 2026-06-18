@@ -182,6 +182,37 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=6,
+        name="profiles_accountdata_filters_regtokens",
+        statements=(
+            "CREATE TABLE IF NOT EXISTS profiles ("
+            " user_id TEXT PRIMARY KEY,"
+            " displayname TEXT,"
+            " avatar_url TEXT"
+            ")",
+            "CREATE TABLE IF NOT EXISTS account_data ("
+            " user_id TEXT NOT NULL,"
+            " room_id TEXT NOT NULL,"
+            " type TEXT NOT NULL,"
+            " content_json TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, room_id, type)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS filters ("
+            " user_id TEXT NOT NULL,"
+            " filter_id TEXT NOT NULL,"
+            " definition_json TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, filter_id)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS registration_tokens ("
+            " token TEXT PRIMARY KEY,"
+            " uses_allowed INTEGER,"
+            " pending INTEGER NOT NULL DEFAULT 0,"
+            " completed INTEGER NOT NULL DEFAULT 0,"
+            " expiry_time INTEGER"
+            ")",
+        ),
+    ),
 )
 
 

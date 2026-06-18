@@ -378,6 +378,34 @@ class RoomService:
         members = await store.get_joined_members(self._db, room_id)
         return {user_id: {} for user_id in members}
 
+    # --- server-authority operations (used by the Admin API) ---------------
+
+    async def admin_make_room_admin(self, room_id: str, user_id: str) -> None:
+        """Grant ``user_id`` power level 100 in the room (bypasses normal auth)."""
+        room = await self._require_room(room_id)
+        state = await self._load_state(room_id)
+        pl_event = state.get(("m.room.power_levels", ""))
+        content = dict(pl_event.content) if pl_event else _default_power_levels(room.creator)
+        users = dict(content.get("users", {}))
+        users[user_id] = 100
+        content["users"] = users
+        async with self._db.transaction():
+            await self._append(
+                room_id, etype="m.room.power_levels", sender=room.creator,
+                content=content, state_key="",
+            )
+        self._wake_syncs()
+
+    async def admin_force_join(self, room_id: str, user_id: str) -> None:
+        """Force ``user_id`` to join the room (bypasses normal auth)."""
+        await self._require_room(room_id)
+        async with self._db.transaction():
+            await self._append(
+                room_id, etype="m.room.member", sender=user_id,
+                content={"membership": "join"}, state_key=user_id,
+            )
+        self._wake_syncs()
+
 
 def _redact_level(state: AuthState) -> int:
     pl = state.get(("m.room.power_levels", ""))

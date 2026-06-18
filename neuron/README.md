@@ -174,22 +174,19 @@ Events the bot can decrypt are recorded with their cleartext type/content and
 
 ### Neuron homeserver — `neuron_server` (HS-0, in progress)
 
-Neuron is growing its **own** clean-room Matrix homeserver (see
-[`HOMESERVER-PLAN.md`](../HOMESERVER-PLAN.md)) so the project becomes one
-self-owned, all-in-one product instead of services around someone else's server.
-It is built strictly from the open Matrix spec/MSCs and will replace the
-transitional upstream backend once it reaches parity (phase HS-6).
+Neuron has its **own** clean-room Matrix homeserver (see
+[`HOMESERVER-PLAN.md`](../HOMESERVER-PLAN.md)) so the project is one self-owned,
+all-in-one product instead of services around someone else's server. It is built
+strictly from the open Matrix spec/MSCs.
 
-Built so far: **HS-0** (ASGI app, async SQLite/PostgreSQL storage with
-migrations, spec-discovery endpoints), **HS-1** (identity & auth: registration,
-login, logout, `whoami`, devices), **HS-2** (rooms, events, state, membership and
-the spec's authorization rules on room version 11 — create / send / join /
-invite / kick / ban / redact, read state & history), **HS-3** (`GET /sync`:
-initial + incremental with long-polling), **HS-4** (media repository:
-authenticated upload / download / thumbnail / config), and **HS-5** (E2EE key
-relay: device-key upload/query/claim, one-time keys, `sendToDevice`, device-list
-tracking — store/relay only, the server never decrypts). Run it with the `server`
-extra (no Docker needed; defaults to a local SQLite file):
+The **non-federating MVP is complete** (HS-0 → HS-6): identity & auth, rooms with
+the spec's authorization rules (room v11), `GET /sync` (long-polling), a media
+repository, E2EE key relay (store/relay only — the server never decrypts), the
+everyday Client-Server API (profile, account data, filters, capabilities), and a
+**Synapse-compatible `/_synapse/admin/...` Admin API**. `neuron_core`, the admin
+console and the bots run against it unchanged. Federation is a separate later epic
+(HS-7). Run it with the `server` extra (no Docker needed; defaults to a local
+SQLite file):
 
 ```bash
 pip install -e ".[server]"
@@ -205,11 +202,14 @@ curl -s -XPOST localhost:8008/_matrix/client/v3/register \
   -d "{\"username\":\"alice\",\"password\":\"choose-a-password\",\"auth\":{\"type\":\"m.login.dummy\",\"session\":\"$S\"}}"
 ```
 
-> **Honest status.** There is **no Synapse-compatible Admin API yet** (HS-6, the
-> cut-over point where the Neuron console/bots run against `neuron_server`);
-> federation is a separate later epic (HS-7). Registration defaults to **open**
-> (gate `NEURON_SERVER_REGISTRATION_ENABLED` in production). Until parity, keep
-> running the Neuron services against the transitional backend in `deploy/compose/`.
+To run the Neuron console/bots against it, set `NEURON_SERVER_ADMIN_USERS` to your
+admin's localpart, register that user, and point `NEURON_HOMESERVER_URL` /
+`NEURON_HOMESERVER_ADMIN_TOKEN` at the server.
+
+> **Honest status.** This is the **non-federating** MVP: no server-to-server
+> federation yet (HS-7), and some Admin endpoints (shadow-ban, server notices,
+> async purge/redaction jobs, content reports) are spec-shaped stubs. Registration
+> defaults to **open** (gate `NEURON_SERVER_REGISTRATION_ENABLED` in production).
 
 ## Configuration & secrets
 

@@ -7,6 +7,7 @@ from fastapi import Request
 
 from neuron_server.auth.service import Authenticated, AuthService
 from neuron_server.errors import MatrixError
+from neuron_server.storage import accounts
 
 
 def get_auth(request: Request) -> AuthService:
@@ -32,3 +33,14 @@ async def require_user(request: Request) -> Authenticated:
     if who is None:
         raise MatrixError(401, "M_UNKNOWN_TOKEN", "Invalid access token")
     return who
+
+
+async def require_admin(request: Request) -> Authenticated:
+    """Require a valid token whose user is a server admin (config list or DB flag)."""
+    who = await require_user(request)
+    if who.user_id in request.app.state.settings.admin_user_ids():
+        return who
+    row = await accounts.get_user(request.app.state.db, who.user_id)
+    if row is not None and row.admin:
+        return who
+    raise MatrixError(403, "M_FORBIDDEN", "You are not a server admin")

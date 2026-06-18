@@ -355,8 +355,54 @@ Honest scope / deferred: server-side **key backup** (`/room_keys` + versions) is
 follow-up; `device_signing/upload` does not enforce UIA yet; signature merging is
 best-effort for cross-signing keys; `device_lists.left` is always empty.
 
-### Next gate
-HS-6 — remaining CS API (account data, profiles, filters, capabilities,
-typing/receipts/presence stubs, push-rules stubs) **plus a Synapse-compatible
-`/_synapse/admin/...` surface**, so the existing Neuron console & bots run against
-`neuron_server`. The cut-over milestone.
+## HS-6 — Remaining CS API + Synapse-compatible Admin API — ✅ built (cut-over)
+
+The milestone where the existing Neuron tooling runs against `neuron_server`.
+
+- **Synapse-compatible Admin API** (`api/synapse_admin.py`, `admin/service.py`):
+  the `/_synapse/admin/...` surface the console/bots use — `server_version`,
+  users (list/get/create/modify with 201-on-create, deactivate, reset_password),
+  rooms (list/get/members/state), registration tokens (list/new/delete),
+  `make_room_admin` + force-`join` (server-authority, via `RoomService`), plus
+  spec-shaped responses for shadow-ban / server-notice / room block-and-delete /
+  redaction / event-reports. Admin auth via a token whose user is in
+  `NEURON_SERVER_ADMIN_USERS` or has the DB admin flag.
+- **Remaining CS API** (`api/client_misc.py`): profile (display name / avatar),
+  global + room **account data**, **filters**, `capabilities` (advertises room
+  version 11), a minimal push-rules ruleset, and accepted-but-stubbed
+  presence/typing/receipts/read-markers.
+- **Storage** (migration 0006): `profiles`, `account_data`, `filters`,
+  `registration_tokens`; admin user queries in `storage/admin.py`.
+
+Acceptance criterion met — **the existing Neuron stack runs against
+`neuron_server`**: `neuron_core`'s `AdminClient` drives the admin API end to end
+(users/rooms/tokens/make-room-admin; non-admin gets 403), and **the repo's
+`neuron_core` integration smoke tests — written for Synapse — pass unchanged
+against `neuron_server`** (verified by pointing `NEURON_HOMESERVER_URL` at a live
+`neuron_server`). ruff + mypy clean (79 files); 116 unit tests pass.
+
+Honest scope / deferred: shadow-ban / server-notice / async room-purge / redaction
+jobs / content-reports are spec-shaped stubs (no backing work yet);
+registration-token gating isn't enforced in the register flow; account data isn't
+surfaced in `/sync` yet.
+
+---
+
+# 🎯 Non-federating MVP complete (HS-0 → HS-6)
+
+`neuron_server` is now a usable, clean-room, **non-federating** Matrix homeserver:
+identity & auth, rooms with spec-enforced authorization (room v11), `/sync`
+(long-polling), media, E2EE key relay, the everyday CS API, and a
+Synapse-compatible Admin API. The existing Neuron services (console, supervisor,
+auditor) and `neuron_core` work against it. Built strictly from the open spec —
+no homeserver source was ever consulted.
+
+### Remaining homeserver work (separate epics)
+- **HS-7 — Federation** (the hard, research-grade epic): server keys, transactions
+  (PDUs/EDUs), make/send join, backfill, **state resolution v2**, per-version auth
+  rules, server ACLs. Months of work; its own program.
+- **HS-8 — Parity, conformance & cut-over**: pass a growing subset of Complement;
+  caching/perf; optional workers; then swap the dev stack + Neuron services from
+  the transitional upstream backend to `neuron_server`.
+- Backfill within the MVP: key backup (`/room_keys`), UIA on sensitive endpoints,
+  per-membership history visibility, real shadow-ban/server-notice/purge jobs.

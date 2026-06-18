@@ -59,6 +59,25 @@ class NeuronServerSettings(BaseSettings):
         description="Allow open account registration via POST /_matrix/client/v3/register.",
     )
 
+    # Bootstrap server admins: a comma-separated list of localparts or full user
+    # IDs that are always treated as server admins (in addition to any user whose
+    # stored admin flag is set). This is how you get the first admin so the Neuron
+    # console / Admin API works. Example: NEURON_SERVER_ADMIN_USERS=admin,ops
+    admin_users: str = Field(
+        default="",
+        description="Comma-separated localparts/user IDs treated as server admins.",
+    )
+
+    def admin_user_ids(self) -> set[str]:
+        """Resolve ``admin_users`` to a set of full Matrix IDs."""
+        result: set[str] = set()
+        for raw in self.admin_users.split(","):
+            entry = raw.strip()
+            if not entry:
+                continue
+            result.add(entry if entry.startswith("@") else f"@{entry}:{self.name}")
+        return result
+
     # --- Media repository ---------------------------------------------------
     # Directory where uploaded media blobs are stored (filesystem backend).
     media_store_path: str = Field(

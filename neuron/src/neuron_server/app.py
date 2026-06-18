@@ -27,11 +27,14 @@ from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, PlainTextResponse
 
 from neuron_core import configure_logging, get_logger
+from neuron_server.admin.service import AdminService
 from neuron_server.api.client_auth import router as client_auth_router
 from neuron_server.api.client_keys import router as client_keys_router
 from neuron_server.api.client_media import router as client_media_router
+from neuron_server.api.client_misc import router as client_misc_router
 from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
+from neuron_server.api.synapse_admin import router as synapse_admin_router
 from neuron_server.auth.service import AuthService
 from neuron_server.config import NeuronServerSettings
 from neuron_server.e2ee.service import E2EEService
@@ -93,6 +96,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             settings.max_upload_bytes,
         )
         app.state.e2ee = E2EEService(db, notify=notifier.notify)
+        app.state.admin = AdminService(db, settings.name)
         try:
             yield
         finally:
@@ -127,6 +131,8 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_sync_router)
     app.include_router(client_media_router)
     app.include_router(client_keys_router)
+    app.include_router(client_misc_router)
+    app.include_router(synapse_admin_router)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.
