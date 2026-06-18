@@ -1,0 +1,76 @@
+# Builds the Neuron Desktop app for macOS, Windows and Linux with PyInstaller and
+# uploads the bundles as artifacts (and as release assets on a tag push).
+#
+# This must run on each OS — PyInstaller cannot cross-compile — so GitHub's macOS,
+# Windows and Ubuntu runners each build their own bundle. Wrapping the bundles in
+# native installer formats (.dmg / .msi / AppImage) and code signing are follow-ups
+# (see DESKTOP-PLAN.md D3/D4).
+
+name: Desktop installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to attach assets to a release on tag builds
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macos
+          - os: windows-latest
+            label: windows
+          - os: ubuntu-latest
+            label: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: neuron
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the desktop app and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[desktop-gui]" pyinstaller
+
+      - name: Build the app bundle
+        run: pyinstaller --noconfirm packaging/neuron_desktop.spec
+
+      - name: Smoke-test the bundle (non-GUI command)
+        # Confirms the frozen bundle starts and its CLI works without a display.
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            ./dist/Neuron/Neuron.exe where
+          else
+            ./dist/Neuron/Neuron where
+          fi
+
+      - name: Archive the bundle
+        run: python -c "import shutil; shutil.make_archive('neuron-${{ matrix.label }}', 'zip', 'dist')"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-${{ matrix.label }}
+          path: neuron/neuron-${{ matrix.label }}.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: neuron/neuron-${{ matrix.label }}.zip

@@ -70,11 +70,20 @@ Per-user data dir via `platformdirs`:
   extra) and a `neuron-desktop tray` command. **Remaining:** the actual tray
   icon/menu can only be verified on a real macOS/Windows/Linux desktop session, not
   in the headless container. *(M)*
-- **D3 — Native installers via CI.** GitHub Actions **matrix** (macOS, Windows,
-  Ubuntu) packaging with **PyInstaller** or **Briefcase** → `.dmg`/`.app`,
-  `.msi`/`.exe`, `AppImage`/`.deb`; uploaded as release artifacts. **Done when:**
-  a tagged release produces downloadable installers for all three OSes. *(L —
-  must build on each OS; CI matrix handles it; no cross-compile)*
+- **D3 — Native installers via CI. ◑ Build pipeline done; native wrappers + macOS/
+  Windows runs pending.** `packaging/neuron_desktop.spec` (PyInstaller, one-folder
+  bundle) + `packaging/app_entry.py` (defaults to the tray; passes other args to the
+  CLI), and `.github/workflows/desktop-installers.yml` — a macOS/Windows/Linux
+  **matrix** that builds the bundle, smoke-tests it (`Neuron where`), and uploads it
+  (attaching to the release on a tag). Frozen apps can't run `python -m
+  neuron_server`, so `ServerProcess` re-execs the bundle as `Neuron _server` (new
+  internal CLI command) to run the homeserver as a child process. **Validated
+  locally on Linux:** the bundle builds, the frozen CLI works, and the frozen app
+  **runs the full signed-event homeserver** (`/health` + `/_matrix/key/v2/server`)
+  — which caught a real packaging bug (PyNaCl's `_cffi_backend` needed an explicit
+  hidden import). **Remaining:** the macOS/Windows builds (CI-only), and wrapping
+  the bundles in true native installers — `.dmg` / `.msi` / `AppImage` — which is
+  its own tooling step. *(L)*
 - **D4 — Trust & polish.** Code signing + notarization (Apple Developer ID;
   Windows Authenticode), optional auto-update, "start at login" toggle. *(M, has
   external costs — see risks)*

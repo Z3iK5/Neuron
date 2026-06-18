@@ -12,10 +12,15 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 
 from neuron_desktop import config as config_module
 from neuron_desktop import paths, setup, supervisor
+
+# Internal command used when the (possibly frozen) app re-execs itself to run the
+# homeserver child process. Not part of the public CLI surface.
+_SERVER_COMMAND = "_server"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,7 +35,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args_list = list(sys.argv[1:] if argv is None else argv)
+
+    # The homeserver child process re-execs this app as ``<app> _server`` and the
+    # server reads its NEURON_SERVER_* settings from the environment.
+    if args_list and args_list[0] == _SERVER_COMMAND:
+        from neuron_server.__main__ import main as run_server
+
+        run_server()
+        return 0
+
+    args = build_parser().parse_args(args_list)
     base = paths.data_dir()
 
     if args.command == "where":

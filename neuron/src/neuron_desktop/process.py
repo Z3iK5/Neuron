@@ -18,6 +18,19 @@ from typing import Any, Protocol
 from neuron_desktop.config import DesktopConfig
 
 
+def default_server_command() -> list[str]:
+    """How to launch the homeserver child process.
+
+    In a normal install we run ``python -m neuron_server``. In a PyInstaller
+    bundle there is no separate interpreter — ``sys.executable`` is the frozen app
+    — so we re-exec the app itself with the internal ``_server`` command (handled
+    in :mod:`neuron_desktop.cli`).
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "_server"]
+    return [sys.executable, "-m", "neuron_server"]
+
+
 def config_to_env(config: DesktopConfig) -> dict[str, str]:
     """The ``NEURON_SERVER_*`` environment that reproduces this config's settings."""
     settings = config.to_server_settings()
@@ -58,7 +71,7 @@ class ServerProcess:
         popen: PopenFactory = subprocess.Popen,
     ) -> None:
         self._config = config
-        self._command = command or [sys.executable, "-m", "neuron_server"]
+        self._command = command or default_server_command()
         self._popen = popen
         self._process: _Process | None = None
 
