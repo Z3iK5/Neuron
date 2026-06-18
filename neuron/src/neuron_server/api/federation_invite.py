@@ -68,4 +68,5 @@ async def receive_invite(room_id: str, event_id: str, request: Request) -> dict[
         signed,
         invite_state if isinstance(invite_state, list) else [],
     )
+    request.app.state.notify()  # wake any long-polling /sync for the invited user
     return {"event": signed}

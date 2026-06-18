@@ -23,6 +23,7 @@ from neuron_server.federation.client import FederationClient
 from neuron_server.federation.validation import KeyResolver, PduValidationError, validate_pdu
 from neuron_server.rooms import versions
 from neuron_server.rooms.events import Event
+from neuron_server.storage import invites as invite_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 
@@ -100,6 +101,8 @@ class FederatedMembership:
                 ) from exc
 
         await self._store_room(room_id, room_version, state, auth_chain, signed)
+        # The room is now joined locally, so any pending invite is consumed.
+        await invite_store.delete_invite(self._db, user_id, room_id)
         if self._notify is not None:
             self._notify()
         return room_id
@@ -138,9 +141,11 @@ class FederatedMembership:
             server, f"/_matrix/federation/v2/send_leave/{room_id}/{event_id}", signed
         )
 
-        # Reflect the leave in our local copy of the room, if we have one.
+        # Reflect the leave in our local copy of the room, if we have one, and
+        # clear any pending invite (this also handles rejecting an invite).
         if await store.get_room(self._db, room_id) is not None:
             await self._apply_local_leave(room_id, signed, event_id)
+        await invite_store.delete_invite(self._db, user_id, room_id)
         if self._notify is not None:
             self._notify()
         return room_id

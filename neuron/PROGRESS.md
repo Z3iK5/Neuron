@@ -689,11 +689,26 @@ bob **joins the invite-only room over federation** (authorised only because the
 invite was applied) and ends up joined on A. ruff + mypy clean (110 files); 181
 tests pass.
 
-Honest scope / deferred: the recorded invite isn't surfaced in the invited server's
-`/sync` yet (needs out-of-band invite state in the sync builder).
+### Step 6f — Federated invites in `/sync` — ✅ built
+
+Closes the invite loop: a federated invite now reaches the invited user's client.
+
+- **Invite stream** (migration 0010): `federated_invites` gains a `stream_id`
+  (`MAX+1`) so `/sync` can tell which invites are new; `storage/invites.py` grows
+  `list_pending_invites` / `delete_invite`.
+- **Sync surfacing** (`sync/service.py`): the sync token gains a fourth
+  (invites) component, and `/sync` adds each pending federated invite to
+  `rooms.invite[roomId].invite_state` (the stripped room state plus the invite
+  member event). A newly-arrived invite wakes long-polling `/sync` (the invite
+  endpoint pokes the notifier), and joining/leaving the room consumes the pending
+  invite.
+
+Acceptance criterion met — extended the invite→join test: after the invite, **Bob's
+`/sync` on his server shows the room under `rooms.invite`** with his invite member
+event; after he joins, the room **moves to `rooms.join`** and is gone from
+`invite`. ruff + mypy clean (110 files); 181 tests pass.
 
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
 into **durable state application**; then **backfill** and **EDUs**
-(typing/receipts/presence over federation), and surfacing federated invites in
-`/sync`. The cross-server conformance milestone (Complement) needs Docker + Go and
-is tracked as HS-8.
+(typing/receipts/presence over federation). The cross-server conformance milestone
+(Complement) needs Docker + Go and is tracked as HS-8.

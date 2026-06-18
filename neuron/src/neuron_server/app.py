@@ -96,6 +96,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         await _ensure_server_identity(db, settings)
         notifier = StreamNotifier()
         app.state.db = db
+        app.state.notify = notifier.notify
         app.state.server_keys = await ServerKeyService.load_or_create(db, settings)
         app.state.federation_client = FederationClient(
             settings.name, app.state.server_keys.signing_key

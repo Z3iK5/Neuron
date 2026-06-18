@@ -21,6 +21,7 @@ from typing import Any
 
 from neuron_server.errors import MatrixError
 from neuron_server.storage import e2ee as e2ee_store
+from neuron_server.storage import invites as invites_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 from neuron_server.sync.notifier import StreamNotifier
@@ -48,6 +49,7 @@ class _Token:
     events: int | None  # None on initial sync
     to_device: int
     device_list: int
+    invites: int = 0
 
 
 class SyncService:
@@ -77,9 +79,12 @@ class SyncService:
             events = int(parts[0])
             to_device = int(parts[1]) if len(parts) > 1 else 0
             device_list = int(parts[2]) if len(parts) > 2 else 0
+            invites = int(parts[3]) if len(parts) > 3 else 0
         except ValueError as exc:
             raise MatrixError(400, "M_INVALID_PARAM", "Invalid sync token") from exc
-        return _Token(events=events, to_device=to_device, device_list=device_list)
+        return _Token(
+            events=events, to_device=to_device, device_list=device_list, invites=invites
+        )
 
     async def _build(
         self, user_id: str, device_id: str, token: _Token
@@ -112,6 +117,11 @@ class SyncService:
                     leave[room_id] = section
                     changed = True
 
+        # Invites to rooms hosted by other servers (received over federation).
+        new_invites = await self._federated_invites(user_id, token.invites, invite)
+        if new_invites > token.invites:
+            changed = changed or not initial
+
         to_device_events, new_to_device = await self._to_device(
             user_id, device_id, token.to_device
         )
@@ -123,7 +133,7 @@ class SyncService:
         if to_device_events or device_changed:
             changed = True
 
-        next_batch = f"{current_events}.{new_to_device}.{new_device_list}"
+        next_batch = f"{current_events}.{new_to_device}.{new_device_list}.{new_invites}"
         body = {
             "next_batch": next_batch,
             "rooms": {"join": join, "invite": invite, "leave": leave, "knock": {}},
@@ -189,6 +199,28 @@ class SyncService:
             "ephemeral": {"events": []},
         }
         return section, room_changed
+
+    async def _federated_invites(
+        self, user_id: str, since_invites: int, invite: dict[str, Any]
+    ) -> int:
+        """Add invites to remote-hosted rooms into ``invite``; return the max
+        invite stream position seen."""
+        pending = await invites_store.list_pending_invites(self._db, user_id)
+        highest = since_invites
+        for entry in pending:
+            highest = max(highest, entry.stream_id)
+            stripped = list(entry.invite_state)
+            event = entry.event
+            stripped.append(
+                {
+                    "type": event.get("type"),
+                    "state_key": event.get("state_key"),
+                    "sender": event.get("sender"),
+                    "content": event.get("content"),
+                }
+            )
+            invite[entry.room_id] = {"invite_state": {"events": stripped}}
+        return highest
 
     async def _invited_room(
         self, room_id: str, user_id: str, since: int | None, initial: bool

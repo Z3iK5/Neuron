@@ -250,6 +250,14 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=10,
+        name="federated_invite_stream",
+        # A stream position so /sync can tell which invites are new.
+        statements=(
+            "ALTER TABLE federated_invites ADD COLUMN stream_id INTEGER NOT NULL DEFAULT 0",
+        ),
+    ),
 )
 
 

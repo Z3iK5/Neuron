@@ -88,7 +88,6 @@ async def test_invite_remote_user_then_they_join(tmp_path: Path) -> None:
         # A's room state shows bob invited (not yet joined).
         assert _BOB not in await store.get_joined_members(app_a.state.db, room_id)  # type: ignore[attr-defined]
 
-        # The invited user joins the invite-only room over federation.
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app_b), base_url="https://b.test"
         ) as on_b:
@@ -102,12 +101,31 @@ async def test_invite_remote_user_then_they_join(tmp_path: Path) -> None:
                     },
                 )
             ).json()["access_token"]
+            bob_headers = {"Authorization": f"Bearer {bob_token}"}
+
+            # Bob's /sync on B surfaces the federated invite.
+            sync = (await on_b.get(f"{_CS}/sync", headers=bob_headers)).json()
+            assert room_id in sync["rooms"]["invite"]
+            events = sync["rooms"]["invite"][room_id]["invite_state"]["events"]
+            assert any(
+                e["type"] == "m.room.member"
+                and e["state_key"] == _BOB
+                and e["content"]["membership"] == "invite"
+                for e in events
+            )
+
+            # The invited user joins the invite-only room over federation.
             joined = await on_b.post(
                 f"{_CS}/rooms/{room_id}/join",
                 params={"server_name": "a.test"},
-                headers={"Authorization": f"Bearer {bob_token}"},
+                headers=bob_headers,
             )
             assert joined.status_code == 200, joined.text
+
+            # After joining, the room moves from invite to join in Bob's /sync.
+            sync2 = (await on_b.get(f"{_CS}/sync", headers=bob_headers)).json()
+            assert room_id not in sync2["rooms"]["invite"]
+            assert room_id in sync2["rooms"]["join"]
 
         # Bob is now joined on A (the resident server).
         assert _BOB in await store.get_joined_members(app_a.state.db, room_id)  # type: ignore[attr-defined]
