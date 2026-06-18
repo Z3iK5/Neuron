@@ -973,5 +973,37 @@ signing/notarization stay a D4 follow-up).
 Honest scope: the `.app`/`.dmg` build runs **only on the `macos-latest` runner** —
 it cannot be exercised in the Linux dev container. Validated locally: shell + spec
 syntax, `ruff` over `packaging/`, and the icon render at every iconset size; the
-`iconutil`/`hdiutil` packaging is exercised in CI. Windows (`.msi`/`.exe`) and Linux
-(AppImage/`.deb`) installers, plus code signing, remain follow-ups.
+`iconutil`/`hdiutil` packaging is exercised in CI. (CI-verified: PR #5 built a
+27 MB `.dmg` on the `macos-latest` runner.)
+
+---
+
+## Desktop D3 — Linux installer (AppImage) — ✅ built & locally verified
+
+The desktop bundle is now also packaged as a portable Linux **AppImage** — a single
+self-contained executable that runs across distros without installation.
+
+- **`packaging/make_appimage.sh`** assembles an AppDir (AppRun → the bundled
+  `Neuron` binary; a `.desktop` entry; the `neuron.png` icon + `.DirIcon` + hicolor
+  path) around the PyInstaller bundle and runs `appimagetool` to emit
+  `Neuron-x86_64.AppImage`. It fetches `appimagetool` if absent and runs everything
+  with `APPIMAGE_EXTRACT_AND_RUN=1`, so **no FUSE** is needed (works in CI /
+  containers); `appimagetool` bundles its own `mksquashfs`.
+- **`.github/workflows/desktop-installers.yml`** gained Linux-only steps (build the
+  AppImage → smoke-test it → upload artifact + attach to the release on a tag).
+- **`.gitignore`** now excludes `*.AppImage` / `*.dmg` build outputs.
+
+Unlike the macOS path, this was **built and run end-to-end in the dev container**: a
+~53 MB `Neuron-x86_64.AppImage` was produced, and via `APPIMAGE_EXTRACT_AND_RUN=1`
+its `where` command and its `_server` child (which boots the full homeserver —
+"Uvicorn running") both work.
+
+**Regression caught & fixed.** Exercising the frozen `_server` child surfaced a bug
+the `doctor` work (PR #4) had introduced: `neuron_server.__main__.main()` began
+parsing the *process* argv, so the desktop app's `Neuron _server` re-exec hit
+`neuron-server`'s parser with the internal `_server` token and crashed — i.e. the
+desktop "start server" path was broken on `main`. Fixed by giving `main()` an
+explicit `argv` parameter and having the desktop CLI call `run_server([])`. New tests
+lock the contract (`tests/neuron_server/test_main_cli.py`; the desktop `_server` test
+now asserts the token is stripped). ruff + mypy clean (120 files); 224 passed, 3
+integration skips. Windows (`.msi`/`.exe`) and code signing remain follow-ups.

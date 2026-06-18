@@ -42,7 +42,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args_list and args_list[0] == _SERVER_COMMAND:
         from neuron_server.__main__ import main as run_server
 
-        run_server()
+        # Pass an explicit empty argv so neuron_server's own parser doesn't try to
+        # interpret our internal "_server" token (it only knows serve/doctor) —
+        # with no args it takes the default "serve" path.
+        run_server([])
         return 0
 
     args = build_parser().parse_args(args_list)
