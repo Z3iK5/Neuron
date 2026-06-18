@@ -527,6 +527,38 @@ client yet (the decision function is in place); the server key **notary**
 (`/_matrix/key/v2/query`) is deferred; no key-validity refresh/rotation handling
 beyond `valid_until_ts`.
 
-Next steps in HS-7: the **transaction** ingest (`PUT /_matrix/federation/v1/send/{txnId}`)
-with inbound PDU validation (content-hash + signature + auth-rule re-check), then
-`make_join`/`send_join` membership over federation, and **state resolution v2**.
+### Step 5 — Inbound transaction ingest + PDU validation — ✅ built
+
+The federation **ingress security gate**: events arriving from other servers are
+cryptographically validated before they could ever be trusted.
+
+- **Validation pipeline** (`federation/validation.py`): checks a PDU's structure
+  and size, recomputes its reference-hash **event ID**, verifies its **content
+  hash**, and verifies a **signature from the sender's server** (keys resolved via
+  the `ServerKeyResolver`). Returns the event ID or raises a peer-safe
+  `PduValidationError`.
+- **Transaction endpoint** (`api/federation_transactions.py`):
+  `PUT /_matrix/federation/v1/send/{txnId}` — authenticates the request over its
+  **signed body** (X-Matrix), checks the body origin matches, validates each PDU,
+  and returns the spec's per-PDU result map (`{}` on success, `{"error": …}` on
+  failure).
+- **Shared federation auth** (`federation/request.py`): one `authenticate_request`
+  helper (now body-aware for POST/PUT) used by both the read and transaction
+  endpoints; `federation_read` was refactored onto it.
+
+Acceptance criterion met — **a two-server transaction test**: server B builds a
+genuine signed event and sends it to A in a transaction; A authenticates B
+(resolving B's keys) and **validates the real PDU** (per-PDU result `{}`); a
+tampered-content PDU is rejected with a `content hash` error, and an
+unauthenticated transaction gets 401. Plus unit tests for every rejection path
+(bad hash, bad signature, unresolvable sender, missing fields, sender-server
+signature required). ruff + mypy clean (95 files); 154 tests pass.
+
+Honest scope / deferred: an "accepted" PDU here means **cryptographically valid** —
+durable **state application** (authorising the event against its `auth_events`,
+persisting it into room state) is the next step and needs state resolution v2; EDUs
+in the transaction are accepted but ignored for now.
+
+Next steps in HS-7: `make_join`/`send_join` so users can **join rooms across
+federation**, then **state resolution v2** and applying ingested events to room
+state — the research-grade remainder.

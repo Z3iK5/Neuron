@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from neuron_server.errors import MatrixError
-from neuron_server.federation.auth import parse_authorization_header, verify_request
+from neuron_server.federation.request import authenticate_request
 from neuron_server.storage import rooms as store
 
 router = APIRouter(prefix="/_matrix/federation/v1")
@@ -33,30 +33,7 @@ def _domain_of(user_id: str) -> str:
 
 
 async def _require_origin(request: Request) -> str:
-    """Authenticate an inbound federation request, returning the origin server."""
-    creds = parse_authorization_header(request.headers.get("Authorization", ""))
-    if creds is None:
-        raise MatrixError(401, "M_UNAUTHORIZED", "Missing or malformed X-Matrix authorization")
-
-    settings = request.app.state.settings
-    verify_keys = await request.app.state.server_key_resolver.verify_keys_for(creds.origin)
-    if not verify_keys:
-        raise MatrixError(
-            401, "M_UNAUTHORIZED", f"Could not resolve signing keys for origin {creds.origin!r}"
-        )
-
-    uri = request.url.path
-    if request.url.query:
-        uri += "?" + request.url.query
-    if not verify_request(
-        creds,
-        method=request.method,
-        uri=uri,
-        destination=settings.name,
-        verify_keys=verify_keys,
-    ):
-        raise MatrixError(401, "M_UNAUTHORIZED", "Federation request signature did not verify")
-    return creds.origin
+    return await authenticate_request(request)
 
 
 async def _require_origin_in_room(request: Request, room_id: str) -> str:
