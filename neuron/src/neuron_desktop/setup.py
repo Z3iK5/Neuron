@@ -9,7 +9,9 @@ same storage the server uses, so the admin can immediately sign in to the consol
 from __future__ import annotations
 
 import asyncio
+import secrets
 import socket
+import sys
 import time
 from collections.abc import Callable
 from getpass import getpass
@@ -31,6 +33,24 @@ PrintFn = Callable[[str], None]
 def is_first_run(base: Path) -> bool:
     """True when no desktop config exists yet in ``base``."""
     return not paths.config_path(base).exists()
+
+
+def stdin_is_interactive() -> bool:
+    """True only when we can actually prompt on a terminal.
+
+    A double-clicked / frozen GUI app has no console, so ``sys.stdin`` is ``None``
+    (or not a tty) and calling ``input()`` raises ``RuntimeError: lost sys.stdin``.
+    We use this to choose interactive vs. non-interactive first-run setup.
+    """
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (ValueError, OSError):
+        return False
+
+
+def welcome_path(base: Path) -> Path:
+    """The file where a non-interactive first run records the admin credentials."""
+    return base / "WELCOME.txt"
 
 
 def default_server_name() -> str:
@@ -83,17 +103,10 @@ async def ensure_admin_account(
     return user_id
 
 
-def perform_first_run(
-    base: Path,
-    *,
-    input_fn: InputFn = input,
-    getpass_fn: InputFn = getpass,
-    print_fn: PrintFn = print,
-) -> DesktopConfig:
-    """Run the whole first-run flow: prompt, write config, create the admin."""
-    config, password = run_interactive_setup(
-        base, input_fn=input_fn, getpass_fn=getpass_fn, print_fn=print_fn
-    )
+def _finalize_first_run(
+    base: Path, config: DesktopConfig, password: str, *, print_fn: PrintFn
+) -> None:
+    """Write the config and create the admin account (shared by both setup paths)."""
     base.mkdir(parents=True, exist_ok=True)
     paths.media_path(base).mkdir(parents=True, exist_ok=True)
     config_module.save(config, paths.config_path(base))
@@ -103,6 +116,52 @@ def perform_first_run(
 
     print_fn(f"Created admin @{config.admin_username}:{config.server_name}.")
     print_fn(f"State directory: {base}")
+
+
+def _write_welcome_file(base: Path, config: DesktopConfig, password: str) -> None:
+    """Record the auto-generated admin credentials where the user can find them."""
+    welcome_path(base).write_text(
+        "Welcome to Neuron!\n\n"
+        "Your homeserver was set up automatically. Sign in to the admin console\n"
+        "or any Matrix client with the account below — then change the password.\n\n"
+        f"  Console / homeserver : {config.console_url()}\n"
+        f"  Matrix ID            : @{config.admin_username}:{config.server_name}\n"
+        f"  Username             : {config.admin_username}\n"
+        f"  Password             : {password}\n\n"
+        "Keep this file safe (it contains your admin password). All of your\n"
+        f"server's data lives in:\n  {base}\n",
+        encoding="utf-8",
+    )
+
+
+def perform_first_run(
+    base: Path,
+    *,
+    input_fn: InputFn = input,
+    getpass_fn: InputFn = getpass,
+    print_fn: PrintFn = print,
+) -> DesktopConfig:
+    """Run the interactive first-run flow: prompt, write config, create the admin."""
+    config, password = run_interactive_setup(
+        base, input_fn=input_fn, getpass_fn=getpass_fn, print_fn=print_fn
+    )
+    _finalize_first_run(base, config, password, print_fn=print_fn)
+    return config
+
+
+def perform_noninteractive_first_run(base: Path, *, print_fn: PrintFn = print) -> DesktopConfig:
+    """First-run setup with no prompts — for the double-clicked desktop app.
+
+    There is no terminal to prompt on, so we pick sensible defaults and a generated
+    admin password, create the account, and record the credentials in a WELCOME.txt
+    in the data directory (the app opens it so the user can sign in).
+    """
+    config = DesktopConfig(
+        server_name=default_server_name(), data_dir=str(base), admin_username="admin"
+    )
+    password = secrets.token_urlsafe(12)
+    _finalize_first_run(base, config, password, print_fn=print_fn)
+    _write_welcome_file(base, config, password)
     return config
 
 
@@ -113,9 +172,15 @@ def load_or_create(
     getpass_fn: InputFn = getpass,
     print_fn: PrintFn = print,
 ) -> DesktopConfig:
-    """Load an existing config, or run first-run setup if there isn't one."""
+    """Load an existing config, or run first-run setup if there isn't one.
+
+    Uses interactive prompts when a terminal is available, otherwise falls back to
+    non-interactive setup (so the GUI app can't crash on a missing ``sys.stdin``).
+    """
     if is_first_run(base):
-        return perform_first_run(
-            base, input_fn=input_fn, getpass_fn=getpass_fn, print_fn=print_fn
-        )
+        if stdin_is_interactive():
+            return perform_first_run(
+                base, input_fn=input_fn, getpass_fn=getpass_fn, print_fn=print_fn
+            )
+        return perform_noninteractive_first_run(base, print_fn=print_fn)
     return config_module.load(paths.config_path(base))

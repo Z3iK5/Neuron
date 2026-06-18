@@ -12,8 +12,11 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from neuron_desktop import config as config_module
 from neuron_desktop import paths, setup, supervisor
@@ -21,6 +24,32 @@ from neuron_desktop import paths, setup, supervisor
 # Internal command used when the (possibly frozen) app re-execs itself to run the
 # homeserver child process. Not part of the public CLI surface.
 _SERVER_COMMAND = "_server"
+
+
+def _reveal(path: Path) -> None:
+    """Best-effort: open a file in the OS default handler. Never raises."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        elif sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception:
+        pass
+
+
+def _configured(base: Path) -> config_module.DesktopConfig:
+    """Ensure the app is configured (first-run setup if needed).
+
+    After a non-interactive first run (the double-clicked app), reveal the
+    WELCOME.txt so the user can find their auto-created admin credentials.
+    """
+    fresh = setup.is_first_run(base)
+    config = setup.load_or_create(base)
+    if fresh and setup.welcome_path(base).exists():
+        _reveal(setup.welcome_path(base))
+    return config
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,14 +98,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "tray":
-        from neuron_desktop import tray
+        config = _configured(base)
+        try:
+            from neuron_desktop import tray
 
-        tray.run_tray(setup.load_or_create(base))
+            tray.run_tray(config)
+        except (SystemExit, Exception) as exc:  # tray/GUI backend unavailable
+            # Don't die silently — keep the homeserver running so the user can
+            # still reach it in a browser (the console URL is in WELCOME.txt).
+            print(f"Tray unavailable ({exc}); running the server in the foreground.")
+            supervisor.serve(config)
         return 0
 
     # Default / "run": ensure configured, then serve.
-    config = setup.load_or_create(base)
-    supervisor.serve(config)
+    supervisor.serve(_configured(base))
     return 0
 
 

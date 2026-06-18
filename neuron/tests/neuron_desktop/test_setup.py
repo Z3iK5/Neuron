@@ -102,6 +102,50 @@ def test_open_console_uses_injected_opener(tmp_path: Path) -> None:
     assert url == "http://localhost:8123" and opened == [url]
 
 
+def _password_from_welcome(base: Path) -> str:
+    for line in setup.welcome_path(base).read_text(encoding="utf-8").splitlines():
+        if "Password" in line:
+            return line.split(":", 1)[1].strip()
+    raise AssertionError("no password line in WELCOME.txt")
+
+
+def test_noninteractive_first_run_creates_loginable_admin(tmp_path: Path) -> None:
+    """A double-clicked app (no stdin) must set up without prompts and not crash."""
+    config = setup.perform_noninteractive_first_run(tmp_path, print_fn=lambda _m: None)
+
+    assert config.admin_username == "admin"
+    assert paths.config_path(tmp_path).exists()
+    assert paths.media_path(tmp_path).is_dir()
+    assert not setup.is_first_run(tmp_path)
+
+    # The generated credentials are recorded for the user, and they actually work.
+    welcome = setup.welcome_path(tmp_path)
+    assert welcome.exists()
+    password = _password_from_welcome(tmp_path)
+    assert password  # a non-empty generated password
+
+    with TestClient(create_app(config.to_server_settings())) as client:
+        login = client.post(
+            "/_matrix/client/v3/login",
+            json={
+                "type": "m.login.password",
+                "identifier": {"type": "m.id.user", "user": "admin"},
+                "password": password,
+            },
+        )
+        assert login.status_code == 200
+
+
+def test_load_or_create_is_noninteractive_without_a_tty(tmp_path: Path) -> None:
+    """Under pytest stdin is not a tty, so load_or_create must not call input()."""
+    assert not setup.stdin_is_interactive()
+    # Would raise "lost sys.stdin" if it tried to prompt; instead it auto-sets-up.
+    config = setup.load_or_create(tmp_path, print_fn=lambda _m: None)
+    assert config.admin_username == "admin"
+    assert setup.welcome_path(tmp_path).exists()
+    assert not setup.is_first_run(tmp_path)
+
+
 def test_first_run_then_admin_can_sign_in(tmp_path: Path) -> None:
     """The headline flow: empty dir → setup → admin signs in and administers."""
     config = setup.perform_first_run(
