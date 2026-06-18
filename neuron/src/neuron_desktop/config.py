@@ -31,6 +31,9 @@ class DesktopConfig:
     bind_host: str = "127.0.0.1"
     bind_port: int = 8008
     public_base_url: str = ""
+    # First-run (non-interactive) flow: the first account created in the browser
+    # becomes the admin, so there's no pre-created default password.
+    first_user_admin: bool = False
 
     @property
     def data_path(self) -> Path:
@@ -52,6 +55,7 @@ class DesktopConfig:
             media_store_path=str(paths.media_path(base)),
             signing_key_path=str(paths.signing_key_path(base)),
             admin_users=self.admin_username,
+            first_user_admin=self.first_user_admin,
             bind_host=self.bind_host,
             bind_port=self.bind_port,
         )

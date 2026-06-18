@@ -9,7 +9,6 @@ same storage the server uses, so the admin can immediately sign in to the consol
 from __future__ import annotations
 
 import asyncio
-import secrets
 import socket
 import sys
 import time
@@ -103,33 +102,37 @@ async def ensure_admin_account(
     return user_id
 
 
-def _finalize_first_run(
-    base: Path, config: DesktopConfig, password: str, *, print_fn: PrintFn
-) -> None:
-    """Write the config and create the admin account (shared by both setup paths)."""
+def _write_config(base: Path, config: DesktopConfig) -> None:
+    """Create the data directories and persist the desktop config."""
     base.mkdir(parents=True, exist_ok=True)
     paths.media_path(base).mkdir(parents=True, exist_ok=True)
     config_module.save(config, paths.config_path(base))
 
+
+def _finalize_first_run(
+    base: Path, config: DesktopConfig, password: str, *, print_fn: PrintFn
+) -> None:
+    """Write the config and create the admin account (interactive setup)."""
+    _write_config(base, config)
     settings = config.to_server_settings()
     asyncio.run(ensure_admin_account(settings, config.admin_username, password))
-
     print_fn(f"Created admin @{config.admin_username}:{config.server_name}.")
     print_fn(f"State directory: {base}")
 
 
-def _write_welcome_file(base: Path, config: DesktopConfig, password: str) -> None:
-    """Record the auto-generated admin credentials where the user can find them."""
+def _write_welcome_file(base: Path, config: DesktopConfig) -> None:
+    """Tell the user how to finish setup in the browser (no default password)."""
+    signup_url = config.console_url().rstrip("/") + "/get-started"
     welcome_path(base).write_text(
         "Welcome to Neuron!\n\n"
-        "Your homeserver was set up automatically. Sign in to the admin console\n"
-        "or any Matrix client with the account below — then change the password.\n\n"
-        f"  Console / homeserver : {config.console_url()}\n"
-        f"  Matrix ID            : @{config.admin_username}:{config.server_name}\n"
-        f"  Username             : {config.admin_username}\n"
-        f"  Password             : {password}\n\n"
-        "Keep this file safe (it contains your admin password). All of your\n"
-        f"server's data lives in:\n  {base}\n",
+        "Your homeserver is running. To finish setup, open the link below and\n"
+        "create your account — the first account you create becomes the server\n"
+        "administrator, and you choose its password:\n\n"
+        f"  {signup_url}\n\n"
+        "Then sign in from any Matrix client (Element, FluffyChat, …) with:\n"
+        f"  Homeserver : {config.console_url()}\n"
+        "  Your new username + password\n\n"
+        f"All of your server's data lives in:\n  {base}\n",
         encoding="utf-8",
     )
 
@@ -152,16 +155,21 @@ def perform_first_run(
 def perform_noninteractive_first_run(base: Path, *, print_fn: PrintFn = print) -> DesktopConfig:
     """First-run setup with no prompts — for the double-clicked desktop app.
 
-    There is no terminal to prompt on, so we pick sensible defaults and a generated
-    admin password, create the account, and record the credentials in a WELCOME.txt
-    in the data directory (the app opens it so the user can sign in).
+    There's no terminal to prompt on, so rather than invent a default password we
+    configure the server to make the **first account that signs up** the admin, write
+    a WELCOME.txt pointing at the in-browser sign-up, and let the user choose their own
+    username and password there.
     """
     config = DesktopConfig(
-        server_name=default_server_name(), data_dir=str(base), admin_username="admin"
+        server_name=default_server_name(),
+        data_dir=str(base),
+        admin_username="admin",
+        first_user_admin=True,
     )
-    password = secrets.token_urlsafe(12)
-    _finalize_first_run(base, config, password, print_fn=print_fn)
-    _write_welcome_file(base, config, password)
+    _write_config(base, config)
+    _write_welcome_file(base, config)
+    print_fn(f"Configured Neuron in {base}.")
+    print_fn(f"Finish setup at {config.console_url().rstrip('/')}/get-started")
     return config
 
 

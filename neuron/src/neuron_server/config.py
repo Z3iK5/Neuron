@@ -59,6 +59,14 @@ class NeuronServerSettings(BaseSettings):
         description="Allow open account registration via POST /_matrix/client/v3/register.",
     )
 
+    # Grant server-admin to the first account that registers. The desktop first-run
+    # flow turns this on so the user who signs up in the browser owns the server,
+    # with no pre-created default admin/password.
+    first_user_admin: bool = Field(
+        default=False,
+        description="Make the first account that registers a server admin.",
+    )
+
     # Bootstrap server admins: a comma-separated list of localparts or full user
     # IDs that are always treated as server admins (in addition to any user whose
     # stored admin flag is set). This is how you get the first admin so the Neuron

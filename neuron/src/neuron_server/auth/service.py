@@ -49,10 +49,18 @@ class LoginResult:
 class AuthService:
     """Account/authentication operations for one server."""
 
-    def __init__(self, db: Database, server_name: str, registration_enabled: bool) -> None:
+    def __init__(
+        self,
+        db: Database,
+        server_name: str,
+        registration_enabled: bool,
+        *,
+        first_user_admin: bool = False,
+    ) -> None:
         self._db = db
         self._server_name = server_name
         self._registration_enabled = registration_enabled
+        self._first_user_admin = first_user_admin
         self._uia = UiaSessionStore()
 
     @property
@@ -119,7 +127,10 @@ class AuthService:
         token = ids.generate_access_token()
 
         async with self._db.transaction():
-            await accounts.create_user(self._db, user_id, password_hash, False, created_ts)
+            # The very first account may be made a server admin (the desktop
+            # first-run flow uses this so the user who signs up owns the server).
+            is_admin = self._first_user_admin and not await accounts.any_users(self._db)
+            await accounts.create_user(self._db, user_id, password_hash, is_admin, created_ts)
             if not inhibit_login:
                 await accounts.create_device(
                     self._db, user_id, new_device_id, initial_device_display_name, created_ts

@@ -3,6 +3,15 @@
 All notable changes to Neuron. Each release attaches desktop installers — macOS
 `.dmg`, Windows `.exe`, Linux `.AppImage` — on the [Releases](https://github.com/Z3iK5/Neuron/releases) page.
 
+## [0.0.3] — unreleased
+
+### Changed
+- **Desktop first run now lets you set your own password.** Instead of creating a
+  default admin with a generated password, the app opens the browser to the in-app
+  sign-up and makes the **first account you create the server administrator** (new
+  `NEURON_SERVER_FIRST_USER_ADMIN` setting). `WELCOME.txt` points you at the sign-up
+  link — no default password to change.
+
 ## [0.0.2] — 2026-06-18
 
 ### Fixed

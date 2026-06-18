@@ -109,7 +109,12 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         app.state.server_key_resolver = ServerKeyResolver(
             db, settings.name, app.state.server_keys, app.state.federation_client
         )
-        app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
+        app.state.auth = AuthService(
+            db,
+            settings.name,
+            settings.registration_enabled,
+            first_user_admin=settings.first_user_admin,
+        )
         app.state.federation_sender = FederationSender(
             db, settings.name, app.state.federation_client
         )
