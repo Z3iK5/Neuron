@@ -1006,4 +1006,27 @@ desktop "start server" path was broken on `main`. Fixed by giving `main()` an
 explicit `argv` parameter and having the desktop CLI call `run_server([])`. New tests
 lock the contract (`tests/neuron_server/test_main_cli.py`; the desktop `_server` test
 now asserts the token is stripped). ruff + mypy clean (120 files); 224 passed, 3
-integration skips. Windows (`.msi`/`.exe`) and code signing remain follow-ups.
+integration skips. (CI-verified: PR #6 built a ~41 MB AppImage on `ubuntu-latest`.)
+
+---
+
+## Desktop D3 — Windows installer (.exe via Inno Setup) — ✅ built (CI-only)
+
+The desktop bundle is now also packaged as a Windows installer, completing the set
+(macOS `.dmg` + Linux `.AppImage` + Windows `.exe`).
+
+- **`packaging/neuron.iss`** (Inno Setup) compiles the one-folder bundle into a
+  **per-user** installer (`PrivilegesRequired=lowest` — no admin / UAC prompt),
+  installing to `%LOCALAPPDATA%\Programs\Neuron` with Start-menu + optional desktop
+  shortcuts, the brand `.ico`, and an uninstaller. A stable `AppId` lets future
+  versions upgrade in place. `SourceDir=..` resolves paths against `neuron/`.
+- **`.github/workflows/desktop-installers.yml`** gained Windows-only steps: find or
+  `choco install` Inno Setup, build `Neuron-Setup-x64.exe`, then **smoke-test via a
+  silent install + running the installed `Neuron.exe where`**, and upload the
+  installer artifact + attach to the release on a tag.
+
+Honest scope: the `.exe` build runs **only on the `windows-latest` runner** — it
+cannot be exercised in the Linux dev container; the `.iss` + workflow are authored
+and YAML-validated locally, with the install/run proven in CI. Code signing
+(Authenticode) remains the D4 follow-up. With this, all three native installers
+build in CI; cut a `v*` tag to publish them as GitHub Release assets.
