@@ -66,8 +66,24 @@ entitlements live in `packaging/entitlements.plist`. Signing the bundled Python 
 for notarization can need a round of iteration — `notarytool` prints a detailed log
 on rejection.
 
-> **Windows / Linux** installers are still unsigned (SmartScreen may warn on Windows).
-> A Windows MSIX for the Microsoft Store is built as a separate artifact.
+> **Windows / Linux** `.exe`/`.AppImage` installers are unsigned (SmartScreen may warn).
+
+### Windows MSIX (Microsoft Store)
+
+Every build also produces a **`.msix`** package, uploaded as a workflow **artifact**
+(`neuron-windows-msix`) — it is *not* attached to the GitHub Release. With no
+configuration it is **self-signed** for sideload testing: download the artifact, import
+the bundled `Neuron-dev-cert.cer` into *Trusted People*, then install the `.msix`.
+
+To make it **Store-ready**, set these repository *variables* (Settings → Secrets and
+variables → Actions → Variables) from your Partner Center app reservation — the package
+is then built with that identity and left unsigned for Store submission:
+
+| Variable | From Partner Center |
+|----------|---------------------|
+| `MSIX_IDENTITY_NAME` | Package/Identity **Name** |
+| `MSIX_PUBLISHER` | Package/Identity **Publisher** (`CN=…`) |
+| `MSIX_PUBLISHER_DISPLAY_NAME` | Publisher display name |
 
 ### Building locally
 
