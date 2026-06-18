@@ -78,6 +78,7 @@ release — see **[docs/desktop.md](docs/desktop.md)**.
 - **[Deployment](docs/deployment.md)** — production: reverse proxy + TLS, `.well-known`, PostgreSQL, federation
 - **[Architecture](docs/architecture.md)** — how the components fit together
 - **[Brand assets](neuron/assets/brand/)** — the NEURON mark, palette, and type
+- **[Changelog](CHANGELOG.md)** — what changed in each release
 - **[Contributing](CONTRIBUTING.md)** — dev setup and the checks CI runs
 
 ## Status
