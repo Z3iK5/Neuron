@@ -5,6 +5,13 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 
 ## [0.0.3] — unreleased
 
+### Added
+- **Passkey (WebAuthn) login for the admin console.** Enrol a passkey (Touch ID /
+  Windows Hello / a security key) from the new **Passkeys** page and sign in with it
+  instead of the console password. Credentials are kept in a small file under
+  `NEURON_CONSOLE_DATA_DIR`; relying-party id/origin auto-derive from the request
+  (override with `NEURON_WEBAUTHN_RP_ID` / `NEURON_WEBAUTHN_ORIGIN` behind a proxy).
+
 ### Changed
 - **Desktop first run now lets you set your own password.** Instead of creating a
   default admin with a generated password, the app opens the browser to the in-app

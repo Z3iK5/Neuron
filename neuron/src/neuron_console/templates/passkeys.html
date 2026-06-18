@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Passkeys — NEURON Console{% endblock %}
+{% block content %}
+<h1>Passkeys</h1>
+<p class="muted">Sign in to the console with a passkey (Touch ID / Windows Hello /
+a security key) instead of the console password. Passkeys you add here can be used
+on the login page.</p>
+
+<div class="card narrow">
+  <h2>Add a passkey</h2>
+  <label for="passkey-label">Name (so you can recognise it)</label>
+  <input type="text" id="passkey-label" placeholder="e.g. MacBook Touch ID">
+  <button type="button" id="passkey-add">Add a passkey</button>
+  <p class="error" id="passkey-error" hidden></p>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>Name</th><th>Added</th><th></th></tr></thead>
+    <tbody>
+      {% for p in passkeys %}
+      <tr>
+        <td>{{ p.label }}</td>
+        <td>{{ p.created_ts }}</td>
+        <td>
+          <form method="post" action="/passkeys/delete"
+                onsubmit="return confirm('Remove this passkey?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="credential_id" value="{{ p.id }}">
+            <button type="submit" class="danger small">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">No passkeys yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>window.NEURON_CSRF = "{{ csrf_token }}";</script>
+<script src="{{ url_for('static', path='/webauthn.js') }}"></script>
+<script>
+  document.getElementById("passkey-add").addEventListener("click", function () {
+    var label = document.getElementById("passkey-label").value || "passkey";
+    neuronPasskeyRegister(label, "passkey-error");
+  });
+</script>
+{% endblock %}

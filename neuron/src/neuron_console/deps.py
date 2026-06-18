@@ -13,6 +13,7 @@ from fastapi import Form
 from starlette.requests import Request
 
 from neuron_console.config import ConsoleSettings
+from neuron_console.passkeys import PasskeyStore
 from neuron_console.security import verify_csrf
 from neuron_core import AdminClient
 from neuron_supervisor import Supervisor
@@ -54,6 +55,12 @@ def get_supervisor(request: Request) -> Supervisor:
     """Return the shared Supervisor (built at startup from the admin + bot clients)."""
     supervisor: Supervisor = request.app.state.supervisor
     return supervisor
+
+
+def get_passkeys(request: Request) -> PasskeyStore:
+    """Return the shared passkey credential store."""
+    store: PasskeyStore = request.app.state.passkeys
+    return store
 
 
 def require_login(request: Request) -> None:
