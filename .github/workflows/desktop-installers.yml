@@ -59,6 +59,49 @@ jobs:
       - name: Build the app bundle
         run: pyinstaller --noconfirm packaging/neuron_desktop.spec
 
+      # --- macOS code signing (Developer ID; only when the secrets are present) ---
+      - name: Import Developer ID certificate
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "No MACOS_CERT_P12 secret set — building unsigned."
+            echo "MACOS_SIGNED=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/neuron-signing.keychain-db"
+          KEYCHAIN_PWD="$(openssl rand -hex 20)"
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PWD" "$KEYCHAIN" >/dev/null
+          # Make the new keychain searchable alongside the defaults.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed s/\"//g)
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | awk '/Developer ID Application/{print $2; exit}')"
+          if [ -z "$IDENTITY" ]; then
+            echo "No 'Developer ID Application' identity found in the imported cert." >&2
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/cert.p12"
+          {
+            echo "MACOS_SIGNED=1"
+            echo "MACOS_IDENTITY=$IDENTITY"
+            echo "MACOS_KEYCHAIN=$KEYCHAIN"
+          } >> "$GITHUB_ENV"
+
+      - name: Sign the macOS app
+        if: matrix.os == 'macos-latest' && env.MACOS_SIGNED == '1'
+        run: bash packaging/macos_sign.sh dist/Neuron.app
+
       - name: Smoke-test the bundle (non-GUI command)
         # Confirms the frozen bundle starts and its CLI works without a display.
         shell: bash
@@ -90,6 +133,22 @@ jobs:
       - name: Build the macOS .dmg
         if: matrix.os == 'macos-latest'
         run: bash packaging/make_dmg.sh neuron-macos.dmg
+
+      - name: Sign & notarize the .dmg
+        if: matrix.os == 'macos-latest' && env.MACOS_SIGNED == '1'
+        shell: bash
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          codesign --force --timestamp --sign "$MACOS_IDENTITY" \
+            --keychain "$MACOS_KEYCHAIN" neuron-macos.dmg
+          if [ -z "$APPLE_API_KEY_P8" ]; then
+            echo "Signed, but no notarization API key set — skipping notarization."
+            exit 0
+          fi
+          bash packaging/macos_notarize.sh neuron-macos.dmg
 
       - name: Upload .dmg artifact
         if: matrix.os == 'macos-latest'
