@@ -910,4 +910,41 @@ registration does **not** consume the token; console — invite link rendered, p
 URL override, QR served as `image/svg+xml`, QR route requires login. ruff + mypy
 clean (119 files); full suite 210 passed, 3 integration skips.
 
-Next QoL step: (3) a `neuron-server doctor` preflight/health command.
+---
+
+## QoL — `neuron-server doctor` (step 3 of 3) — ✅ built
+
+A preflight / health command so an operator can find the things that quietly break
+a deployment before (or while) running the server. `neuron-server` gained
+subcommands: `serve` (the default, unchanged) and `doctor`.
+
+Each check reports **ok / warn / fail**; `doctor` exits non-zero on any failure
+(`--strict` also fails on warnings), so it doubles as a CI/preflight gate.
+
+- **Config & identity (always):** server name (warns on a non-federatable name);
+  public base URL (valid, warns on `http`/localhost); bind address; media-store
+  path writable; registration open vs closed (warns on open — points at the invite
+  links from step 2); bootstrap admins configured.
+- **Database (always):** connects, reports the backend + schema version (warns when
+  migrations are pending, ok when "not yet initialized"), and re-runs the server's
+  own identity guard — a DB that belongs to a different `server_name` is a **fail**.
+- **Signing key (always):** loads from the configured file or the database and
+  reports the key id; missing is fine (generated on first run), corrupt is a fail.
+- **Reachability (`--offline` skips):** whether something is `listening` on the bind
+  port; `client discovery` (fetches `/_matrix/client/versions` + `.well-known/
+  matrix/client` from the public URL and checks the advertised base URL matches);
+  the resolved `federation routing` target; and `federation reachability` — fetches
+  this server's own `/_matrix/key/v2/server` back over federation and verifies it is
+  correctly self-signed.
+
+Built in `neuron_server/doctor.py` with injectable network seams (`http_client`,
+`fed_open_client`) so the online checks are tested in-process. Tests
+(`tests/neuron_server/test_doctor.py`): clean config all-ok; dev defaults warn but
+don't fail (and `--strict` flips them to a non-zero exit); identity mismatch fails;
+invalid public URL fails; unwritable media store fails; signing-key file states;
+unreachable database fails; online checks pass against an in-process server; report
+formatting + exit codes; and a subprocess smoke of `neuron-server doctor --offline`.
+ruff + mypy clean (120 files); full suite 221 passed, 3 integration skips.
+
+This completes the three onboarding QoL steps (in-browser onboarding → invite links
++ QR → doctor).
