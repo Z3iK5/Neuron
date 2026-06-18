@@ -588,6 +588,35 @@ the template and storing the returned room state locally so *our* users can join
 resolution (single resident server, no forks), so **state resolution v2** is still
 to come, as is applying transaction-ingested events to room state.
 
-Next steps in HS-7: the outbound join side (6b) so our users join remote rooms;
-then **state resolution v2** + durable state application; then backfill and the
-remaining federation read/EDU surface.
+### Step 6b — Federated join, outbound side — ✅ built
+
+The mirror of 6a: **our users can now join rooms hosted on other servers**, and we
+persist a room we didn't create. Federated join now works in **both directions**.
+
+- **Outbound handshake** (`federation/membership.py`, `FederatedMembership`): runs
+  the joining side — `make_join` to fetch the template, completes & signs the join
+  with our key, `send_join` to submit it — then **validates every returned state /
+  auth-chain event** (`validate_pdu`) and **persists the room locally**: creates the
+  room row from the create event, inserts all events parents-first, adopts the
+  returned state as current state, and records memberships.
+- **Outbound client** (`federation/client.py`): added a signed `put_json`.
+- **Event ingest helper** (`Event.from_pdu`): builds a stored event from a received
+  PDU.
+- **CS routing** (`api/client_rooms.py`): the ordinary join endpoints
+  (`/join/{roomId}`, `/rooms/{roomId}/join`) transparently use federation when the
+  room isn't hosted here, honouring `?server_name=` resident hints.
+
+Acceptance criterion met — **a two-server outbound-join test**: a user on A joins a
+public room hosted by B through the normal CS join endpoint; A runs the handshake,
+validates B's returned state, and stores the room — afterwards the room appears in
+A's `joined_rooms`, A's `joined_members` lists **both** the remote creator and our
+user, and A can read the adopted room state; B also sees our user joined. ruff +
+mypy clean (97 files); 156 tests pass.
+
+Honest scope / deferred: the returned state is adopted as-is (single resident
+server, no forks), so **state resolution v2** is still required for conflict
+handling and for applying transaction-ingested events to room state; also pending
+are leave/invite over federation, backfill, and EDUs.
+
+Next steps in HS-7: **state resolution v2** (the algorithmic core) and durable
+state application; then backfill, federated leave/invite, and EDUs.

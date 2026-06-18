@@ -30,6 +30,19 @@ def get_rooms(request: Request) -> RoomService:
     return service
 
 
+async def _join_any(request: Request, room_id: str, user_id: str) -> str:
+    """Join a room, transparently using federation if it isn't hosted here."""
+    rooms: RoomService = request.app.state.rooms
+    if await request.app.state.db.fetchval(
+        "SELECT 1 FROM rooms WHERE room_id = ?", (room_id,)
+    ):
+        return await rooms.join(room_id, user_id)
+    # Unknown locally → join over federation via the requested servers (or the
+    # room's own domain as a fallback).
+    via = request.query_params.getlist("server_name")
+    return await request.app.state.fed_membership.join(room_id, user_id, via)
+
+
 async def _json_body(request: Request) -> dict[str, Any]:
     raw = await request.body()
     if not raw:
@@ -107,21 +120,21 @@ async def send_state_no_key(
 @router.post("/v3/join/{room_id}")
 async def join_by_id(
     room_id: str,
+    request: Request,
     who: Authenticated = Depends(require_user),
-    rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
     if not room_id.startswith("!"):
         raise MatrixError(400, "M_INVALID_PARAM", "Room aliases are not supported yet")
-    return {"room_id": await rooms.join(room_id, who.user_id)}
+    return {"room_id": await _join_any(request, room_id, who.user_id)}
 
 
 @router.post("/v3/rooms/{room_id}/join")
 async def join_room(
     room_id: str,
+    request: Request,
     who: Authenticated = Depends(require_user),
-    rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    return {"room_id": await rooms.join(room_id, who.user_id)}
+    return {"room_id": await _join_any(request, room_id, who.user_id)}
 
 
 @router.post("/v3/rooms/{room_id}/leave")

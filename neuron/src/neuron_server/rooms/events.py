@@ -48,6 +48,26 @@ class Event:
     def is_state(self) -> bool:
         return self.state_key is not None
 
+    @classmethod
+    def from_pdu(cls, pdu: dict[str, Any], event_id: str, stream_ordering: int) -> Event:
+        """Build a stored event from a received federation PDU."""
+        state_key = pdu.get("state_key")
+        return cls(
+            event_id=event_id,
+            room_id=str(pdu["room_id"]),
+            type=str(pdu["type"]),
+            sender=str(pdu["sender"]),
+            content=dict(pdu.get("content") or {}),
+            origin_server_ts=int(pdu["origin_server_ts"]),
+            depth=int(pdu.get("depth", 0)),
+            stream_ordering=stream_ordering,
+            state_key=None if state_key is None else str(state_key),
+            auth_events=list(pdu.get("auth_events", [])),
+            prev_events=list(pdu.get("prev_events", [])),
+            hashes=pdu.get("hashes"),
+            signatures=pdu.get("signatures"),
+        )
+
     def pdu_dict(self) -> dict[str, Any]:
         """Render the full federation event (PDU) shape.
 
