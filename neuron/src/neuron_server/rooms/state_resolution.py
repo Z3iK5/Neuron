@@ -36,7 +36,6 @@ StateMap = dict[StateKey, str]
 
 _CREATE = ("m.room.create", "")
 _POWER_LEVELS = ("m.room.power_levels", "")
-_JOIN_RULES = ("m.room.join_rules", "")
 
 
 def _key_of(event: Event) -> StateKey:
