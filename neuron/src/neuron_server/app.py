@@ -47,6 +47,7 @@ from neuron_server.config import NeuronServerSettings
 from neuron_server.e2ee.service import E2EEService
 from neuron_server.errors import MatrixError, unrecognized
 from neuron_server.federation.client import FederationClient
+from neuron_server.federation.flusher import RetryFlusher
 from neuron_server.federation.membership import FederatedMembership
 from neuron_server.federation.sender import FederationSender
 from neuron_server.keys.resolver import ServerKeyResolver
@@ -137,9 +138,15 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         )
         app.state.e2ee = E2EEService(db, notify=notifier.notify)
         app.state.admin = AdminService(db, settings.name)
+        flusher = RetryFlusher(
+            app.state.federation_sender.retry_all, settings.federation_retry_interval_s
+        )
+        app.state.retry_flusher = flusher
+        flusher.start()
         try:
             yield
         finally:
+            await flusher.stop()
             await db.disconnect()
 
     app = FastAPI(title="Neuron Server", lifespan=lifespan, docs_url=None, redoc_url=None)

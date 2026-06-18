@@ -818,7 +818,25 @@ Honest scope / deferred: typing state is in-memory (single-process); expiry is
 applied on read, not via a timer (so a stop-typing that's purely a timeout surfaces
 on the next sync, not as an instant long-poll wake); **presence** is still stubbed.
 
+### Step 6l — Background retry flusher — ✅ built
+
+Completes the durability story: the send outbox now drains on its own, without
+waiting for the next locally-originated event.
+
+- **Flusher** (`federation/flusher.py`, `RetryFlusher`): runs an injected flush
+  callable (`FederationSender.retry_all`) on a fixed interval
+  (`NEURON_SERVER_FEDERATION_RETRY_INTERVAL_S`, default 30s); a failed flush is
+  logged and never kills the loop. Started in the app lifespan, stopped cleanly on
+  shutdown.
+
+Acceptance criterion met: the loop flushes repeatedly and stops cleanly (no further
+flushes after `stop`), survives flush errors, and `retry_all` drains **every**
+destination with a backlog. ruff + mypy clean (116 files); 190 tests pass.
+
+Honest scope / deferred: fixed interval (no exponential backoff per destination
+yet).
+
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
-into durable state application for forks; then a background retry flusher and
-**presence**. The cross-server conformance milestone (Complement) needs Docker + Go
-and is tracked as HS-8.
+into durable state application for forks; then **presence** and per-destination
+backoff. The cross-server conformance milestone (Complement) needs Docker + Go and
+is tracked as HS-8.

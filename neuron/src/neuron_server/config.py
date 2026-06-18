@@ -107,6 +107,13 @@ class NeuronServerSettings(BaseSettings):
         gt=0,
         description="valid_until_ts horizon for the published server key, in ms.",
     )
+    # How often (seconds) the background flusher retries undelivered federation
+    # transactions to destinations that were offline.
+    federation_retry_interval_s: float = Field(
+        default=30.0,
+        gt=0,
+        description="Interval for retrying queued outbound federation transactions.",
+    )
 
     # Where the ASGI server binds when run via `python -m neuron_server`.
     bind_host: str = Field(default="127.0.0.1", description="ASGI bind host.")
