@@ -559,6 +559,35 @@ durable **state application** (authorising the event against its `auth_events`,
 persisting it into room state) is the next step and needs state resolution v2; EDUs
 in the transaction are accepted but ignored for now.
 
-Next steps in HS-7: `make_join`/`send_join` so users can **join rooms across
-federation**, then **state resolution v2** and applying ingested events to room
-state — the research-grade remainder.
+### Step 6a — Federated join, resident side (make_join / send_join) — ✅ built
+
+A **remote user can now join a room we host** over real federation — the first
+end-to-end membership flow across two servers.
+
+- **`make_join`** (`GET /_matrix/federation/v1/make_join/{roomId}/{userId}`):
+  returns an unsigned join-event **template** (selected `auth_events`, the forward
+  extremity as `prev_events`, depth, room version) for the remote server to
+  complete. Refuses users not on the calling server, and rooms that aren't public
+  and haven't invited them.
+- **`send_join`** (`PUT /_matrix/federation/v2/send_join/{roomId}/{eventId}`):
+  validates the remote server's signed join event (content hash + sender-server
+  signature), **authorises it against current room state** and persists it, then
+  returns the room's current **state** and **auth chain** (`RoomService.
+  apply_external_join`).
+
+Acceptance criterion met — **a two-server join test**: a user on server A joins a
+public room hosted by server B; A fetches the template, completes and signs the
+join with A's key, and sends it back; B authenticates A (resolving A's keys),
+validates and applies the join, and afterwards **B's room lists the remote user as
+joined**. make_join for a user not on the origin is refused. ruff + mypy clean (96
+files); 155 tests pass.
+
+Honest scope / deferred: the **joining (outbound) side** — building the join from
+the template and storing the returned room state locally so *our* users can join
+*remote* rooms — is the next sub-step (6b); state is returned without conflict
+resolution (single resident server, no forks), so **state resolution v2** is still
+to come, as is applying transaction-ingested events to room state.
+
+Next steps in HS-7: the outbound join side (6b) so our users join remote rooms;
+then **state resolution v2** + durable state application; then backfill and the
+remaining federation read/EDU surface.

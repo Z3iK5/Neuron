@@ -446,6 +446,87 @@ class RoomService:
             )
         self._wake_syncs()
 
+    # --- federated membership (resident side: make_join / send_join) --------
+
+    async def make_join_template(self, room_id: str, user_id: str) -> dict[str, Any]:
+        """Build the unsigned join-event template a remote server completes."""
+        room = await self._require_room(room_id)
+        state = await self._load_state(room_id)
+        join_rules = state.get(("m.room.join_rules", ""))
+        join_rule = join_rules.content.get("join_rule") if join_rules else "invite"
+        if join_rule != "public" and authrules.membership_of(state, user_id) != "invite":
+            raise MatrixError(403, "M_FORBIDDEN", "Not invited and the room is not public")
+
+        extremity = await store.get_forward_extremity(self._db, room_id)
+        prev_events = [extremity.event_id] if extremity is not None else []
+        depth = (extremity.depth + 1) if extremity is not None else 1
+        content = {"membership": "join"}
+        auth_events = authrules.select_auth_event_ids(
+            "m.room.member", user_id, user_id, content, state
+        )
+        return {
+            "room_version": room.room_version,
+            "event": {
+                "room_id": room_id,
+                "type": "m.room.member",
+                "sender": user_id,
+                "state_key": user_id,
+                "content": content,
+                "depth": depth,
+                "prev_events": prev_events,
+                "auth_events": auth_events,
+                "origin_server_ts": _now_ms(),
+            },
+        }
+
+    async def apply_external_join(
+        self, room_id: str, pdu: dict[str, Any]
+    ) -> tuple[list[Event], list[Event]]:
+        """Authorise and persist a remote server's signed join event.
+
+        Returns ``(current_state, auth_chain)`` for the send_join response.
+        """
+        await self._require_room(room_id)
+        sender = pdu.get("sender")
+        if (
+            pdu.get("type") != "m.room.member"
+            or not isinstance(sender, str)
+            or pdu.get("state_key") != sender
+            or (pdu.get("content") or {}).get("membership") != "join"
+        ):
+            raise MatrixError(400, "M_INVALID_PARAM", "Not a valid join event")
+
+        event_id = compute_event_id(pdu)
+        state = await self._load_state(room_id)
+        probe = Event(
+            event_id=event_id, room_id=room_id, type="m.room.member", sender=sender,
+            content=dict(pdu["content"]), origin_server_ts=int(pdu["origin_server_ts"]),
+            depth=int(pdu["depth"]), stream_ordering=0, state_key=sender,
+        )
+        authrules.authorize(probe, state)
+
+        async with self._db.transaction():
+            stream = await store.next_stream_ordering(self._db)
+            event = Event(
+                event_id=event_id, room_id=room_id, type="m.room.member", sender=sender,
+                content=dict(pdu["content"]), origin_server_ts=int(pdu["origin_server_ts"]),
+                depth=int(pdu["depth"]), stream_ordering=stream, state_key=sender,
+                auth_events=list(pdu.get("auth_events", [])),
+                prev_events=list(pdu.get("prev_events", [])),
+                hashes=pdu.get("hashes"), signatures=pdu.get("signatures"),
+            )
+            await store.insert_event(self._db, event)
+            await store.update_current_state(self._db, room_id, "m.room.member", sender, event_id)
+            await store.set_membership(self._db, room_id, sender, "join")
+        self._wake_syncs()
+
+        current_state = await store.get_current_state(self._db, room_id)
+        auth_seed: list[str] = []
+        for member in current_state:
+            auth_seed.extend(member.auth_events)
+        auth_chain = await store.get_auth_chain(self._db, room_id, auth_seed)
+        return current_state, auth_chain
+
 
 def _redact_level(state: AuthState) -> int:
     pl = state.get(("m.room.power_levels", ""))
