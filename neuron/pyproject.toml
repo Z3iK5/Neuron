@@ -80,6 +80,14 @@ desktop = [
     "platformdirs>=4.0",         # per-user data directory across macOS/Windows/Linux
 ]
 
+# The tray / menu-bar front-end (D2). Split out because it needs a desktop session
+# and a GUI toolkit; the supervisor logic in `desktop` works headless without it.
+# Install with:  pipx install "neuron[desktop-gui]"
+desktop-gui = [
+    "neuron[desktop]",
+    "pystray>=0.19",             # cross-platform tray icon (macOS/Windows/Linux)
+]
+
 # Everything needed for development + CI (includes the service extras above so
 # the whole codebase is importable and testable).
 # Install with:  pip install -e ".[dev]"
@@ -140,7 +148,7 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 # These ship little/no type information; treat them as untyped.
 #   boto3 — S3 sink; olm — libolm bindings for E2EE; aiosqlite/asyncpg — DB drivers.
-module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg", "PIL", "PIL.*", "nacl", "nacl.*"]
+module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg", "PIL", "PIL.*", "nacl", "nacl.*", "pystray", "pystray.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

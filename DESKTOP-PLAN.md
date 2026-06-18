@@ -60,10 +60,16 @@ Per-user data dir via `platformdirs`:
   signs in and uses the admin API, all verified by unit tests (the GUI/installer
   parts remain D2/D3). Data-dir defaulting (the unfinished part of D0) is handled
   here at the desktop layer, keeping `neuron_server` itself env-configured and pure.
-- **D2 — Tray / menu-bar app.** Cross-platform tray icon (`pystray`) with
-  Start/Stop, Open Console, Open data folder, Status, Quit; server runs in a
-  background process. **Done when:** the app sits in the tray and controls the
-  server. *(M — GUI verified on real OSes, not in CI headless)*
+- **D2 — Tray / menu-bar app. ◑ Logic done; GUI pending real-OS run.**
+  `neuron_desktop/process.py` runs the server as a managed **background child
+  process** (`python -m neuron_server` with settings passed via env), with an
+  injectable `Popen` so start/stop/status is unit-tested (plus a real-child test).
+  `neuron_desktop/tray.py` has a GUI-agnostic `TrayController` + `menu_items`
+  (Start/Stop, Status, Open console, Open data folder, Quit) — fully tested — and a
+  thin `run_tray` that draws the icon with `pystray` (lazy import; `desktop-gui`
+  extra) and a `neuron-desktop tray` command. **Remaining:** the actual tray
+  icon/menu can only be verified on a real macOS/Windows/Linux desktop session, not
+  in the headless container. *(M)*
 - **D3 — Native installers via CI.** GitHub Actions **matrix** (macOS, Windows,
   Ubuntu) packaging with **PyInstaller** or **Briefcase** → `.dmg`/`.app`,
   `.msi`/`.exe`, `AppImage`/`.deb`; uploaded as release artifacts. **Done when:**

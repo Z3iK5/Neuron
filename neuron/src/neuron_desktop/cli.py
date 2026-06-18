@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("setup", help="Run the first-run setup wizard.")
     sub.add_parser("where", help="Print the data directory and config path.")
     sub.add_parser("console", help="Open the admin console in a browser.")
+    sub.add_parser("tray", help="Run the menu-bar / system-tray app (needs a desktop).")
     return parser
 
 
@@ -47,6 +48,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         url = supervisor.open_console(config_module.load(paths.config_path(base)))
         print(f"Opening {url}")
+        return 0
+
+    if args.command == "tray":
+        from neuron_desktop import tray
+
+        tray.run_tray(setup.load_or_create(base))
         return 0
 
     # Default / "run": ensure configured, then serve.
