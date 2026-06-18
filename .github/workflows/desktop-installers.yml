@@ -2,9 +2,10 @@
 # uploads the bundles as artifacts (and as release assets on a tag push).
 #
 # This must run on each OS — PyInstaller cannot cross-compile — so GitHub's macOS,
-# Windows and Ubuntu runners each build their own bundle. Wrapping the bundles in
-# native installer formats (.dmg / .msi / AppImage) and code signing are follow-ups
-# (see DESKTOP-PLAN.md D3/D4).
+# Windows and Ubuntu runners each build their own bundle. On macOS the bundle is
+# additionally wrapped into a real `.app` and packaged as a drag-to-install `.dmg`.
+# Windows (.msi/.exe) and Linux (AppImage) installers, plus code signing /
+# notarization, are follow-ups (see DESKTOP-PLAN.md D3/D4).
 
 name: Desktop installers
 
@@ -47,6 +48,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[desktop-gui]" pyinstaller
 
+      - name: Render the macOS app icon (.icns)
+        if: matrix.os == 'macos-latest'
+        run: python packaging/make_icns.py
+
       - name: Build the app bundle
         run: pyinstaller --noconfirm packaging/neuron_desktop.spec
 
@@ -54,11 +59,11 @@ jobs:
         # Confirms the frozen bundle starts and its CLI works without a display.
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            ./dist/Neuron/Neuron.exe where
-          else
-            ./dist/Neuron/Neuron where
-          fi
+          case "${{ matrix.os }}" in
+            windows-latest) ./dist/Neuron/Neuron.exe where ;;
+            macos-latest)   ./dist/Neuron.app/Contents/MacOS/Neuron where ;;
+            *)              ./dist/Neuron/Neuron where ;;
+          esac
 
       - name: Archive the bundle
         run: python -c "import shutil; shutil.make_archive('neuron-${{ matrix.label }}', 'zip', 'dist')"
@@ -74,3 +79,21 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: neuron/neuron-${{ matrix.label }}.zip
+
+      # --- macOS native installer (.dmg) ------------------------------------
+      - name: Build the macOS .dmg
+        if: matrix.os == 'macos-latest'
+        run: bash packaging/make_dmg.sh neuron-macos.dmg
+
+      - name: Upload .dmg artifact
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-macos-dmg
+          path: neuron/neuron-macos.dmg
+
+      - name: Attach .dmg to release
+        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: neuron/neuron-macos.dmg

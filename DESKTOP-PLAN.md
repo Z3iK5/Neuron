@@ -81,9 +81,14 @@ Per-user data dir via `platformdirs`:
   locally on Linux:** the bundle builds, the frozen CLI works, and the frozen app
   **runs the full signed-event homeserver** (`/health` + `/_matrix/key/v2/server`)
   — which caught a real packaging bug (PyNaCl's `_cffi_backend` needed an explicit
-  hidden import). **Remaining:** the macOS/Windows builds (CI-only), and wrapping
-  the bundles in true native installers — `.dmg` / `.msi` / `AppImage` — which is
-  its own tooling step. *(L)*
+  hidden import). **macOS installer (.dmg) — done:** the spec now wraps the bundle
+  into a real `Neuron.app` (Info.plist + an `.icns` rendered from the brand mark by
+  `packaging/make_icns.py` via `iconutil`), and `packaging/make_dmg.sh` packages it
+  into a drag-to-`/Applications` `.dmg` that the CI workflow uploads/attaches on
+  macOS. Built only on the `macos-latest` runner (can't be exercised in the Linux
+  container); the icon-render + spec/scripts are validated locally. **Remaining:**
+  Windows (`.msi`/`.exe`) and Linux (AppImage/`.deb`) installers — each its own
+  tooling step. *(L)*
 - **D4 — Trust & polish.** Code signing + notarization (Apple Developer ID;
   Windows Authenticode), optional auto-update, "start at login" toggle. *(M, has
   external costs — see risks)*
