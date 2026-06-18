@@ -2,10 +2,9 @@
 # uploads the bundles as artifacts (and as release assets on a tag push).
 #
 # This must run on each OS — PyInstaller cannot cross-compile — so GitHub's macOS,
-# Windows and Ubuntu runners each build their own bundle. On macOS the bundle is
-# wrapped into a real `.app` and packaged as a drag-to-install `.dmg`; on Linux it
-# is packaged as a portable `.AppImage`. A Windows installer (.msi/.exe) and code
-# signing / notarization are follow-ups (see DESKTOP-PLAN.md D3/D4).
+# Windows and Ubuntu runners each build their own bundle, then wrap it into a native
+# installer: macOS `.dmg`, Linux `.AppImage`, Windows `.exe` (Inno Setup). Code
+# signing / notarization are follow-ups (see DESKTOP-PLAN.md D4).
 
 name: Desktop installers
 
@@ -119,3 +118,39 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: neuron/neuron-x86_64.AppImage
+
+      # --- Windows native installer (.exe via Inno Setup) -------------------
+      - name: Build the Windows installer (Inno Setup)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --yes --no-progress }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after install" }
+          & $iscc "packaging\neuron.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+
+      - name: Smoke-test the installer (silent install + run)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "Neuron-Setup-x64.exe")) { throw "installer not produced" }
+          Start-Process -Wait -FilePath ".\Neuron-Setup-x64.exe" `
+            -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART"
+          $app = Join-Path $env:LOCALAPPDATA "Programs\Neuron\Neuron.exe"
+          if (-not (Test-Path $app)) { throw "installed app not found at $app" }
+          $p = Start-Process -Wait -PassThru -FilePath $app -ArgumentList "where"
+          if ($p.ExitCode -ne 0) { throw "installed app failed ($($p.ExitCode))" }
+
+      - name: Upload Windows installer artifact
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: neuron-windows-installer
+          path: neuron/Neuron-Setup-x64.exe
+
+      - name: Attach Windows installer to release
+        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: neuron/Neuron-Setup-x64.exe

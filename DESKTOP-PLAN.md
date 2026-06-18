@@ -92,8 +92,13 @@ Per-user data dir via `platformdirs`:
   runs (`where`) and its `_server` child boots the homeserver — which caught a real
   regression: the `doctor` subcommand had made `neuron_server.__main__.main()` parse
   the process argv, so the frozen `_server` re-exec crashed; fixed by giving `main()`
-  an explicit `argv` and having the desktop CLI pass `[]`. **Remaining:** a Windows
-  installer (`.msi`/`.exe`). *(L)*
+  an explicit `argv` and having the desktop CLI pass `[]`. **Windows installer (.exe)
+  — done:** `packaging/neuron.iss` (Inno Setup) compiles the bundle into a per-user
+  installer (`PrivilegesRequired=lowest`, no UAC) with Start-menu/desktop shortcuts
+  and an uninstaller; the CI job finds-or-installs Inno Setup, builds it, and
+  smoke-tests via a silent install + running the installed `Neuron.exe where`.
+  CI-built on `windows-latest`. All three native installers (`.dmg` / `.AppImage` /
+  `.exe`) now build; code signing is the remaining D4 step. *(L)*
 - **D4 — Trust & polish.** Code signing + notarization (Apple Developer ID;
   Windows Authenticode), optional auto-update, "start at login" toggle. *(M, has
   external costs — see risks)*
