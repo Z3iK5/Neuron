@@ -10,6 +10,7 @@ minimal empty ruleset. Profile, account data and filters are fully stored.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -18,6 +19,7 @@ from neuron_server.api.deps import require_user
 from neuron_server.auth.service import Authenticated
 from neuron_server.errors import MatrixError
 from neuron_server.rooms import versions
+from neuron_server.storage import receipts as receipts_store
 from neuron_server.storage import userdata
 from neuron_server.storage.database import Database
 
@@ -237,8 +239,18 @@ async def receipt(
     room_id: str,
     receipt_type: str,
     event_id: str,
+    request: Request,
     who: Authenticated = Depends(require_user),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
+    if receipt_type != "m.read":
+        return {}  # only read receipts are persisted/federated for now
+    ts = int(time.time() * 1000)
+    await receipts_store.upsert_receipt(db, room_id, who.user_id, receipt_type, event_id, ts)
+    request.app.state.notify()
+    await request.app.state.federation_sender.send_receipt(
+        room_id, who.user_id, receipt_type, event_id, ts
+    )
     return {}
 
 

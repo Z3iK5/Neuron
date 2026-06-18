@@ -26,6 +26,8 @@ from neuron_server.federation.validation import (
     best_effort_event_id,
     validate_pdu,
 )
+from neuron_server.storage import receipts as receipts_store
+from neuron_server.storage import rooms as store
 
 router = APIRouter(prefix="/_matrix/federation/v1")
 
@@ -64,4 +66,36 @@ async def send_transaction(txn_id: str, request: Request) -> dict[str, Any]:
             results[event_id] = {}
         except PduValidationError as exc:
             results[best_effort_event_id(pdu)] = {"error": exc.reason}
+
+    edus = body.get("edus")
+    if isinstance(edus, list):
+        await _process_edus(request, edus)
     return {"pdus": results}
+
+
+async def _process_edus(request: Request, edus: list[Any]) -> None:
+    """Apply ephemeral data units (currently read receipts) from a transaction."""
+    db = request.app.state.db
+    touched = False
+    for edu in edus:
+        if not isinstance(edu, dict) or edu.get("edu_type") != "m.receipt":
+            continue
+        content = edu.get("content")
+        if not isinstance(content, dict):
+            continue
+        for room_id, by_type in content.items():
+            if await store.get_room(db, room_id) is None or not isinstance(by_type, dict):
+                continue
+            for receipt_type, users in by_type.items():
+                if not isinstance(users, dict):
+                    continue
+                for user_id, info in users.items():
+                    event_ids = info.get("event_ids") if isinstance(info, dict) else None
+                    ts = int((info.get("data") or {}).get("ts", 0)) if isinstance(info, dict) else 0
+                    for event_id in event_ids or []:
+                        await receipts_store.upsert_receipt(
+                            db, room_id, user_id, receipt_type, event_id, ts
+                        )
+                        touched = True
+    if touched:
+        request.app.state.notify()

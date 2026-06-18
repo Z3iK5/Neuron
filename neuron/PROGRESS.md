@@ -754,7 +754,29 @@ Honest scope / deferred: backfilled events are appended with current stream
 orderings (so very old history can sort after recent events — Synapse uses negative
 orderings for this); backfill is triggered on join only (not yet on gap detection).
 
+### Step 6i — Read receipts (local + over federation) — ✅ built
+
+The first EDU, and it de-stubs the HS-6 receipt endpoint into a real feature.
+
+- **Storage** (migration 0011 `receipts`, `storage/receipts.py`): read receipts with
+  a `stream_id` so `/sync` reports only changed rooms.
+- **CS endpoint** (`api/client_misc.py`): `POST /rooms/{roomId}/receipt/m.read/{eventId}`
+  now persists the receipt, wakes `/sync`, and federates it.
+- **`/sync`** (`sync/service.py`): joined rooms gain an `m.receipt` ephemeral event
+  (gated by a fifth, receipts, token component so long-polling still works).
+- **Federation** (`FederationSender.send_receipt` as an `m.receipt` EDU; the
+  transaction endpoint's `_process_edus` applies inbound receipt EDUs for rooms we
+  participate in).
+
+Acceptance criterion met — **a two-server receipt test**: Alice (on A) posts a read
+receipt for Bob's message; it appears in **her own `/sync`** and federates to **Bob's
+`/sync`** on B as an `m.receipt` ephemeral event. ruff + mypy clean (113 files); 184
+tests pass.
+
+Honest scope / deferred: only `m.read` receipts (not threaded/private); **typing**
+and **presence** EDUs are still stubbed (typing needs timeout handling).
+
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
-into durable state application for forks; then **EDUs** (typing/receipts/presence
-over federation) and outbound **retries** for offline destinations. The cross-server
-conformance milestone (Complement) needs Docker + Go and is tracked as HS-8.
+into durable state application for forks; then **typing** EDUs and outbound
+**retries** for offline destinations. The cross-server conformance milestone
+(Complement) needs Docker + Go and is tracked as HS-8.

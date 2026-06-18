@@ -22,6 +22,7 @@ from typing import Any
 from neuron_server.errors import MatrixError
 from neuron_server.storage import e2ee as e2ee_store
 from neuron_server.storage import invites as invites_store
+from neuron_server.storage import receipts as receipts_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 from neuron_server.sync.notifier import StreamNotifier
@@ -50,6 +51,7 @@ class _Token:
     to_device: int
     device_list: int
     invites: int = 0
+    receipts: int = 0
 
 
 class SyncService:
@@ -80,10 +82,15 @@ class SyncService:
             to_device = int(parts[1]) if len(parts) > 1 else 0
             device_list = int(parts[2]) if len(parts) > 2 else 0
             invites = int(parts[3]) if len(parts) > 3 else 0
+            receipts = int(parts[4]) if len(parts) > 4 else 0
         except ValueError as exc:
             raise MatrixError(400, "M_INVALID_PARAM", "Invalid sync token") from exc
         return _Token(
-            events=events, to_device=to_device, device_list=device_list, invites=invites
+            events=events,
+            to_device=to_device,
+            device_list=device_list,
+            invites=invites,
+            receipts=receipts,
         )
 
     async def _build(
@@ -98,12 +105,19 @@ class SyncService:
         leave: dict[str, Any] = {}
         changed = False
 
+        new_receipts = await receipts_store.max_receipt_stream(self._db)
+
         for room_id, membership in memberships:
             if membership == "join":
                 section, room_changed = await self._joined_room(room_id, token.events, initial)
-                if initial or room_changed:
+                receipt_event, receipts_changed = await self._room_receipts(
+                    room_id, token.receipts, initial
+                )
+                if receipt_event is not None:
+                    section["ephemeral"]["events"].append(receipt_event)
+                if initial or room_changed or receipts_changed:
                     join[room_id] = section
-                    changed = changed or room_changed
+                    changed = changed or room_changed or receipts_changed
             elif membership == "invite":
                 include, section = await self._invited_room(
                     room_id, user_id, token.events, initial
@@ -133,7 +147,9 @@ class SyncService:
         if to_device_events or device_changed:
             changed = True
 
-        next_batch = f"{current_events}.{new_to_device}.{new_device_list}.{new_invites}"
+        next_batch = (
+            f"{current_events}.{new_to_device}.{new_device_list}.{new_invites}.{new_receipts}"
+        )
         body = {
             "next_batch": next_batch,
             "rooms": {"join": join, "invite": invite, "leave": leave, "knock": {}},
@@ -199,6 +215,20 @@ class SyncService:
             "ephemeral": {"events": []},
         }
         return section, room_changed
+
+    async def _room_receipts(
+        self, room_id: str, since_receipts: int, initial: bool
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Build the room's ``m.receipt`` ephemeral event; flag whether it changed."""
+        receipts = await receipts_store.get_room_receipts(self._db, room_id)
+        if not receipts:
+            return None, False
+        content: dict[str, Any] = {}
+        for receipt in receipts:
+            by_type = content.setdefault(receipt.event_id, {}).setdefault(receipt.receipt_type, {})
+            by_type[receipt.user_id] = {"ts": receipt.ts}
+        changed = initial or any(receipt.stream_id > since_receipts for receipt in receipts)
+        return {"type": "m.receipt", "content": content}, changed
 
     async def _federated_invites(
         self, user_id: str, since_invites: int, invite: dict[str, Any]

@@ -258,6 +258,23 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE federated_invites ADD COLUMN stream_id INTEGER NOT NULL DEFAULT 0",
         ),
     ),
+    Migration(
+        version=11,
+        name="receipts",
+        # Read receipts (local and received over federation), with a stream
+        # position so /sync can report only changed ones.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS receipts ("
+            " room_id TEXT NOT NULL,"
+            " user_id TEXT NOT NULL,"
+            " receipt_type TEXT NOT NULL,"
+            " event_id TEXT NOT NULL,"
+            " ts INTEGER NOT NULL,"
+            " stream_id INTEGER NOT NULL,"
+            " PRIMARY KEY (room_id, user_id, receipt_type)"
+            ")",
+        ),
+    ),
 )
 
 
