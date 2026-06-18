@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from neuron_server.crypto.event_hashing import add_hashes_and_signatures, compute_event_id
@@ -64,11 +64,17 @@ class RoomService:
         server_name: str,
         signing_key: SigningKey,
         notify: Callable[[], None] | None = None,
+        federation_sender: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self._db = db
         self._server_name = server_name
         self._signing_key = signing_key
         self._notify = notify
+        self._federation_sender = federation_sender
+
+    async def _propagate(self, room_id: str, event: Event) -> None:
+        if self._federation_sender is not None:
+            await self._federation_sender(room_id, event.pdu_dict())
 
     def _wake_syncs(self) -> None:
         if self._notify is not None:
@@ -249,6 +255,7 @@ class RoomService:
             event = await self._append(room_id, etype=etype, sender=sender, content=content)
             await store.put_txn_event(self._db, sender, txn_id, event.event_id)
         self._wake_syncs()
+        await self._propagate(room_id, event)
         return event.event_id
 
     async def send_state(
@@ -266,6 +273,7 @@ class RoomService:
                 room_id, etype=etype, sender=sender, content=content, state_key=state_key
             )
         self._wake_syncs()
+        await self._propagate(room_id, event)
         return event.event_id
 
     # --- membership --------------------------------------------------------
@@ -647,6 +655,44 @@ class RoomService:
             pdu, server_name=self._server_name, signing_key=self._signing_key
         )
         return pdu, self._stripped_invite_state(state, sender)
+
+    async def apply_remote_event(self, pdu: dict[str, Any]) -> bool:
+        """Apply an event received over federation to our copy of the room.
+
+        Returns ``True`` if the event was stored. Skips events for rooms we don't
+        participate in, duplicates, and events the auth rules reject against our
+        current state. Full DAG/state-resolution handling is still to come, so this
+        is best-effort for forks; it is exact for the common linear case.
+        """
+        room_id = str(pdu.get("room_id", ""))
+        if await store.get_room(self._db, room_id) is None:
+            return False
+        event_id = compute_event_id(pdu)
+        if await store.get_event(self._db, room_id, event_id) is not None:
+            return True
+
+        state = await self._load_state(room_id)
+        probe = Event.from_pdu(pdu, event_id, 0)
+        try:
+            authrules.authorize(probe, state)
+        except MatrixError:
+            return False
+
+        async with self._db.transaction():
+            stream = await store.next_stream_ordering(self._db)
+            event = Event.from_pdu(pdu, event_id, stream)
+            await store.insert_event(self._db, event)
+            if event.state_key is not None:
+                await store.update_current_state(
+                    self._db, room_id, event.type, event.state_key, event_id
+                )
+                if event.type == "m.room.member":
+                    await store.set_membership(
+                        self._db, room_id, event.state_key,
+                        str(event.content.get("membership")),
+                    )
+        self._wake_syncs()
+        return True
 
     async def apply_invite(self, room_id: str, pdu: dict[str, Any]) -> str:
         """Persist an invite event (already authorised in :meth:`build_invite`)."""

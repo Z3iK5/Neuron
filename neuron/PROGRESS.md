@@ -708,7 +708,32 @@ Acceptance criterion met — extended the invite→join test: after the invite, 
 event; after he joins, the room **moves to `rooms.join`** and is gone from
 `invite`. ruff + mypy clean (110 files); 181 tests pass.
 
+### Step 6g — Federated message propagation — ✅ built
+
+Federated rooms now work for chat: an event created on one server reaches the
+joined users on the others.
+
+- **Outbound** (`federation/sender.py`, `FederationSender`): after a message/state
+  event is committed, `RoomService` pushes it (via a `federation_sender` hook) to
+  every server with a joined member, in a transaction to their
+  `/_matrix/federation/v1/send/{txnId}`. Best-effort — federation failures never
+  break the local send.
+- **Inbound apply** (`RoomService.apply_remote_event`): the transaction endpoint now
+  **applies** each validated PDU to our copy of the room — authorising it against
+  current state, inserting it, updating current state/memberships for state events,
+  and waking `/sync`. Idempotent; skips rooms we don't participate in.
+
+Acceptance criterion met — **a two-server chat test**: Alice (on A) joins a room
+hosted by B; a message Bob sends on B appears in **Alice's `/sync`** on A, and a
+message Alice sends on A appears in **Bob's `/sync`** on B. ruff + mypy clean (111
+files); 182 tests pass.
+
+Honest scope / deferred: message propagation is exact for the common linear case;
+**state-event** propagation across **diverged DAGs** needs state resolution v2
+wired in (the conflict path), and retries/backfill for missed events are still to
+come.
+
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
-into **durable state application**; then **backfill** and **EDUs**
+into durable state application for forks; then **backfill** and **EDUs**
 (typing/receipts/presence over federation). The cross-server conformance milestone
 (Complement) needs Docker + Go and is tracked as HS-8.

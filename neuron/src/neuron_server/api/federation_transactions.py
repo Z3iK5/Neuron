@@ -54,10 +54,13 @@ async def send_transaction(txn_id: str, request: Request) -> dict[str, Any]:
         raise MatrixError(400, "M_INVALID_PARAM", "Invalid or oversized pdus list")
 
     resolver = request.app.state.server_key_resolver
+    rooms = request.app.state.rooms
     results: dict[str, dict[str, Any]] = {}
     for pdu in pdus:
         try:
             event_id = await validate_pdu(pdu, resolver=resolver)
+            # Apply the event to our copy of the room (no-op if we don't have it).
+            await rooms.apply_remote_event(pdu)
             results[event_id] = {}
         except PduValidationError as exc:
             results[best_effort_event_id(pdu)] = {"error": exc.reason}

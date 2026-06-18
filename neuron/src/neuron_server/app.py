@@ -47,6 +47,7 @@ from neuron_server.e2ee.service import E2EEService
 from neuron_server.errors import MatrixError, unrecognized
 from neuron_server.federation.client import FederationClient
 from neuron_server.federation.membership import FederatedMembership
+from neuron_server.federation.sender import FederationSender
 from neuron_server.keys.resolver import ServerKeyResolver
 from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
@@ -105,8 +106,15 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             db, settings.name, app.state.server_keys, app.state.federation_client
         )
         app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
+        app.state.federation_sender = FederationSender(
+            db, settings.name, app.state.federation_client
+        )
         app.state.rooms = RoomService(
-            db, settings.name, app.state.server_keys.signing_key, notify=notifier.notify
+            db,
+            settings.name,
+            app.state.server_keys.signing_key,
+            notify=notifier.notify,
+            federation_sender=app.state.federation_sender.send_event,
         )
         app.state.fed_membership = FederatedMembership(
             db,
