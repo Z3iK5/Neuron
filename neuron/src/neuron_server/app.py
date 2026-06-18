@@ -179,6 +179,47 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     async def favicon() -> Response:
         return Response(branding.mark_svg(branding.NAVY), media_type="image/svg+xml")
 
+    @app.get("/get-started", include_in_schema=False)
+    async def get_started() -> HTMLResponse:
+        auth: AuthService = app.state.auth
+        return HTMLResponse(
+            branding.get_started_html(
+                settings.name, registration_enabled=auth.registration_enabled
+            )
+        )
+
+    @app.post("/get-started", include_in_schema=False)
+    async def get_started_submit(request: Request) -> HTMLResponse:
+        auth: AuthService = app.state.auth
+        if not auth.registration_enabled:
+            return HTMLResponse(
+                branding.get_started_html(settings.name, registration_enabled=False),
+                status_code=403,
+            )
+        form = await request.form()
+        username = str(form.get("username") or "").strip()
+        password = str(form.get("password") or "")
+        try:
+            result = await auth.register(
+                localpart=username or None,
+                password=password or None,
+                device_id=None,
+                initial_device_display_name=None,
+                inhibit_login=True,
+            )
+        except MatrixError as exc:
+            return HTMLResponse(
+                branding.get_started_html(
+                    settings.name,
+                    registration_enabled=True,
+                    error=exc.error,
+                    username=username,
+                ),
+                status_code=exc.status_code,
+            )
+        user_id = result["user_id"] if isinstance(result, dict) else result.user_id
+        return HTMLResponse(branding.welcome_html(settings.name, user_id))
+
     # Client-Server API routers (registered before the catch-all so their
     # specific routes match first).
     app.include_router(client_auth_router)
