@@ -43,6 +43,16 @@ async def _join_any(request: Request, room_id: str, user_id: str) -> str:
     return await request.app.state.fed_membership.join(room_id, user_id, via)
 
 
+async def _leave_any(request: Request, room_id: str, user_id: str) -> None:
+    """Leave a room: locally if we host it, otherwise over federation."""
+    server_name = request.app.state.settings.name
+    if room_id.split(":", 1)[-1] == server_name:
+        await request.app.state.rooms.leave(room_id, user_id)
+        return
+    via = request.query_params.getlist("server_name")
+    await request.app.state.fed_membership.leave(room_id, user_id, via)
+
+
 async def _json_body(request: Request) -> dict[str, Any]:
     raw = await request.body()
     if not raw:
@@ -140,10 +150,10 @@ async def join_room(
 @router.post("/v3/rooms/{room_id}/leave")
 async def leave_room(
     room_id: str,
+    request: Request,
     who: Authenticated = Depends(require_user),
-    rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    await rooms.leave(room_id, who.user_id)
+    await _leave_any(request, room_id, who.user_id)
     return {}
 
 

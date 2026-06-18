@@ -36,6 +36,7 @@ from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
 from neuron_server.api.federation_join import router as federation_join_router
 from neuron_server.api.federation_keys import router as federation_keys_router
+from neuron_server.api.federation_leave import router as federation_leave_router
 from neuron_server.api.federation_read import router as federation_read_router
 from neuron_server.api.federation_transactions import router as federation_transactions_router
 from neuron_server.api.synapse_admin import router as synapse_admin_router
@@ -162,6 +163,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(federation_read_router)
     app.include_router(federation_transactions_router)
     app.include_router(federation_join_router)
+    app.include_router(federation_leave_router)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.

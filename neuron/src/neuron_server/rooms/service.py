@@ -527,6 +527,61 @@ class RoomService:
         auth_chain = await store.get_auth_chain(self._db, room_id, auth_seed)
         return current_state, auth_chain
 
+    async def make_leave_template(self, room_id: str, user_id: str) -> dict[str, Any]:
+        """Build the unsigned leave-event template a remote server completes."""
+        room = await self._require_room(room_id)
+        state = await self._load_state(room_id)
+        extremity = await store.get_forward_extremity(self._db, room_id)
+        prev_events = [extremity.event_id] if extremity is not None else []
+        depth = (extremity.depth + 1) if extremity is not None else 1
+        content = {"membership": "leave"}
+        auth_events = authrules.select_auth_event_ids(
+            "m.room.member", user_id, user_id, content, state
+        )
+        return {
+            "room_version": room.room_version,
+            "event": {
+                "room_id": room_id,
+                "type": "m.room.member",
+                "sender": user_id,
+                "state_key": user_id,
+                "content": content,
+                "depth": depth,
+                "prev_events": prev_events,
+                "auth_events": auth_events,
+                "origin_server_ts": _now_ms(),
+            },
+        }
+
+    async def apply_external_leave(self, room_id: str, pdu: dict[str, Any]) -> None:
+        """Authorise and persist a remote server's signed leave event."""
+        await self._require_room(room_id)
+        sender = pdu.get("sender")
+        if (
+            pdu.get("type") != "m.room.member"
+            or not isinstance(sender, str)
+            or pdu.get("state_key") != sender
+            or (pdu.get("content") or {}).get("membership") != "leave"
+        ):
+            raise MatrixError(400, "M_INVALID_PARAM", "Not a valid leave event")
+
+        event_id = compute_event_id(pdu)
+        state = await self._load_state(room_id)
+        probe = Event(
+            event_id=event_id, room_id=room_id, type="m.room.member", sender=sender,
+            content=dict(pdu["content"]), origin_server_ts=int(pdu["origin_server_ts"]),
+            depth=int(pdu["depth"]), stream_ordering=0, state_key=sender,
+        )
+        authrules.authorize(probe, state)
+
+        async with self._db.transaction():
+            if await store.get_event(self._db, room_id, event_id) is None:
+                stream = await store.next_stream_ordering(self._db)
+                await store.insert_event(self._db, Event.from_pdu(pdu, event_id, stream))
+            await store.update_current_state(self._db, room_id, "m.room.member", sender, event_id)
+            await store.set_membership(self._db, room_id, sender, "leave")
+        self._wake_syncs()
+
 
 def _redact_level(state: AuthState) -> int:
     pl = state.get(("m.room.power_levels", ""))

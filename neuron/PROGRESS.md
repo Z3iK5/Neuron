@@ -646,6 +646,28 @@ overall.
 > tested foundation that the conflict-handling and event-application paths will use
 > once it is vector-verified.
 
-Next steps in HS-7: validate state res v2 against conformance vectors, then wire it
-into **durable state application** (applying transaction-ingested events and
-resolving forks on join); then backfill, federated leave/invite, and EDUs.
+### Step 6d — Federated leave (make_leave / send_leave) — ✅ built
+
+The membership mirror of join: a user can now **leave a room across federation** in
+either direction.
+
+- **Resident side** (`api/federation_leave.py`, `RoomService.make_leave_template` /
+  `apply_external_leave`): `GET /_matrix/federation/v1/make_leave/{roomId}/{userId}`
+  returns a leave-event template; `PUT /_matrix/federation/v2/send_leave/{roomId}/
+  {eventId}` validates the remote server's signed leave, authorises and applies it.
+- **Outbound side** (`FederatedMembership.leave`): runs make_leave → sign →
+  send_leave against the resident server, then reflects the leave in our local copy
+  of the room.
+- **CS routing** (`api/client_rooms.py`): `POST /rooms/{roomId}/leave` leaves
+  locally for rooms we host and over federation for rooms we don't.
+
+Acceptance criterion met — **a two-server leave test**: a user on A joins B's public
+room and then leaves through the normal CS leave endpoint; the room drops out of A's
+`joined_rooms` and B (the resident) no longer lists the user as joined, while still
+hosting the room. ruff + mypy clean (108 files); 180 tests pass.
+
+Next steps in HS-7: validate state res v2 against conformance vectors and wire it
+into **durable state application** (applying transaction-ingested events, resolving
+forks); then federated **invite**, **backfill**, and **EDUs** (typing/receipts/
+presence over federation). The cross-server conformance milestone (Complement)
+needs Docker + Go and is tracked as HS-8.

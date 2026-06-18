@@ -104,6 +104,59 @@ class FederatedMembership:
             self._notify()
         return room_id
 
+    async def leave(self, room_id: str, user_id: str, via: list[str]) -> str:
+        """Leave a remote ``room_id`` (via one of the ``via`` servers)."""
+        candidates = via or [_domain_of(room_id)]
+        last_error: Exception | None = None
+        for server in candidates:
+            if server == self._server_name:
+                continue
+            try:
+                return await self._leave_via(server, room_id, user_id)
+            except Exception as exc:
+                _logger.warning("federated leave via %s failed: %s", server, exc)
+                last_error = exc
+        raise MatrixError(
+            502, "M_UNKNOWN", f"Could not leave {room_id} over federation: {last_error}"
+        )
+
+    async def _leave_via(self, server: str, room_id: str, user_id: str) -> str:
+        make = await self._client.get_json(
+            server, f"/_matrix/federation/v1/make_leave/{room_id}/{user_id}"
+        )
+        template = make.get("event")
+        if not isinstance(template, dict):
+            raise MatrixError(502, "M_UNKNOWN", "make_leave did not return an event template")
+
+        template = dict(template)
+        template["content"] = {"membership": "leave"}
+        signed = add_hashes_and_signatures(
+            template, server_name=self._server_name, signing_key=self._signing_key
+        )
+        event_id = compute_event_id(signed)
+        await self._client.put_json(
+            server, f"/_matrix/federation/v2/send_leave/{room_id}/{event_id}", signed
+        )
+
+        # Reflect the leave in our local copy of the room, if we have one.
+        if await store.get_room(self._db, room_id) is not None:
+            await self._apply_local_leave(room_id, signed, event_id)
+        if self._notify is not None:
+            self._notify()
+        return room_id
+
+    async def _apply_local_leave(
+        self, room_id: str, pdu: dict[str, Any], event_id: str
+    ) -> None:
+        async with self._db.transaction():
+            if await store.get_event(self._db, room_id, event_id) is None:
+                stream = await store.next_stream_ordering(self._db)
+                await store.insert_event(self._db, Event.from_pdu(pdu, event_id, stream))
+            await store.update_current_state(
+                self._db, room_id, "m.room.member", str(pdu["state_key"]), event_id
+            )
+            await store.set_membership(self._db, room_id, str(pdu["state_key"]), "leave")
+
     async def _store_room(
         self,
         room_id: str,
