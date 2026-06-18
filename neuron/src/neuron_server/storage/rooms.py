@@ -32,7 +32,9 @@ def _row_to_event(row: tuple[Any, ...]) -> Event:
         stream_ordering,
         unsigned,
         redacts,
+        pdu_json,
     ) = row
+    pdu = json.loads(str(pdu_json)) if pdu_json is not None else {}
     return Event(
         event_id=str(event_id),
         room_id=str(room_id),
@@ -45,12 +47,16 @@ def _row_to_event(row: tuple[Any, ...]) -> Event:
         state_key=None if state_key is None else str(state_key),
         unsigned=json.loads(str(unsigned)) if unsigned is not None else None,
         redacts=None if redacts is None else str(redacts),
+        auth_events=list(pdu.get("auth_events", [])),
+        prev_events=list(pdu.get("prev_events", [])),
+        hashes=pdu.get("hashes"),
+        signatures=pdu.get("signatures"),
     )
 
 
 _EVENT_COLUMNS = (
     "event_id, room_id, type, state_key, sender, content, origin_server_ts,"
-    " depth, stream_ordering, unsigned, redacts"
+    " depth, stream_ordering, unsigned, redacts, pdu_json"
 )
 
 
@@ -124,8 +130,8 @@ async def insert_event(db: Database, event: Event) -> None:
     await db.execute(
         "INSERT INTO events ("
         " event_id, room_id, type, state_key, sender, content, origin_server_ts,"
-        " depth, stream_ordering, unsigned, redacts"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " depth, stream_ordering, unsigned, redacts, pdu_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             event.event_id,
             event.room_id,
@@ -138,8 +144,19 @@ async def insert_event(db: Database, event: Event) -> None:
             event.stream_ordering,
             json.dumps(event.unsigned) if event.unsigned is not None else None,
             event.redacts,
+            json.dumps(event.pdu_dict()),
         ),
     )
+
+
+async def get_forward_extremity(db: Database, room_id: str) -> Event | None:
+    """The room's latest event (single forward extremity in our linear DAG)."""
+    rows = await db.fetchall(
+        f"SELECT {_EVENT_COLUMNS} FROM events WHERE room_id = ?"
+        " ORDER BY depth DESC, stream_ordering DESC LIMIT 1",
+        (room_id,),
+    )
+    return _row_to_event(rows[0]) if rows else None
 
 
 async def get_event(db: Database, room_id: str, event_id: str) -> Event | None:

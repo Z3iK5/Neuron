@@ -439,7 +439,38 @@ backends). Ed25519 wiring is cross-checked against libsodium; signing envelope h
 roundtrip + tamper + multi-signature tests. ruff + mypy clean (84 files); 127
 tests pass.
 
+### Step 2 — Event hashing, reference-hash IDs & event signing — ✅ built
+
+Our events are now proper, verifiable federation PDUs (and our room-v11 event IDs
+are now spec-correct instead of opaque random strings).
+
+- **Hashing/signing** (`crypto/event_hashing.py`): the v11 redaction algorithm
+  (top-level allowlist + per-type content allowlist), the **content hash**
+  (`hashes.sha256`), the **reference hash**, the room-v4+ **event ID**
+  (`$` + URL-safe unpadded base64 of the reference hash), and event
+  signing/verification (sign the redacted form, which carries the content hash, so
+  the signature commits to the whole event). Content-hash and signature
+  verification helpers included for future federation ingestion.
+- **Auth-event selection** (`authrules.select_auth_event_ids`): the spec's
+  algorithm picking the state events that authorise a new event (`m.room.create`
+  is its own root; members pull in join rules / target membership / third-party
+  invites / restricted-join authoriser).
+- **Event building** (`rooms/service.py`): `_append` now selects `prev_events`
+  (the forward extremity) and `auth_events`, computes the content hash, derives the
+  reference-hash event ID, and signs the event with the server key before
+  persisting it. Redaction events carry `redacts` in `content` (MSC2174). The full
+  signed PDU is stored (migration 0007, `events.pdu_json`).
+
+Acceptance criterion met: a service-level test drives `RoomService` against a real
+database and shows that every stored event's **ID equals its reference hash**, its
+**server signature verifies** with the published verify key, and its
+`auth_events`/`prev_events` links are correct — i.e. the events would be acceptable
+to a remote homeserver. Plus unit tests for the redaction algorithm, content-hash
+tamper detection, signature/`unsigned` independence, and auth-event selection.
+Found & fixed a real bug along the way (the reference hash must not include an
+`event_id` field). ruff + mypy clean (85 files); 137 tests pass.
+
 Next steps in HS-7: the server key **notary/query** endpoints (fetching & caching
-*remote* servers' keys), event **reference hashes + content hashes + event
-signing** (so our PDUs are verifiable), then the transaction/`make_join`/`send_join`
-machinery and state resolution v2.
+*remote* servers' keys), the **federation read** endpoints
+(`GET /_matrix/federation/v1/event/{eventId}` etc.) that serve these PDUs, then the
+transaction / `make_join` / `send_join` machinery and **state resolution v2**.

@@ -213,6 +213,13 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=7,
+        name="event_pdu_json",
+        # The full signed federation event (auth_events/prev_events/hashes/
+        # signatures), so events can be served and verified over federation.
+        statements=("ALTER TABLE events ADD COLUMN pdu_json TEXT",),
+    ),
 )
 
 

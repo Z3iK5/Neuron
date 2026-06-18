@@ -40,6 +40,52 @@ _DEFAULTS = {
 }
 
 
+def select_auth_event_ids(
+    etype: str, state_key: str | None, sender: str, content: dict[str, Any], state: AuthState
+) -> list[str]:
+    """The spec's "auth events selection": the state events that authorise a new
+    event of this type, returned as a de-duplicated, order-preserving id list.
+
+    ``m.room.create`` is its own auth root and selects nothing.
+    """
+    if etype == "m.room.create":
+        return []
+
+    ids: list[str] = []
+
+    def add(key: tuple[str, str]) -> None:
+        event = state.get(key)
+        if event is not None:
+            ids.append(event.event_id)
+
+    add(("m.room.create", ""))
+    add(("m.room.power_levels", ""))
+    add(("m.room.member", sender))
+
+    if etype == "m.room.member":
+        if state_key is not None:
+            add(("m.room.member", state_key))
+        membership = content.get("membership")
+        if membership in ("join", "invite"):
+            add(("m.room.join_rules", ""))
+        third_party = content.get("third_party_invite")
+        if isinstance(third_party, dict):
+            token = third_party.get("signed", {}).get("token")
+            if isinstance(token, str):
+                add(("m.room.third_party_invite", token))
+        authorising = content.get("join_authorised_via_users_server")
+        if isinstance(authorising, str):
+            add(("m.room.member", authorising))
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for event_id in ids:
+        if event_id not in seen:
+            seen.add(event_id)
+            unique.append(event_id)
+    return unique
+
+
 def _forbidden(message: str) -> MatrixError:
     return MatrixError(403, "M_FORBIDDEN", message)
 

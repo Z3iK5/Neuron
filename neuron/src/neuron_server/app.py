@@ -90,7 +90,9 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         app.state.db = db
         app.state.server_keys = await ServerKeyService.load_or_create(db, settings)
         app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
-        app.state.rooms = RoomService(db, settings.name, notify=notifier.notify)
+        app.state.rooms = RoomService(
+            db, settings.name, app.state.server_keys.signing_key, notify=notifier.notify
+        )
         app.state.sync = SyncService(db, notifier)
         app.state.media = MediaService(
             FilesystemMediaStore(settings.media_store_path),

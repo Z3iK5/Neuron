@@ -34,6 +34,11 @@ def decode_unpadded_base64(value: str) -> bytes:
     return base64.b64decode(value + padding)
 
 
+def encode_unpadded_base64_urlsafe(data: bytes) -> str:
+    """URL-safe base64 with padding stripped (event IDs in room version 4+)."""
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
 def canonical_json(value: Any) -> bytes:
     """Encode ``value`` as Matrix canonical JSON.
 

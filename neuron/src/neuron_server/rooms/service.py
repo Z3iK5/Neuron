@@ -14,10 +14,12 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from neuron_server.crypto.event_hashing import add_hashes_and_signatures, compute_event_id
+from neuron_server.crypto.signing import SigningKey
 from neuron_server.errors import MatrixError
 from neuron_server.rooms import authrules, versions
 from neuron_server.rooms.authrules import AuthState
-from neuron_server.rooms.events import Event, generate_event_id, generate_room_id
+from neuron_server.rooms.events import Event, generate_room_id
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 
@@ -57,10 +59,15 @@ class RoomService:
     """Create and operate on rooms for one server."""
 
     def __init__(
-        self, db: Database, server_name: str, notify: Callable[[], None] | None = None
+        self,
+        db: Database,
+        server_name: str,
+        signing_key: SigningKey,
+        notify: Callable[[], None] | None = None,
     ) -> None:
         self._db = db
         self._server_name = server_name
+        self._signing_key = signing_key
         self._notify = notify
 
     def _wake_syncs(self) -> None:
@@ -85,21 +92,51 @@ class RoomService:
         unsigned: dict[str, Any] | None = None,
         redacts: str | None = None,
     ) -> Event:
-        """Persist a new event, updating current state and membership. No auth check."""
+        """Persist a new event, updating current state and membership. No auth check.
+
+        Builds a proper federation PDU: selects ``prev_events`` (the room's forward
+        extremity) and ``auth_events``, computes the content hash, derives the
+        reference-hash event ID, and signs the event with the server key.
+        """
         stream = await store.next_stream_ordering(self._db)
-        depth = await store.next_depth(self._db, room_id)
+        extremity = await store.get_forward_extremity(self._db, room_id)
+        prev_events = [extremity.event_id] if extremity is not None else []
+        depth = (extremity.depth + 1) if extremity is not None else 1
+
+        state = {} if etype == "m.room.create" else await self._load_state(room_id)
+        auth_events = authrules.select_auth_event_ids(etype, state_key, sender, content, state)
+
+        pdu: dict[str, Any] = {
+            "room_id": room_id,
+            "type": etype,
+            "sender": sender,
+            "content": content,
+            "origin_server_ts": ts if ts is not None else _now_ms(),
+            "depth": depth,
+            "prev_events": prev_events,
+            "auth_events": auth_events,
+        }
+        if state_key is not None:
+            pdu["state_key"] = state_key
+        pdu = add_hashes_and_signatures(
+            pdu, server_name=self._server_name, signing_key=self._signing_key
+        )
         event = Event(
-            event_id=generate_event_id(),
+            event_id=compute_event_id(pdu),
             room_id=room_id,
             type=etype,
             sender=sender,
             content=content,
-            origin_server_ts=ts if ts is not None else _now_ms(),
+            origin_server_ts=int(pdu["origin_server_ts"]),
             depth=depth,
             stream_ordering=stream,
             state_key=state_key,
             unsigned=unsigned,
             redacts=redacts,
+            auth_events=auth_events,
+            prev_events=prev_events,
+            hashes=pdu["hashes"],
+            signatures=pdu["signatures"],
         )
         await store.insert_event(self._db, event)
         if state_key is not None:
@@ -307,7 +344,10 @@ class RoomService:
             if authrules.power_level_for(state, sender) < _redact_level(state):
                 raise MatrixError(403, "M_FORBIDDEN", "Insufficient power level to redact")
 
-        content = {"reason": reason} if reason else {}
+        # Room v11 (MSC2174) carries the redaction target inside ``content``.
+        content: dict[str, Any] = {"redacts": target_event_id}
+        if reason:
+            content["reason"] = reason
         async with self._db.transaction():
             redaction = await self._append(
                 room_id, etype="m.room.redaction", sender=sender, content=content,

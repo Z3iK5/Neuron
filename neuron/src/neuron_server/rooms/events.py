@@ -1,32 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The in-memory event model and ID/room-ID generation.
+"""The in-memory event model and room-ID generation.
 
 An :class:`Event` is the server's representation of a Matrix event. ``state_key``
 is ``None`` for non-state events. ``stream_ordering`` is a server-local monotonic
 position used for ``/sync`` and ``/messages`` pagination; ``depth`` is the event's
 position in the room DAG.
 
-Event IDs are opaque, server-generated strings (``$<random>``). Federation-grade
-**reference-hash** event IDs (and content hashing / signing) are deferred to the
-federation epic (HS-7); clients treat the event ID as opaque, so this is a safe
-simplification for the single-server MVP.
+Event IDs are **reference hashes** (``$`` + URL-safe base64 of the event's
+SHA-256 reference hash, per room version 11), computed when the event is built;
+``pdu`` holds the full signed federation event (``auth_events``/``prev_events``/
+``hashes``/``signatures``) so it can be served and verified over federation.
 """
 
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
 def generate_room_id(server_name: str) -> str:
     """Return a fresh room ID (``!<random>:server_name``)."""
     return f"!{secrets.token_urlsafe(16)}:{server_name}"
-
-
-def generate_event_id() -> str:
-    """Return a fresh opaque event ID (``$<random>``)."""
-    return f"${secrets.token_urlsafe(32)}"
 
 
 @dataclass
@@ -44,10 +39,38 @@ class Event:
     state_key: str | None = None
     unsigned: dict[str, Any] | None = None
     redacts: str | None = None
+    auth_events: list[str] = field(default_factory=list)
+    prev_events: list[str] = field(default_factory=list)
+    hashes: dict[str, Any] | None = None
+    signatures: dict[str, Any] | None = None
 
     @property
     def is_state(self) -> bool:
         return self.state_key is not None
+
+    def pdu_dict(self) -> dict[str, Any]:
+        """Render the full federation event (PDU) shape.
+
+        Room v3+ events carry no ``event_id`` field — the ID is the reference hash
+        of this object — so it is deliberately omitted here.
+        """
+        body: dict[str, Any] = {
+            "room_id": self.room_id,
+            "type": self.type,
+            "sender": self.sender,
+            "content": self.content,
+            "origin_server_ts": self.origin_server_ts,
+            "depth": self.depth,
+            "auth_events": self.auth_events,
+            "prev_events": self.prev_events,
+        }
+        if self.state_key is not None:
+            body["state_key"] = self.state_key
+        if self.hashes is not None:
+            body["hashes"] = self.hashes
+        if self.signatures is not None:
+            body["signatures"] = self.signatures
+        return body
 
     def client_dict(self) -> dict[str, Any]:
         """Render the event in the Client-Server API shape."""
