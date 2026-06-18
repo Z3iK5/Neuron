@@ -50,12 +50,16 @@ Per-user data dir via `platformdirs`:
   command today. Default the DB/media/keys to the per-user app data dir (override
   with env vars unchanged). **Done when:** `pipx install` then `neuron-server`
   runs a server storing state in the app data dir. *(S — partly done this commit)*
-- **D1 — First-run setup + supervisor.** A `neuron_desktop` package: detect first
-  run, run an interactive setup (server name default from hostname, create the
-  admin account, confirm data dir), and a supervisor that starts/stops the server
-  and opens the browser to the console. `neuron-desktop` entry point. **Done
-  when:** a fresh machine goes from launch → admin account → open console with no
-  manual config. *(M — logic unit-testable here)*
+- **D1 — First-run setup + supervisor. ✅ Done.** The `neuron_desktop` package:
+  `paths` (per-user data dir via `platformdirs`, `NEURON_DATA_DIR` override),
+  `config` (`config.json` ↔ a fully-derived `NeuronServerSettings` pointing the DB,
+  media and signing key at the data dir), `setup` (first-run detection, interactive
+  wizard with injectable I/O, idempotent admin-account creation), `supervisor`
+  (`serve`, `open_console`), and a `neuron-desktop` CLI (`run`/`setup`/`where`/
+  `console`). **Done:** a fresh data dir goes launch → admin account → the admin
+  signs in and uses the admin API, all verified by unit tests (the GUI/installer
+  parts remain D2/D3). Data-dir defaulting (the unfinished part of D0) is handled
+  here at the desktop layer, keeping `neuron_server` itself env-configured and pure.
 - **D2 — Tray / menu-bar app.** Cross-platform tray icon (`pystray`) with
   Start/Stop, Open Console, Open data folder, Status, Quit; server runs in a
   background process. **Done when:** the app sits in the tray and controls the

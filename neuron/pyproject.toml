@@ -35,6 +35,7 @@ dependencies = [
 # installable program on macOS/Windows/Linux (see DESKTOP-PLAN.md).
 [project.scripts]
 neuron-server = "neuron_server.__main__:main"
+neuron-desktop = "neuron_desktop.cli:main"
 
 [project.optional-dependencies]
 # The admin console service (FastAPI + server-rendered templates).
@@ -71,6 +72,14 @@ server = [
     "PyNaCl>=1.5",               # Ed25519 server signing keys (federation, HS-7)
 ]
 
+# The desktop app: run your own homeserver as an installed program. Wraps the
+# `server` extra with a per-user data dir, first-run setup and a supervisor.
+# Install with:  pipx install "neuron[desktop]"   (or  pip install -e ".[desktop]")
+desktop = [
+    "neuron[server]",            # the homeserver this app supervises
+    "platformdirs>=4.0",         # per-user data directory across macOS/Windows/Linux
+]
+
 # Everything needed for development + CI (includes the service extras above so
 # the whole codebase is importable and testable).
 # Install with:  pip install -e ".[dev]"
@@ -79,6 +88,7 @@ dev = [
     "neuron[auditor]",           # boto3 for the S3 sink
     "neuron[e2e]",               # python-olm for E2EE decryption
     "neuron[server]",            # fastapi/uvicorn + DB drivers for neuron_server
+    "neuron[desktop]",           # platformdirs for the desktop supervisor
     "pytest>=8.0",
     "pytest-asyncio>=0.23",      # lets us write async test functions
     "ruff>=0.5",                 # linter + formatter
@@ -96,6 +106,7 @@ packages = [
     "src/neuron_auditor",
     "src/neuron_crypto",
     "src/neuron_server",
+    "src/neuron_desktop",
 ]
 
 # ---------------------------------------------------------------------------
@@ -119,7 +130,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor", "neuron_crypto", "neuron_server"]
+packages = ["neuron_core", "neuron_console", "neuron_supervisor", "neuron_auditor", "neuron_crypto", "neuron_server", "neuron_desktop"]
 mypy_path = "src"
 warn_unused_ignores = true
 warn_redundant_casts = true

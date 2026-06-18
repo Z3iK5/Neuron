@@ -206,8 +206,29 @@ To run the Neuron console/bots against it, set `NEURON_SERVER_ADMIN_USERS` to yo
 admin's localpart, register that user, and point `NEURON_HOMESERVER_URL` /
 `NEURON_HOMESERVER_ADMIN_TOKEN` at the server.
 
-> **Honest status.** This is the **non-federating** MVP: no server-to-server
-> federation yet (HS-7), and some Admin endpoints (shadow-ban, server notices,
+### Run it as a desktop app
+
+For a personal/LAN server with no manual config, install the `desktop` extra and
+let the first-run wizard pick a server name, create your admin account, and keep
+all state in a per-user data directory (override with `NEURON_DATA_DIR`):
+
+```bash
+pipx install "neuron[desktop]"   # or: pip install -e ".[desktop]"
+neuron-desktop                   # first run: setup wizard, then starts the server
+neuron-desktop where             # show the data directory
+neuron-desktop console           # open the admin console in a browser
+```
+
+State (database, media, signing key, config) lives in the OS app-data dir — macOS
+`~/Library/Application Support/Neuron`, Windows `%LOCALAPPDATA%\Neuron`, Linux
+`~/.local/share/Neuron`. A cross-platform tray app and native installers are the
+next desktop phases (see `DESKTOP-PLAN.md`).
+
+> **Honest status.** Server-to-server **federation is in progress** (HS-7): signed
+> events, the key API, X-Matrix request auth, remote key resolution, transaction
+> ingest and **bidirectional federated joins** work across two servers, with state
+> resolution v2 implemented as a provisional library; backfill, EDUs and full
+> conformance are still to come. Some Admin endpoints (shadow-ban, server notices,
 > async purge/redaction jobs, content reports) are spec-shaped stubs. Registration
 > defaults to **open** (gate `NEURON_SERVER_REGISTRATION_ENABLED` in production).
 
