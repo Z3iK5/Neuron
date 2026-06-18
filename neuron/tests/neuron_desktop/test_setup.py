@@ -102,38 +102,54 @@ def test_open_console_uses_injected_opener(tmp_path: Path) -> None:
     assert url == "http://localhost:8123" and opened == [url]
 
 
-def _password_from_welcome(base: Path) -> str:
-    for line in setup.welcome_path(base).read_text(encoding="utf-8").splitlines():
-        if "Password" in line:
-            return line.split(":", 1)[1].strip()
-    raise AssertionError("no password line in WELCOME.txt")
+def _register_via_browser(client: TestClient, username: str, password: str) -> None:
+    """Create an account through the in-browser /get-started onboarding form."""
+    resp = client.post("/get-started", data={"username": username, "password": password})
+    assert resp.status_code == 200, resp.text
 
 
-def test_noninteractive_first_run_creates_loginable_admin(tmp_path: Path) -> None:
-    """A double-clicked app (no stdin) must set up without prompts and not crash."""
+def _is_admin(client: TestClient, username: str, password: str) -> bool:
+    login = client.post(
+        "/_matrix/client/v3/login",
+        json={
+            "type": "m.login.password",
+            "identifier": {"type": "m.id.user", "user": username},
+            "password": password,
+        },
+    )
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+    # The Synapse-compatible admin API is admin-gated.
+    return (
+        client.get(
+            "/_synapse/admin/v1/server_version", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
+
+
+def test_noninteractive_first_run_sets_up_browser_signup(tmp_path: Path) -> None:
+    """A double-clicked app (no stdin) sets up without prompts and without a default
+    password — the first account created in the browser becomes the admin."""
     config = setup.perform_noninteractive_first_run(tmp_path, print_fn=lambda _m: None)
 
-    assert config.admin_username == "admin"
+    assert config.first_user_admin is True
     assert paths.config_path(tmp_path).exists()
     assert paths.media_path(tmp_path).is_dir()
     assert not setup.is_first_run(tmp_path)
 
-    # The generated credentials are recorded for the user, and they actually work.
-    welcome = setup.welcome_path(tmp_path)
-    assert welcome.exists()
-    password = _password_from_welcome(tmp_path)
-    assert password  # a non-empty generated password
+    # The welcome file points at the in-browser sign-up (no password in it).
+    welcome_text = setup.welcome_path(tmp_path).read_text(encoding="utf-8")
+    assert "/get-started" in welcome_text
+    assert "Password" not in welcome_text
 
+    # No account exists yet; the first one to sign up in the browser is the admin,
+    # the next one is not.
     with TestClient(create_app(config.to_server_settings())) as client:
-        login = client.post(
-            "/_matrix/client/v3/login",
-            json={
-                "type": "m.login.password",
-                "identifier": {"type": "m.id.user", "user": "admin"},
-                "password": password,
-            },
-        )
-        assert login.status_code == 200
+        _register_via_browser(client, "alice", "s3cret-password")
+        _register_via_browser(client, "bob", "s3cret-password")
+        assert _is_admin(client, "alice", "s3cret-password") is True
+        assert _is_admin(client, "bob", "s3cret-password") is False
 
 
 def test_load_or_create_is_noninteractive_without_a_tty(tmp_path: Path) -> None:
@@ -141,7 +157,7 @@ def test_load_or_create_is_noninteractive_without_a_tty(tmp_path: Path) -> None:
     assert not setup.stdin_is_interactive()
     # Would raise "lost sys.stdin" if it tried to prompt; instead it auto-sets-up.
     config = setup.load_or_create(tmp_path, print_fn=lambda _m: None)
-    assert config.admin_username == "admin"
+    assert config.first_user_admin is True
     assert setup.welcome_path(tmp_path).exists()
     assert not setup.is_first_run(tmp_path)
 

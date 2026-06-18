@@ -67,6 +67,11 @@ async def user_exists(db: Database, name: str) -> bool:
     return (await db.fetchval("SELECT 1 FROM users WHERE name = ?", (name,))) is not None
 
 
+async def any_users(db: Database) -> bool:
+    """True if at least one account exists (used to grant the first user admin)."""
+    return (await db.fetchval("SELECT 1 FROM users LIMIT 1")) is not None
+
+
 # --- devices ---------------------------------------------------------------
 
 
