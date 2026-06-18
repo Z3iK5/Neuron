@@ -275,6 +275,20 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=12,
+        name="federation_outbox",
+        # Events that failed to send to a destination server, queued for retry.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS federation_outbox ("
+            " stream_id INTEGER PRIMARY KEY,"
+            " destination TEXT NOT NULL,"
+            " pdu_json TEXT NOT NULL"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_outbox_destination"
+            " ON federation_outbox (destination, stream_id)",
+        ),
+    ),
 )
 
 

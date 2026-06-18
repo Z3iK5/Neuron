@@ -16,6 +16,7 @@ from typing import Any
 from neuron_core import get_logger
 from neuron_server.federation.client import FederationClient
 from neuron_server.federation.validation import domain_of
+from neuron_server.storage import outbox as outbox_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 
@@ -43,22 +44,49 @@ class FederationSender:
         self, room_id: str, *, pdus: list[dict[str, Any]], edus: list[dict[str, Any]]
     ) -> None:
         destinations = await self.remote_destinations(room_id)
-        if not destinations:
+        for server in destinations:
+            await self._deliver(server, new_pdus=pdus, edus=edus)
+
+    async def _deliver(
+        self,
+        server: str,
+        *,
+        new_pdus: list[dict[str, Any]],
+        edus: list[dict[str, Any]],
+    ) -> None:
+        """Send any queued PDUs for ``server`` plus the new ones; on failure, the
+        new PDUs are queued for a later retry (EDUs are best-effort, not queued)."""
+        pending = await outbox_store.get_pending(self._db, server)
+        all_pdus = [pdu for _, pdu in pending] + new_pdus
+        if not all_pdus and not edus:
             return
         transaction = {
             "origin": self._server_name,
             "origin_server_ts": int(time.time() * 1000),
-            "pdus": pdus,
+            "pdus": all_pdus,
             "edus": edus,
         }
         txn_id = secrets.token_urlsafe(8)
-        for server in destinations:
-            try:
-                await self._client.put_json(
-                    server, f"/_matrix/federation/v1/send/{txn_id}", transaction
-                )
-            except Exception as exc:  # best effort; never block the local action
-                _logger.warning("failed to send transaction to %s: %s", server, exc)
+        try:
+            await self._client.put_json(
+                server, f"/_matrix/federation/v1/send/{txn_id}", transaction
+            )
+        except Exception as exc:  # best effort; never block the local action
+            _logger.warning("failed to send transaction to %s: %s", server, exc)
+            for pdu in new_pdus:
+                await outbox_store.enqueue(self._db, server, pdu)
+            return
+        if pending:
+            await outbox_store.delete(self._db, [stream_id for stream_id, _ in pending])
+
+    async def retry(self, server: str) -> None:
+        """Attempt to flush any queued events for one destination server."""
+        await self._deliver(server, new_pdus=[], edus=[])
+
+    async def retry_all(self) -> None:
+        """Attempt to flush queued events for every destination with a backlog."""
+        for server in await outbox_store.destinations_with_pending(self._db):
+            await self.retry(server)
 
     async def send_event(self, room_id: str, pdu: dict[str, Any]) -> None:
         await self._send_transaction(room_id, pdus=[pdu], edus=[])

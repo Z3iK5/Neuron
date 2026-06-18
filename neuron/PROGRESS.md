@@ -776,7 +776,27 @@ tests pass.
 Honest scope / deferred: only `m.read` receipts (not threaded/private); **typing**
 and **presence** EDUs are still stubbed (typing needs timeout handling).
 
+### Step 6j — Outbound federation retries (durability) — ✅ built
+
+A transient outage no longer silently drops events: a send that fails is queued and
+re-delivered later.
+
+- **Outbox** (migration 0012 `federation_outbox`, `storage/outbox.py`): per-
+  destination queue of undelivered PDUs (ordered by `stream_id`).
+- **Sender** (`FederationSender`): each delivery sends any queued PDUs for a
+  destination plus the new ones; on failure the new PDUs are **queued** (EDUs stay
+  best-effort), and a successful send **drains** the backlog. A `retry(server)` /
+  `retry_all()` flushes pending destinations on demand (for a background flusher).
+
+Acceptance criterion met — **a retry test**: with B unreachable, Alice's message is
+**not** delivered and lands in A's outbox; once B is back, `retry("b.test")` flushes
+it and it appears in **Bob's `/sync`**, leaving the outbox empty. ruff + mypy clean
+(114 files); 185 tests pass.
+
+Honest scope / deferred: retries are triggered opportunistically (next send) or
+explicitly (`retry`); a periodic background flusher with backoff is future work.
+
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
-into durable state application for forks; then **typing** EDUs and outbound
-**retries** for offline destinations. The cross-server conformance milestone
-(Complement) needs Docker + Go and is tracked as HS-8.
+into durable state application for forks; then **typing**/**presence** EDUs and a
+background retry flusher. The cross-server conformance milestone (Complement) needs
+Docker + Go and is tracked as HS-8.
