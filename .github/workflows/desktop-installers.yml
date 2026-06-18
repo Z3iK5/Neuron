@@ -12,9 +12,14 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Cut a release with this tag (e.g. v0.0.1). Empty = artifacts-only build."
+        required: false
+        default: ""
 
 permissions:
-  contents: write # needed to attach assets to a release on tag builds
+  contents: write # needed to create the release / attach assets on a release build
 
 jobs:
   build:
@@ -74,9 +79,10 @@ jobs:
           path: neuron/neuron-${{ matrix.label }}.zip
 
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: neuron/neuron-${{ matrix.label }}.zip
 
       # --- macOS native installer (.dmg) ------------------------------------
@@ -92,9 +98,10 @@ jobs:
           path: neuron/neuron-macos.dmg
 
       - name: Attach .dmg to release
-        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.os == 'macos-latest' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: neuron/neuron-macos.dmg
 
       # --- Linux native installer (AppImage) --------------------------------
@@ -114,9 +121,10 @@ jobs:
           path: neuron/neuron-x86_64.AppImage
 
       - name: Attach AppImage to release
-        if: matrix.os == 'ubuntu-latest' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.os == 'ubuntu-latest' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: neuron/neuron-x86_64.AppImage
 
       # --- Windows native installer (.exe via Inno Setup) -------------------
@@ -150,7 +158,8 @@ jobs:
           path: neuron/Neuron-Setup-x64.exe
 
       - name: Attach Windows installer to release
-        if: matrix.os == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
+        if: matrix.os == 'windows-latest' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: neuron/Neuron-Setup-x64.exe
