@@ -6,6 +6,10 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 ## [0.0.3] — unreleased
 
 ### Added
+- **Windows MSIX package** for Microsoft Store submission, built every release and
+  uploaded as a workflow artifact (not attached to the GitHub Release). Self-signed
+  for sideload testing by default; set the `MSIX_*` repo variables (Partner Center
+  identity) to make it Store-ready.
 - **macOS installers are signed & notarized** (Developer ID) when the Apple signing
   secrets are configured in CI, so they launch without a Gatekeeper warning. Builds
   stay unsigned (and CI green) when the secrets are absent.

@@ -19,6 +19,8 @@ dist/
 # Desktop installer build outputs (built in CI / locally, never committed)
 *.AppImage
 *.dmg
+*.msix
+*.cer
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
