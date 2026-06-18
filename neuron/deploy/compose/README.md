@@ -1,11 +1,12 @@
-# Local dev stack
+# Local interop stack (optional)
 
-A throwaway homeserver + PostgreSQL + Redis environment for developing and
-testing Neuron services against a **real** backend.
+An optional throwaway stack — a standard Matrix homeserver image + PostgreSQL + Redis —
+for testing Neuron's console and bots against a separate server over the public Matrix
+and Admin APIs.
 
-> The `homeserver` service runs a stock, unmodified upstream image as a
-> transitional black box until Neuron's own `neuron_server` reaches parity. See
-> the repository `NOTICE` and `HOMESERVER-PLAN.md`.
+> Neuron's own homeserver (`neuron-server`) is the primary target and needs no Docker;
+> this stack is only for cross-server interop checks. See the
+> [repository README](../../../README.md).
 
 > Requires Docker with the Compose plugin (`docker compose`).
 

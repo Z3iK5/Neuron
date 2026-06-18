@@ -6,8 +6,7 @@ version). The redaction algorithm — which content keys survive when an event i
 redacted — is defined per room version by the Matrix spec; we implement the v11
 rules here.
 
-Clean-room: this follows the spec's "Redactions" / room-version grammar, not any
-server's source.
+This follows the spec's "Redactions" / room-version grammar.
 """
 
 from __future__ import annotations

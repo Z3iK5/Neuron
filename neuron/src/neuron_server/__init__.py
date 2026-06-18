@@ -1,20 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""neuron_server — Neuron's own, clean-room Matrix homeserver (in progress).
+"""neuron_server — Neuron's Matrix homeserver, built on the open Matrix spec.
 
-Implemented **strictly from the open Matrix specification and open MSCs** —
-never by reading any other homeserver's source (see ``HOMESERVER-PLAN.md`` at the
-repository root). This package is the all-in-one replacement for the transitional
-upstream backend: once it reaches parity (through phase HS-6) the Neuron services
-point at it instead of the stock upstream image.
+An ASGI application (FastAPI/Starlette) over an async storage layer (SQLite for
+dev, PostgreSQL for prod) with migrations. It implements identity & auth, rooms
+(room v11), ``GET /sync``, a media repository, E2EE key relay, the Client-Server
+API, a Synapse-compatible Admin API, and server-to-server federation.
 
-Phase **HS-0** (this milestone) is the foundation only:
-
-- an ASGI application skeleton (FastAPI/Starlette);
-- an async storage layer (SQLite for dev, PostgreSQL for prod) with migrations;
-- the spec-discovery endpoints ``GET /_matrix/client/versions`` and
-  ``GET /.well-known/matrix/client``, plus a health probe.
-
-Identity, rooms, sync, media and E2EE arrive in later phases (HS-1..HS-6).
+See the repository docs (``docs/architecture.md``, ``docs/configuration.md``) for
+the full picture and how to run it.
 """
 
 from neuron_server.app import create_app

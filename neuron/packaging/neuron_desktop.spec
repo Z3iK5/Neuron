@@ -8,7 +8,7 @@
 # that bundle into a proper `dist/Neuron.app` (so it can be packaged as a `.dmg`
 # by packaging/make_dmg.sh). The CI workflow (.github/workflows/desktop-installers.yml)
 # builds this on macOS, Windows and Linux. Code signing / notarization are follow-ups
-# (see DESKTOP-PLAN.md D4).
+# (see docs/desktop.md).
 
 import os
 

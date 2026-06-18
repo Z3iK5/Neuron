@@ -4,20 +4,10 @@ Copyright 2026 The Neuron Authors
 This product includes original software developed for the Neuron project,
 licensed under the Apache License, Version 2.0 (see the LICENSE file).
 
-Neuron is an independent, clean-room implementation built solely from public
-documentation and the open Matrix specification (https://spec.matrix.org) and
-its open specification proposals (MSCs). It is NOT derived from, and does NOT
-include source code from, Synapse, Dendrite, Conduit, or any other Matrix
-homeserver, nor from Element Server Suite (ESS) Pro or any other Element
-proprietary software.
-
-"Matrix" is an open communications protocol; the names "Synapse", "Element",
-and "Element Server Suite" are used only to describe interoperability and the
-documented functionality being reimplemented, and remain the property of their
-respective owners. Neuron is not affiliated with, nor endorsed by, Element or
-The Matrix.org Foundation.
+"Matrix" is an open communications protocol; Neuron is an independent
+implementation of it and is not affiliated with or endorsed by The Matrix.org
+Foundation.
 
 Third-party dependencies are distributed under their own (permissive) licenses
 — for example BSD (httpx), MIT (pydantic, FastAPI, Jinja2), and Apache-2.0
-(boto3, libolm / python-olm, signedjson, canonicaljson, unpaddedbase64). See
-each project for details.
+(boto3, libolm / python-olm, segno, PyNaCl). See each project for details.

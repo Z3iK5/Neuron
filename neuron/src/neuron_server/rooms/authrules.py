@@ -6,8 +6,8 @@ This implements the Matrix spec's authorization rules for the event types the
 single-server MVP supports (create, membership transitions, power levels, and the
 generic power-level check for everything else).
 
-Clean-room: derived from the spec's "Authorization rules" section, scoped to a
-single server (no state-resolution — the current state *is* the auth context).
+Follows the spec's "Authorization rules" section, scoped to a single server (no
+state-resolution — the current state *is* the auth context).
 
 Not yet covered (honest scope): knock / restricted (membership) join rules,
 third-party invites, and the full fine-grained power-levels delta rules (we use

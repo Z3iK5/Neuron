@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """neuron_console — a web admin console over the homeserver Admin API.
 
-Phase 1 is **read-only**: it lets an operator log in and browse users, rooms,
-and content reports. Write/destructive actions and MAS/OIDC login arrive in
-Phase 2 (see ``PLAN.md``).
+Operators log in to browse and manage users and rooms, registration tokens
+(with shareable invite links / QR codes), content reports, and moderation.
 
 Design notes:
 
