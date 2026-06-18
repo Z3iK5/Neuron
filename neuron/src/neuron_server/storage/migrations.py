@@ -235,6 +235,21 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=9,
+        name="federated_invites",
+        # Invites received over federation for a *local* user to a room hosted
+        # elsewhere (we don't host the room, so this is tracked separately).
+        statements=(
+            "CREATE TABLE IF NOT EXISTS federated_invites ("
+            " user_id TEXT NOT NULL,"
+            " room_id TEXT NOT NULL,"
+            " event_json TEXT NOT NULL,"
+            " invite_state_json TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, room_id)"
+            ")",
+        ),
+    ),
 )
 
 

@@ -157,6 +157,23 @@ class FederatedMembership:
             )
             await store.set_membership(self._db, room_id, str(pdu["state_key"]), "leave")
 
+    async def send_invite(
+        self,
+        server: str,
+        room_id: str,
+        pdu: dict[str, Any],
+        invite_state: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Push an invite event to the invited user's ``server``; return its
+        co-signed form (falling back to our event if the peer omits it)."""
+        event_id = compute_event_id(pdu)
+        body = {"event": pdu, "room_version": "11", "invite_room_state": invite_state}
+        response = await self._client.put_json(
+            server, f"/_matrix/federation/v2/invite/{room_id}/{event_id}", body
+        )
+        returned = response.get("event")
+        return returned if isinstance(returned, dict) else pdu
+
     async def _store_room(
         self,
         room_id: str,

@@ -582,6 +582,86 @@ class RoomService:
             await store.set_membership(self._db, room_id, sender, "leave")
         self._wake_syncs()
 
+    # State types shared with an invited user's server so it can render the room.
+    _INVITE_STATE_KEYS = (
+        ("m.room.create", ""),
+        ("m.room.join_rules", ""),
+        ("m.room.name", ""),
+        ("m.room.canonical_alias", ""),
+        ("m.room.avatar", ""),
+        ("m.room.encryption", ""),
+    )
+
+    def _stripped_invite_state(self, state: AuthState, inviter: str) -> list[dict[str, Any]]:
+        keys = [*self._INVITE_STATE_KEYS, ("m.room.member", inviter)]
+        stripped: list[dict[str, Any]] = []
+        for key in keys:
+            event = state.get(key)
+            if event is not None:
+                stripped.append(
+                    {
+                        "type": event.type,
+                        "state_key": event.state_key or "",
+                        "sender": event.sender,
+                        "content": event.content,
+                    }
+                )
+        return stripped
+
+    async def build_invite(
+        self, room_id: str, sender: str, target: str
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Authorise and sign an invite event (without persisting it).
+
+        Returns ``(invite_pdu, invite_room_state)`` — the latter is the stripped
+        state shared with the invited user's server.
+        """
+        await self._require_room(room_id)
+        state = await self._load_state(room_id)
+        content = {"membership": "invite"}
+        probe = Event(
+            event_id="", room_id=room_id, type="m.room.member", sender=sender,
+            content=content, origin_server_ts=_now_ms(), depth=0, stream_ordering=0,
+            state_key=target,
+        )
+        authrules.authorize(probe, state)
+
+        extremity = await store.get_forward_extremity(self._db, room_id)
+        prev_events = [extremity.event_id] if extremity is not None else []
+        depth = (extremity.depth + 1) if extremity is not None else 1
+        auth_events = authrules.select_auth_event_ids(
+            "m.room.member", target, sender, content, state
+        )
+        pdu: dict[str, Any] = {
+            "room_id": room_id,
+            "type": "m.room.member",
+            "sender": sender,
+            "state_key": target,
+            "content": content,
+            "depth": depth,
+            "prev_events": prev_events,
+            "auth_events": auth_events,
+            "origin_server_ts": _now_ms(),
+        }
+        pdu = add_hashes_and_signatures(
+            pdu, server_name=self._server_name, signing_key=self._signing_key
+        )
+        return pdu, self._stripped_invite_state(state, sender)
+
+    async def apply_invite(self, room_id: str, pdu: dict[str, Any]) -> str:
+        """Persist an invite event (already authorised in :meth:`build_invite`)."""
+        await self._require_room(room_id)
+        event_id = compute_event_id(pdu)
+        target = str(pdu["state_key"])
+        async with self._db.transaction():
+            if await store.get_event(self._db, room_id, event_id) is None:
+                stream = await store.next_stream_ordering(self._db)
+                await store.insert_event(self._db, Event.from_pdu(pdu, event_id, stream))
+            await store.update_current_state(self._db, room_id, "m.room.member", target, event_id)
+            await store.set_membership(self._db, room_id, target, "invite")
+        self._wake_syncs()
+        return event_id
+
 
 def _redact_level(state: AuthState) -> int:
     pl = state.get(("m.room.power_levels", ""))

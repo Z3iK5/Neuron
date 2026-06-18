@@ -666,8 +666,34 @@ room and then leaves through the normal CS leave endpoint; the room drops out of
 `joined_rooms` and B (the resident) no longer lists the user as joined, while still
 hosting the room. ruff + mypy clean (108 files); 180 tests pass.
 
+### Step 6e — Federated invite — ✅ built
+
+The "push" membership flow: a room we host can invite a user on another server, and
+a user we host can be invited by a remote room.
+
+- **Resident side** (`RoomService.build_invite` / `apply_invite`,
+  `FederatedMembership.send_invite`): builds and signs the invite event (with
+  stripped `invite_room_state`), pushes it to the invited user's server, then
+  applies the returned co-signed event to our room state.
+- **Invited side** (`api/federation_invite.py`,
+  `PUT /_matrix/federation/v2/invite/{roomId}/{eventId}`): validates the invite,
+  **co-signs** it (`crypto.event_hashing.add_signature`), and records it
+  (migration 0009 `federated_invites`, `storage/invites.py`).
+- **CS routing** (`api/client_rooms.py`): `POST /rooms/{roomId}/invite` pushes over
+  federation when the invitee is remote, else invites locally.
+
+Acceptance criterion met — **an invite → join end-to-end test**: A (hosting an
+**invite-only** room) invites `@bob:b.test`; B validates, co-signs and records the
+invite (the stored event carries **both servers' signatures**); A applies it; then
+bob **joins the invite-only room over federation** (authorised only because the
+invite was applied) and ends up joined on A. ruff + mypy clean (110 files); 181
+tests pass.
+
+Honest scope / deferred: the recorded invite isn't surfaced in the invited server's
+`/sync` yet (needs out-of-band invite state in the sync builder).
+
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
-into **durable state application** (applying transaction-ingested events, resolving
-forks); then federated **invite**, **backfill**, and **EDUs** (typing/receipts/
-presence over federation). The cross-server conformance milestone (Complement)
-needs Docker + Go and is tracked as HS-8.
+into **durable state application**; then **backfill** and **EDUs**
+(typing/receipts/presence over federation), and surfacing federated invites in
+`/sync`. The cross-server conformance milestone (Complement) needs Docker + Go and
+is tracked as HS-8.

@@ -53,6 +53,19 @@ async def _leave_any(request: Request, room_id: str, user_id: str) -> None:
     await request.app.state.fed_membership.leave(room_id, user_id, via)
 
 
+async def _invite_any(request: Request, room_id: str, sender: str, target: str) -> None:
+    """Invite a user, pushing the invite over federation if they're remote."""
+    rooms: RoomService = request.app.state.rooms
+    if target.split(":", 1)[-1] == request.app.state.settings.name:
+        await rooms.invite(room_id, sender, target)
+        return
+    pdu, invite_state = await rooms.build_invite(room_id, sender, target)
+    co_signed = await request.app.state.fed_membership.send_invite(
+        target.split(":", 1)[-1], room_id, pdu, invite_state
+    )
+    await rooms.apply_invite(room_id, co_signed)
+
+
 async def _json_body(request: Request) -> dict[str, Any]:
     raw = await request.body()
     if not raw:
@@ -162,13 +175,12 @@ async def invite_to_room(
     room_id: str,
     request: Request,
     who: Authenticated = Depends(require_user),
-    rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
     body = await _json_body(request)
     target = body.get("user_id")
     if not isinstance(target, str):
         raise MatrixError(400, "M_MISSING_PARAM", "Missing user_id")
-    await rooms.invite(room_id, who.user_id, target)
+    await _invite_any(request, room_id, who.user_id, target)
     return {}
 
 

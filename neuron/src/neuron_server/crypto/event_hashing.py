@@ -110,6 +110,26 @@ def add_hashes_and_signatures(
     return result
 
 
+def add_signature(
+    pdu: dict[str, Any],
+    *,
+    server_name: str,
+    signing_key: SigningKey,
+    room_version: str = versions.DEFAULT_ROOM_VERSION,
+) -> dict[str, Any]:
+    """Add ``server_name``'s signature to an already-formed event (e.g. an invited
+    server co-signing an invite), keeping any existing signatures and hashes."""
+    redacted = redact_event(pdu, room_version)
+    redacted.pop("signatures", None)
+    redacted.pop("unsigned", None)
+    signed = sign_json(redacted, server_name=server_name, signing_key=signing_key)
+    result = dict(pdu)
+    signatures = {k: dict(v) for k, v in result.get("signatures", {}).items()}
+    signatures.setdefault(server_name, {}).update(signed["signatures"][server_name])
+    result["signatures"] = signatures
+    return result
+
+
 def verify_event_signature(
     pdu: dict[str, Any],
     *,
