@@ -398,11 +398,48 @@ auditor) and `neuron_core` work against it. Built strictly from the open spec �
 no homeserver source was ever consulted.
 
 ### Remaining homeserver work (separate epics)
-- **HS-7 — Federation** (the hard, research-grade epic): server keys, transactions
+- **HS-7 — Federation** (the hard, research-grade epic): server keys ✅, transactions
   (PDUs/EDUs), make/send join, backfill, **state resolution v2**, per-version auth
-  rules, server ACLs. Months of work; its own program.
+  rules, server ACLs. Months of work; its own program. **In progress** (below).
 - **HS-8 — Parity, conformance & cut-over**: pass a growing subset of Complement;
   caching/perf; optional workers; then swap the dev stack + Neuron services from
   the transitional upstream backend to `neuron_server`.
 - Backfill within the MVP: key backup (`/room_keys`), UIA on sensitive endpoints,
   per-membership history visibility, real shadow-ban/server-notice/purge jobs.
+
+---
+
+## HS-7 — Federation — 🚧 in progress
+
+### Step 1 — Server signing keys + key publishing — ✅ built
+
+The first brick of server-to-server identity, the prerequisite for every later
+federation step (everything a server sends is signed with this key).
+
+- **Crypto primitives** (`crypto/signing.py`): Matrix canonical JSON, unpadded
+  base64, Ed25519 keys via libsodium/PyNaCl, the Synapse-compatible
+  ``ed25519 <version> <base64-seed>`` key file format, and the spec's
+  ``signatures`` envelope (`sign_json` / `verify_signed_json`, which exclude the
+  `signatures` and `unsigned` members from the signed bytes).
+- **Server identity** (`keys/service.py`): loads the Ed25519 signing key from a
+  file (`NEURON_SERVER_SIGNING_KEY_PATH`, created on first run) or generates it
+  once and persists it in `server_metadata`, so the federation identity is stable
+  across restarts. Builds the signed key document.
+- **Endpoint** (`api/federation_keys.py`): `GET /_matrix/key/v2/server`
+  (+ the deprecated `/server/{keyId}` form) — the self-signed document of verify
+  keys, `valid_until_ts` and `old_verify_keys`, unauthenticated by design.
+- **Dependency:** added `PyNaCl` to the `server` extra (libsodium Ed25519).
+
+Acceptance criterion met — **the published key verifies the way a remote
+homeserver would**: a unit test (and a live `uvicorn` run cross-checked with raw
+libsodium + an independent canonical-JSON reconstruction) fetches
+`/_matrix/key/v2/server` and verifies the self-signature using only the published
+verify key; the signing key is shown stable across restarts (DB and file
+backends). Ed25519 wiring is cross-checked against libsodium; signing envelope has
+roundtrip + tamper + multi-signature tests. ruff + mypy clean (84 files); 127
+tests pass.
+
+Next steps in HS-7: the server key **notary/query** endpoints (fetching & caching
+*remote* servers' keys), event **reference hashes + content hashes + event
+signing** (so our PDUs are verifiable), then the transaction/`make_join`/`send_join`
+machinery and state resolution v2.

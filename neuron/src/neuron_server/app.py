@@ -34,11 +34,13 @@ from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_misc import router as client_misc_router
 from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
+from neuron_server.api.federation_keys import router as federation_keys_router
 from neuron_server.api.synapse_admin import router as synapse_admin_router
 from neuron_server.auth.service import AuthService
 from neuron_server.config import NeuronServerSettings
 from neuron_server.e2ee.service import E2EEService
 from neuron_server.errors import MatrixError, unrecognized
+from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
 from neuron_server.media.store import FilesystemMediaStore
 from neuron_server.rooms.service import RoomService
@@ -86,6 +88,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         await _ensure_server_identity(db, settings)
         notifier = StreamNotifier()
         app.state.db = db
+        app.state.server_keys = await ServerKeyService.load_or_create(db, settings)
         app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
         app.state.rooms = RoomService(db, settings.name, notify=notifier.notify)
         app.state.sync = SyncService(db, notifier)
@@ -133,6 +136,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_keys_router)
     app.include_router(client_misc_router)
     app.include_router(synapse_admin_router)
+    app.include_router(federation_keys_router)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.

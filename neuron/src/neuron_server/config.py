@@ -91,6 +91,23 @@ class NeuronServerSettings(BaseSettings):
         description="Maximum media upload size in bytes.",
     )
 
+    # --- Federation identity (HS-7) ----------------------------------------
+    # Optional path to the server's Ed25519 signing key (Synapse-compatible
+    # ``ed25519 <version> <base64-seed>`` format). If set, the key is loaded from
+    # there (created on first run); if empty, it is generated once and persisted
+    # in the database. This key is the server's federation identity — back it up.
+    signing_key_path: str = Field(
+        default="",
+        description="Path to the Ed25519 signing key file (else stored in the DB).",
+    )
+    # How long (ms) other servers may cache our published /_matrix/key/v2/server
+    # response before refetching. Default 7 days.
+    key_validity_period_ms: int = Field(
+        default=7 * 24 * 60 * 60 * 1000,
+        gt=0,
+        description="valid_until_ts horizon for the published server key, in ms.",
+    )
+
     # Where the ASGI server binds when run via `python -m neuron_server`.
     bind_host: str = Field(default="127.0.0.1", description="ASGI bind host.")
     bind_port: int = Field(default=8008, gt=0, description="ASGI bind port.")

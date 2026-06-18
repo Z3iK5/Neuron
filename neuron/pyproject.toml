@@ -68,6 +68,7 @@ server = [
     "aiosqlite>=0.20",           # async SQLite driver (development backend)
     "asyncpg>=0.29",             # async PostgreSQL driver (production backend)
     "Pillow>=10.0",              # image thumbnailing for the media repository
+    "PyNaCl>=1.5",               # Ed25519 server signing keys (federation, HS-7)
 ]
 
 # Everything needed for development + CI (includes the service extras above so
@@ -128,7 +129,7 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 # These ship little/no type information; treat them as untyped.
 #   boto3 — S3 sink; olm — libolm bindings for E2EE; aiosqlite/asyncpg — DB drivers.
-module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg", "PIL", "PIL.*"]
+module = ["boto3", "botocore.*", "olm", "aiosqlite", "asyncpg", "PIL", "PIL.*", "nacl", "nacl.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
