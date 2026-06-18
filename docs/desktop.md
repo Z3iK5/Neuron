@@ -47,9 +47,27 @@ Each release builds a native installer per platform in CI
 | Windows | `Neuron-Setup-x64.exe` (Inno Setup) | per-user install, no admin/UAC prompt |
 | Linux | `Neuron-x86_64.AppImage` | single portable file, no install needed |
 
-> Installers are currently **unsigned**. macOS Gatekeeper and Windows SmartScreen will
-> warn on first launch; on macOS, right-click → Open the first time. Code signing and
-> notarization are a planned follow-up.
+### macOS code signing & notarization
+
+The macOS build is **signed with a Developer ID and notarized** automatically when
+these repository secrets are present (otherwise it builds unsigned, and Gatekeeper
+warns on first launch — right-click → Open):
+
+| Secret | What it is |
+|--------|-----------|
+| `MACOS_CERT_P12` | Your *Developer ID Application* cert exported as a `.p12` (with the private key), base64-encoded |
+| `MACOS_CERT_PASSWORD` | The `.p12` export password |
+| `APPLE_API_KEY_ID` | App Store Connect API key id (Users & Access → Integrations) |
+| `APPLE_API_ISSUER_ID` | The issuer id on that page |
+| `APPLE_API_KEY_P8` | The downloaded `AuthKey_*.p8`, base64-encoded |
+
+The signing identity is auto-detected from the cert; the hardened-runtime
+entitlements live in `packaging/entitlements.plist`. Signing the bundled Python app
+for notarization can need a round of iteration — `notarytool` prints a detailed log
+on rejection.
+
+> **Windows / Linux** installers are still unsigned (SmartScreen may warn on Windows).
+> A Windows MSIX for the Microsoft Store is built as a separate artifact.
 
 ### Building locally
 
