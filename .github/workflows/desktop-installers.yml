@@ -126,7 +126,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          generate_release_notes: true
           files: neuron/neuron-${{ matrix.label }}.zip
 
       # --- macOS native installer (.dmg) ------------------------------------
@@ -162,7 +161,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          generate_release_notes: true
           files: neuron/neuron-macos.dmg
 
       # --- Linux native installer (AppImage) --------------------------------
@@ -186,7 +184,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          generate_release_notes: true
           files: neuron/neuron-x86_64.AppImage
 
       # --- Windows native installer (.exe via Inno Setup) -------------------
@@ -224,7 +221,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          generate_release_notes: true
           files: neuron/Neuron-Setup-x64.exe
 
       # --- Windows MSIX (for the Microsoft Store) ---------------------------
@@ -249,3 +245,20 @@ jobs:
             neuron/Neuron.msix
             neuron/Neuron-dev-cert.cer
           if-no-files-found: warn
+
+  # Generate the release's "What's Changed" notes exactly once, after the build
+  # jobs have created the release and attached their assets. (Doing this in each
+  # matrix job appends the notes repeatedly.)
+  release-notes:
+    name: Release notes
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Generate release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
