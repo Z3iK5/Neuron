@@ -167,6 +167,32 @@ async def get_event(db: Database, room_id: str, event_id: str) -> Event | None:
     return _row_to_event(rows[0]) if rows else None
 
 
+async def get_event_global(db: Database, event_id: str) -> Event | None:
+    """Look up an event by ID across all rooms (federation read path)."""
+    rows = await db.fetchall(
+        f"SELECT {_EVENT_COLUMNS} FROM events WHERE event_id = ?", (event_id,)
+    )
+    return _row_to_event(rows[0]) if rows else None
+
+
+async def get_auth_chain(db: Database, room_id: str, event_ids: list[str]) -> list[Event]:
+    """The transitive closure of ``auth_events`` reachable from ``event_ids``."""
+    seen: set[str] = set()
+    pending = list(event_ids)
+    chain: list[Event] = []
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        event = await get_event(db, room_id, current)
+        if event is None:
+            continue
+        chain.append(event)
+        pending.extend(event.auth_events)
+    return chain
+
+
 async def update_event_content(
     db: Database, event_id: str, content_json: str, unsigned_json: str | None
 ) -> None:

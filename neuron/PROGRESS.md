@@ -470,7 +470,34 @@ tamper detection, signature/`unsigned` independence, and auth-event selection.
 Found & fixed a real bug along the way (the reference hash must not include an
 `event_id` field). ruff + mypy clean (85 files); 137 tests pass.
 
-Next steps in HS-7: the server key **notary/query** endpoints (fetching & caching
-*remote* servers' keys), the **federation read** endpoints
-(`GET /_matrix/federation/v1/event/{eventId}` etc.) that serve these PDUs, then the
-transaction / `make_join` / `send_join` machinery and **state resolution v2**.
+### Step 3 — Federation request auth (X-Matrix) + read endpoints — ✅ built
+
+The inbound federation read surface, so a remote homeserver can fetch the signed
+PDUs we produce — gated by proper server-to-server request authentication.
+
+- **X-Matrix request auth** (`federation/auth.py`): signs/verifies the canonical
+  JSON request description (`method`/`uri`/`origin`/`destination`/`content`) and
+  builds/parses the `Authorization: X-Matrix origin=…,key=…,sig=…` header. Used for
+  both inbound verification and (later) outbound signing.
+- **Read endpoints** (`api/federation_read.py`): `GET /_matrix/federation/v1/version`
+  (unauthenticated), and — behind X-Matrix auth + an origin-in-room check —
+  `/event/{eventId}`, `/state/{roomId}` and `/state_ids/{roomId}`, returning the
+  stored PDUs and their transitive **auth chain**.
+- **Storage** (`storage/rooms.py`): `get_event_global`, `get_auth_chain`
+  (auth-events closure).
+
+Acceptance criterion met: a loopback test signs federation requests with the
+server's own key, fetches an event and room state, and verifies the **served PDUs'
+signatures the way a remote server would**; unauthenticated requests get 401 and
+bad signatures 403. Plus X-Matrix sign/verify/parse unit tests (GET + body,
+tamper, non-X-Matrix). ruff + mypy clean (88 files); 144 tests pass.
+
+Honest scope / deferred: the origin's verify keys are resolved **locally only**
+(remote-key resolution needs the outbound federation client), room state is the
+**current** state (per-event historical state needs state groups), and there is no
+content-hash/auth re-check of inbound events yet.
+
+Next steps in HS-7: the **outbound federation client** + server key
+**notary/query** (resolving & caching *remote* keys — unlocks authenticating real
+remote origins), then the **transaction** ingest (`PUT /send/{txnId}`) and
+`make_join`/`send_join` membership over federation, and **state resolution v2**.
