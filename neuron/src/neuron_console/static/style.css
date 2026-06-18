@@ -1,65 +1,85 @@
-/* Minimal, dependency-free styling for the Neuron console. */
+/* NEURON admin console — styled from the NEURON brand (neuron_core.branding). */
 :root {
-  --bg: #f6f7f9;
-  --fg: #1f2430;
-  --muted: #6b7280;
-  --accent: #2f6fed;
-  --border: #e2e5ea;
+  --navy: #1C3D5F;   /* primary */
+  --deep: #0E2740;   /* dark surfaces */
+  --paper: #ECEAE4;  /* page background */
+  --canvas: #E4E2DC;
+  --fg: #16324F;
+  --muted: #5A6B7C;
+  --muted-soft: #7C8896;
+  --on-dark: #8FA6BC;
+  --accent: #1C3D5F;
+  --accent-soft: #7FA8CC;
+  --border: #DEDCD6;
   --card: #ffffff;
+  --bg: var(--paper);
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: 'Jost', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 300;
   color: var(--fg);
   background: var(--bg);
 }
+
+/* --- top bar / brand --- */
 .topbar {
   display: flex; align-items: center; gap: 1.5rem;
-  background: var(--card); border-bottom: 1px solid var(--border);
-  padding: 0.75rem 1.25rem;
+  background: var(--deep); color: #fff;
+  border-bottom: 1px solid var(--deep);
+  padding: 0.7rem 1.25rem;
 }
-.brand { font-weight: 700; }
-.topbar nav { display: flex; gap: 1rem; margin-left: auto; }
-.topbar nav a { text-decoration: none; color: var(--fg); }
-.topbar nav a:hover { color: var(--accent); }
-.topbar nav a.logout { color: var(--muted); }
-main { max-width: 960px; margin: 1.5rem auto; padding: 0 1.25rem; }
+.brand { display: flex; align-items: center; gap: 0.7rem; text-decoration: none; color: #fff; }
+.brand-mark { width: 30px; height: 30px; color: #fff; display: block; flex: none; }
+.brand-mark svg { display: block; }
+.brand-name { font-family: 'Cinzel', Georgia, serif; font-weight: 600; letter-spacing: 0.14em; font-size: 1.2rem; }
+.brand-sub {
+  margin-left: 0.55rem; font-size: 0.62rem; letter-spacing: 0.32em;
+  text-transform: uppercase; color: var(--on-dark);
+}
+.topbar nav { display: flex; gap: 1.1rem; margin-left: auto; }
+.topbar nav a { text-decoration: none; color: #D7E1EC; font-size: 0.95rem; }
+.topbar nav a:hover { color: #fff; }
+.topbar nav a.logout { color: var(--on-dark); }
+
+main { max-width: 960px; margin: 1.75rem auto; padding: 0 1.25rem; }
+h1, h2, h3 { font-family: 'Cinzel', Georgia, serif; font-weight: 600; letter-spacing: 0.02em; color: var(--navy); }
 h1 { font-size: 1.5rem; }
 h2 { font-size: 1.1rem; margin-top: 0; }
 .muted { color: var(--muted); font-weight: normal; }
 .error { color: #b00020; }
 .card {
   background: var(--card); border: 1px solid var(--border);
-  border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+  border-radius: 14px; padding: 1.1rem 1.3rem; margin-bottom: 1.25rem;
+  box-shadow: 0 1px 3px rgba(20, 48, 77, 0.06);
 }
 .card.narrow { max-width: 420px; }
 .cards { display: flex; gap: 1.25rem; flex-wrap: wrap; }
 .card.stat { flex: 1; text-align: center; min-width: 140px; }
-.stat-number { font-size: 2rem; font-weight: 700; }
+.stat-number { font-size: 2rem; font-weight: 600; font-family: 'Cinzel', Georgia, serif; color: var(--navy); }
 .stat-label a { text-decoration: none; color: var(--accent); }
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-th { color: var(--muted); font-weight: 600; }
+th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 0.78rem; letter-spacing: 0.06em; }
 a { color: var(--accent); }
 .search { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
 .search input[type=search] { flex: 1; }
-input, button {
+input, button, select {
   padding: 0.5rem 0.7rem; border: 1px solid var(--border);
-  border-radius: 6px; font-size: 1rem; background: #fff;
+  border-radius: 9px; font-size: 1rem; background: #fff; font-family: inherit;
 }
-button { background: var(--accent); color: #fff; border: none; cursor: pointer; }
-button:hover { opacity: 0.92; }
-form label { display: block; margin-bottom: 0.3rem; font-weight: 600; }
+button { background: var(--navy); color: #fff; border: none; cursor: pointer; letter-spacing: 0.03em; }
+button:hover { background: var(--deep); }
+form label { display: block; margin-bottom: 0.3rem; font-weight: 500; }
 form input { width: 100%; margin-bottom: 0.8rem; }
 .pager { margin-top: 1rem; display: flex; gap: 1.5rem; }
 .members { columns: 2; list-style: none; padding-left: 0; }
 .footer { max-width: 960px; margin: 2rem auto; padding: 0 1.25rem; color: var(--muted); font-size: 0.85rem; }
 
-/* Buttons styled as links, danger actions, action rows */
 .button-link {
-  display: inline-block; padding: 0.5rem 0.8rem; border-radius: 6px;
-  background: var(--accent); color: #fff; text-decoration: none;
+  display: inline-block; padding: 0.5rem 0.85rem; border-radius: 9px;
+  background: var(--navy); color: #fff; text-decoration: none;
 }
 .button-link.danger, button.danger { background: #b00020; }
 button.small { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
@@ -69,10 +89,26 @@ button.small { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
 .checkbox input { width: auto; margin: 0; }
 .flash {
   background: #e7f5ec; border: 1px solid #b6e0c4; color: #1a6b3a;
-  padding: 0.6rem 0.9rem; border-radius: 6px; margin-bottom: 1rem;
+  padding: 0.6rem 0.9rem; border-radius: 9px; margin-bottom: 1rem;
 }
 .warning {
   background: #fff4e5; border: 1px solid #ffd8a8; color: #8a5300;
-  padding: 0.6rem 0.9rem; border-radius: 6px;
+  padding: 0.6rem 0.9rem; border-radius: 9px;
 }
 code { background: #eef0f3; padding: 0.1rem 0.3rem; border-radius: 4px; }
+
+/* --- branded login / auth --- */
+.auth {
+  max-width: 400px; margin: 3.5rem auto; background: #fff;
+  border-radius: 18px; overflow: hidden; box-shadow: 0 10px 30px rgba(14, 39, 64, 0.16);
+}
+.auth-head {
+  background: var(--deep); color: #fff; padding: 2.2rem 2rem 1.8rem;
+  display: flex; flex-direction: column; align-items: center; gap: 0.9rem; text-align: center;
+}
+.auth-mark { width: 56px; height: 56px; color: #fff; }
+.auth-mark svg { display: block; }
+.auth-name { font-family: 'Cinzel', Georgia, serif; font-weight: 600; letter-spacing: 0.12em; font-size: 1.6rem; line-height: 1; }
+.auth-tag { font-size: 0.7rem; letter-spacing: 0.32em; text-transform: lowercase; color: var(--on-dark); }
+.auth-body { padding: 1.6rem 1.9rem 2rem; }
+.auth-body h1 { font-size: 1.15rem; margin: 0 0 1.1rem; }

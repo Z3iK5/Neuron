@@ -24,9 +24,9 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
-from neuron_core import configure_logging, get_logger
+from neuron_core import branding, configure_logging, get_logger
 from neuron_server.admin.service import AdminService
 from neuron_server.api.client_auth import router as client_auth_router
 from neuron_server.api.client_keys import router as client_keys_router
@@ -170,6 +170,14 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     @app.get("/health")
     async def health() -> PlainTextResponse:
         return PlainTextResponse("OK")
+
+    @app.get("/", include_in_schema=False)
+    async def landing() -> HTMLResponse:
+        return HTMLResponse(branding.landing_page_html(settings.name))
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon() -> Response:
+        return Response(branding.mark_svg(branding.NAVY), media_type="image/svg+xml")
 
     # Client-Server API routers (registered before the catch-all so their
     # specific routes match first).

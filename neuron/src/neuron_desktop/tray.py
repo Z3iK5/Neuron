@@ -98,13 +98,10 @@ def menu_items(controller: TrayController, *, on_quit: Callable[[], None]) -> li
 
 
 def _icon_image() -> object:
-    """A simple tray icon (a filled circle) drawn with Pillow."""
-    from PIL import Image, ImageDraw
+    """The NEURON app icon (Neural Shield mark on a navy squircle)."""
+    from neuron_desktop.icon import render_icon
 
-    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((8, 8, 56, 56), fill=(63, 81, 181, 255))
-    return image
+    return render_icon(64)
 
 
 def run_tray(config: DesktopConfig, *, autostart: bool = True) -> None:

@@ -42,13 +42,21 @@ from neuron_console.deps import (
     require_login,
 )
 from neuron_console.security import get_csrf_token
-from neuron_core import AdminClient, MatrixClient, configure_logging, get_logger
+from neuron_core import AdminClient, MatrixClient, branding, configure_logging, get_logger
 from neuron_core.errors import AdminApiError
 from neuron_supervisor import Supervisor
 from neuron_supervisor.core import SupervisorError
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
+# Expose the NEURON brand (mark/fonts/identity) to every template.
+templates.env.globals.update(
+    neuron_mark=branding.mark_svg("currentColor"),
+    neuron_fonts=branding.FONTS_LINK,
+    neuron_favicon=branding.favicon_data_uri(),
+    neuron_name=branding.NAME,
+    neuron_tagline=branding.TAGLINE,
+)
 log = get_logger(__name__)
 
 

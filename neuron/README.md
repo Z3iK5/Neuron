@@ -1,4 +1,18 @@
-# Neuron
+<div align="center">
+
+<img src="assets/brand/neuron-icon.png" alt="NEURON" width="112" height="112">
+
+# NEURON
+
+**matrix homeserver**
+
+_Your private chat, on your own server. Self-hosted Matrix, end-to-end encrypted._
+
+<img src="assets/brand/neuron-social.png" alt="NEURON — matrix homeserver" width="640">
+
+</div>
+
+---
 
 **Neuron** is an independent, clean-room Matrix platform: an all-in-one,
 self-owned product that bundles operator tooling (an admin console, a

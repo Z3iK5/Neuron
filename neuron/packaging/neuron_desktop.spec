@@ -52,6 +52,14 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# OS-level app icon. Windows/Linux use the generated .ico; macOS wants an .icns
+# (generated in CI via iconutil when available), so fall back gracefully.
+import sys  # noqa: E402
+
+_icns = os.path.join(SPECPATH, "icons", "neuron.icns")  # noqa: F821
+_ico = os.path.join(SPECPATH, "icons", "neuron.ico")  # noqa: F821
+_icon = (_icns if os.path.exists(_icns) else None) if sys.platform == "darwin" else _ico
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -60,5 +68,6 @@ exe = EXE(
     name="Neuron",
     console=False,  # tray app: no terminal window
     disable_windowed_traceback=False,
+    icon=_icon,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="Neuron")
