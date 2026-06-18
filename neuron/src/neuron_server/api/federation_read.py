@@ -39,13 +39,10 @@ async def _require_origin(request: Request) -> str:
         raise MatrixError(401, "M_UNAUTHORIZED", "Missing or malformed X-Matrix authorization")
 
     settings = request.app.state.settings
-    server_keys = request.app.state.server_keys
-    if creds.origin == settings.name:
-        verify_keys = {kid: v["key"] for kid, v in server_keys.verify_keys().items()}
-    else:
-        # Remote key resolution arrives with the outbound federation client.
+    verify_keys = await request.app.state.server_key_resolver.verify_keys_for(creds.origin)
+    if not verify_keys:
         raise MatrixError(
-            401, "M_UNAUTHORIZED", f"Cannot resolve keys for remote origin {creds.origin!r} yet"
+            401, "M_UNAUTHORIZED", f"Could not resolve signing keys for origin {creds.origin!r}"
         )
 
     uri = request.url.path
@@ -58,7 +55,7 @@ async def _require_origin(request: Request) -> str:
         destination=settings.name,
         verify_keys=verify_keys,
     ):
-        raise MatrixError(403, "M_FORBIDDEN", "Federation request signature did not verify")
+        raise MatrixError(401, "M_UNAUTHORIZED", "Federation request signature did not verify")
     return creds.origin
 
 

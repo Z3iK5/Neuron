@@ -96,12 +96,12 @@ def test_event_endpoint_serves_verifiable_pdu(tmp_path: Path) -> None:
             pdu, server_name=_NAME, verify_key_base64=verify_key, key_id=key_id
         )
 
-        # A signature over a different URI is rejected.
+        # A signature over a different URI is rejected as unauthenticated.
         bad = sign_request(
             method="GET", uri="/_matrix/federation/v1/event/$wrong", origin=_NAME,
             destination=_NAME, signing_key=app.state.server_keys.signing_key,
         )
-        assert client.get(path, headers={"Authorization": bad}).status_code == 403
+        assert client.get(path, headers={"Authorization": bad}).status_code == 401
 
 
 def test_state_endpoints(tmp_path: Path) -> None:

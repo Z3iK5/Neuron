@@ -41,6 +41,8 @@ from neuron_server.auth.service import AuthService
 from neuron_server.config import NeuronServerSettings
 from neuron_server.e2ee.service import E2EEService
 from neuron_server.errors import MatrixError, unrecognized
+from neuron_server.federation.client import FederationClient
+from neuron_server.keys.resolver import ServerKeyResolver
 from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
 from neuron_server.media.store import FilesystemMediaStore
@@ -90,6 +92,12 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         notifier = StreamNotifier()
         app.state.db = db
         app.state.server_keys = await ServerKeyService.load_or_create(db, settings)
+        app.state.federation_client = FederationClient(
+            settings.name, app.state.server_keys.signing_key
+        )
+        app.state.server_key_resolver = ServerKeyResolver(
+            db, settings.name, app.state.server_keys, app.state.federation_client
+        )
         app.state.auth = AuthService(db, settings.name, settings.registration_enabled)
         app.state.rooms = RoomService(
             db, settings.name, app.state.server_keys.signing_key, notify=notifier.notify

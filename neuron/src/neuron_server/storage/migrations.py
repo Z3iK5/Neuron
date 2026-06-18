@@ -220,6 +220,21 @@ MIGRATIONS: tuple[Migration, ...] = (
         # signatures), so events can be served and verified over federation.
         statements=("ALTER TABLE events ADD COLUMN pdu_json TEXT",),
     ),
+    Migration(
+        version=8,
+        name="remote_server_keys",
+        # Cache of other servers' Ed25519 verify keys (fetched from their
+        # /_matrix/key/v2/server), used to authenticate inbound federation.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS remote_server_keys ("
+            " server_name TEXT NOT NULL,"
+            " key_id TEXT NOT NULL,"
+            " verify_key TEXT NOT NULL,"
+            " valid_until_ts INTEGER NOT NULL,"
+            " PRIMARY KEY (server_name, key_id)"
+            ")",
+        ),
+    ),
 )
 
 

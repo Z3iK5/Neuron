@@ -497,7 +497,36 @@ Honest scope / deferred: the origin's verify keys are resolved **locally only**
 **current** state (per-event historical state needs state groups), and there is no
 content-hash/auth re-check of inbound events yet.
 
-Next steps in HS-7: the **outbound federation client** + server key
-**notary/query** (resolving & caching *remote* keys — unlocks authenticating real
-remote origins), then the **transaction** ingest (`PUT /send/{txnId}`) and
+### Step 4 — Outbound federation client + remote key resolution — ✅ built
+
+Federation is no longer loopback-only: we can now fetch and verify **real remote
+servers'** keys and authenticate their requests.
+
+- **Outbound client** (`federation/client.py`): signs outbound requests with
+  X-Matrix and sends them; an `open_client` seam lets us route to an in-process
+  server over an ASGI transport (used by tests) instead of the network.
+- **Server discovery** (`federation/discovery.py`): `pick_base_url` — explicit port
+  wins, else honour `/.well-known/matrix/server` delegation, else default to 8448.
+- **Key resolution** (`keys/resolver.py`): `ServerKeyResolver` returns our own keys
+  locally and, for a remote server, returns cached keys or fetches its
+  `/_matrix/key/v2/server` document, **verifies it is correctly self-signed**
+  (`parse_and_verify_key_document`), caches it (migration 0008,
+  `remote_server_keys`), and returns the keys. Wired into the federation read
+  auth, so inbound requests from real remote origins now authenticate.
+
+Acceptance criterion met — **a two-server, in-process federation test**: server A
+resolves server B's keys by fetching B's key document over an ASGI transport, the
+keys are cached (resolution then works with the network removed), and a request B
+signs to A authenticates (the only remaining failure is A's room-membership check,
+proving auth itself passed); a forged/mismatched key document and a bad signature
+are both rejected. Plus discovery unit tests. ruff + mypy clean (92 files); 147
+tests pass.
+
+Honest scope / deferred: `.well-known` delegation isn't fetched by the default
+client yet (the decision function is in place); the server key **notary**
+(`/_matrix/key/v2/query`) is deferred; no key-validity refresh/rotation handling
+beyond `valid_until_ts`.
+
+Next steps in HS-7: the **transaction** ingest (`PUT /_matrix/federation/v1/send/{txnId}`)
+with inbound PDU validation (content-hash + signature + auth-rule re-check), then
 `make_join`/`send_join` membership over federation, and **state resolution v2**.
