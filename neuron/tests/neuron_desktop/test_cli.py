@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 
 from neuron_desktop import cli, process
 
@@ -21,10 +22,13 @@ def test_default_server_command_normal_vs_frozen(monkeypatch) -> None:
 def test_cli_internal_server_command_runs_homeserver(monkeypatch) -> None:
     import neuron_server.__main__ as server_main
 
-    called: list[bool] = []
-    monkeypatch.setattr(server_main, "main", lambda: called.append(True))
+    # Capture the argv the desktop layer hands to the homeserver entry point: it
+    # must NOT contain our internal "_server" token (which neuron_server's parser
+    # would reject), so an empty list is passed and the server defaults to serve.
+    seen: list[Sequence[str] | None] = []
+    monkeypatch.setattr(server_main, "main", lambda argv=None: seen.append(argv))
     assert cli.main(["_server"]) == 0
-    assert called == [True]
+    assert seen == [[]]
 
 
 def test_cli_where_prints_paths(monkeypatch, tmp_path, capsys) -> None:

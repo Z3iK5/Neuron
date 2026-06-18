@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Sequence
 
 import uvicorn
 
@@ -35,7 +36,10 @@ def _doctor(settings: NeuronServerSettings, *, offline: bool, strict: bool) -> i
     return asyncio.run(doctor_main(settings, offline=offline, strict=strict))
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
+    # ``argv`` defaults to the process args, but the desktop app calls this with an
+    # explicit list (e.g. ``[]``) when it re-execs the frozen bundle as its server
+    # child — so the internal ``_server`` token never leaks into this parser.
     parser = argparse.ArgumentParser(prog="neuron-server", description="The Neuron homeserver.")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("serve", help="Run the homeserver (default).")
@@ -47,7 +51,7 @@ def main() -> None:
         "--strict", action="store_true", help="Exit non-zero on warnings too."
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     settings = NeuronServerSettings()
 
     if args.command == "doctor":
