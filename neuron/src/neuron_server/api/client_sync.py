@@ -38,6 +38,7 @@ async def sync(
         raise MatrixError(400, "M_INVALID_PARAM", "timeout must be an integer") from exc
     return await syncer.sync(
         who.user_id,
+        who.device_id,
         since=request.query_params.get("since"),
         timeout_ms=max(0, timeout_ms),
     )

@@ -321,7 +321,42 @@ Honest scope / deferred: remote (federated) media (HS-7), async upload
 (`/media/v1/create` + `PUT upload`), `preview_url`, per-media quotas/retention,
 and the S3 blob backend (filesystem only for now).
 
+## HS-5 — E2EE server support — ✅ built
+
+The key-distribution side of E2EE — **store and relay only; the server never
+decrypts**.
+
+- **Storage** (migration 0005, `storage/e2ee.py`): `device_keys`,
+  `one_time_keys`, `fallback_keys`, `cross_signing_keys`, `to_device_messages`,
+  `device_list_changes` (stream IDs assigned `MAX+1` for portability).
+- **Service** (`e2ee/service.py`): `keys/upload` (device keys + OTKs + fallback),
+  `keys/query` (device + cross-signing keys), `keys/claim` (atomically consumes
+  one OTK, falls back to the fallback key), `device_signing/upload` (cross-signing
+  master/self/user-signing), `signatures/upload` (merges signatures into device /
+  cross-signing keys), and `sendToDevice` (relays Olm-encrypted to-device events,
+  expanding `*` to all of a user's devices).
+- **Sync integration:** the sync token is now composite
+  (`events.to_device.device_list`); `/sync` delivers pending to-device messages
+  (with ack-based cleanup once the client advances its token), reports
+  `device_one_time_keys_count`, and reports `device_lists.changed` for users
+  sharing a room with the syncer. to-device/keys changes wake long-polling syncs.
+- **Endpoints** (`api/client_keys.py`): `keys/upload`, `keys/query`, `keys/claim`,
+  `keys/device_signing/upload`, `keys/signatures/upload`, `sendToDevice`.
+
+Acceptance criterion met — **automatic key receipt works end to end against our
+server**: a real-libolm pipeline test claims an OTK, shares a Megolm key via an
+Olm `sendToDevice`, and the recipient **syncs against `neuron_server`**, decrypts
+the to-device message, imports the room key, and decrypts the room message. Plus
+relay unit tests (upload/query/claim/counts, sendToDevice delivery + ack,
+cross-signing) and a live uvicorn run. ruff + mypy clean (73 files); 110 tests
+pass.
+
+Honest scope / deferred: server-side **key backup** (`/room_keys` + versions) is a
+follow-up; `device_signing/upload` does not enforce UIA yet; signature merging is
+best-effort for cross-signing keys; `device_lists.left` is always empty.
+
 ### Next gate
-HS-5 — E2EE server support: device keys upload/query/claim, one-time keys, key
-backup (`/room_keys`), `sendToDevice`, device-list tracking — store/relay only
-(the server never decrypts).
+HS-6 — remaining CS API (account data, profiles, filters, capabilities,
+typing/receipts/presence stubs, push-rules stubs) **plus a Synapse-compatible
+`/_synapse/admin/...` surface**, so the existing Neuron console & bots run against
+`neuron_server`. The cut-over milestone.

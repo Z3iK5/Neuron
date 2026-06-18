@@ -134,6 +134,54 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=5,
+        name="e2ee_relay",
+        statements=(
+            "CREATE TABLE IF NOT EXISTS device_keys ("
+            " user_id TEXT NOT NULL,"
+            " device_id TEXT NOT NULL,"
+            " key_json TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, device_id)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS one_time_keys ("
+            " user_id TEXT NOT NULL,"
+            " device_id TEXT NOT NULL,"
+            " key_alg_id TEXT NOT NULL,"
+            " key_json TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, device_id, key_alg_id)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS fallback_keys ("
+            " user_id TEXT NOT NULL,"
+            " device_id TEXT NOT NULL,"
+            " algorithm TEXT NOT NULL,"
+            " key_alg_id TEXT NOT NULL,"
+            " key_json TEXT NOT NULL,"
+            " used INTEGER NOT NULL DEFAULT 0,"
+            " PRIMARY KEY (user_id, device_id, algorithm)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS cross_signing_keys ("
+            " user_id TEXT NOT NULL,"
+            " key_type TEXT NOT NULL,"
+            " key_json TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, key_type)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS to_device_messages ("
+            " stream_id INTEGER PRIMARY KEY,"
+            " target_user TEXT NOT NULL,"
+            " target_device TEXT NOT NULL,"
+            " sender TEXT NOT NULL,"
+            " type TEXT NOT NULL,"
+            " content_json TEXT NOT NULL"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_to_device_target"
+            " ON to_device_messages (target_user, target_device, stream_id)",
+            "CREATE TABLE IF NOT EXISTS device_list_changes ("
+            " stream_id INTEGER PRIMARY KEY,"
+            " user_id TEXT NOT NULL"
+            ")",
+        ),
+    ),
 )
 
 

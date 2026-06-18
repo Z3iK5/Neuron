@@ -246,6 +246,17 @@ async def get_user_memberships(db: Database, user_id: str) -> list[tuple[str, st
     return [(str(row[0]), str(row[1])) for row in rows]
 
 
+async def get_users_sharing_room(db: Database, user_id: str) -> list[str]:
+    """Return all users who are joined to a room ``user_id`` is also joined to."""
+    rows = await db.fetchall(
+        "SELECT DISTINCT other.user_id FROM room_memberships me"
+        " JOIN room_memberships other ON me.room_id = other.room_id"
+        " WHERE me.user_id = ? AND me.membership = 'join' AND other.membership = 'join'",
+        (user_id,),
+    )
+    return [str(row[0]) for row in rows]
+
+
 async def get_joined_members(db: Database, room_id: str) -> list[str]:
     rows = await db.fetchall(
         "SELECT user_id FROM room_memberships WHERE room_id = ? AND membership = 'join'"
