@@ -105,3 +105,10 @@ class FederationSender:
             },
         }
         await self._send_transaction(room_id, pdus=[], edus=[edu])
+
+    async def send_typing(self, room_id: str, user_id: str, typing: bool) -> None:
+        edu = {
+            "edu_type": "m.typing",
+            "content": {"room_id": room_id, "user_id": user_id, "typing": typing},
+        }
+        await self._send_transaction(room_id, pdus=[], edus=[edu])

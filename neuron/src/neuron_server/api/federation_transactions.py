@@ -78,10 +78,22 @@ async def _process_edus(request: Request, edus: list[Any]) -> None:
     db = request.app.state.db
     touched = False
     for edu in edus:
-        if not isinstance(edu, dict) or edu.get("edu_type") != "m.receipt":
+        if not isinstance(edu, dict):
             continue
+        edu_type = edu.get("edu_type")
         content = edu.get("content")
         if not isinstance(content, dict):
+            continue
+        if edu_type == "m.typing":
+            room_id = content.get("room_id")
+            user_id = content.get("user_id")
+            if isinstance(room_id, str) and isinstance(user_id, str):
+                if await store.get_room(db, room_id) is not None:
+                    request.app.state.typing.set_typing(
+                        room_id, user_id, bool(content.get("typing"))
+                    )
+            continue
+        if edu_type != "m.receipt":
             continue
         for room_id, by_type in content.items():
             if await store.get_room(db, room_id) is None or not isinstance(by_type, dict):

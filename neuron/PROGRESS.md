@@ -796,7 +796,29 @@ it and it appears in **Bob's `/sync`**, leaving the outbox empty. ruff + mypy cl
 Honest scope / deferred: retries are triggered opportunistically (next send) or
 explicitly (`retry`); a periodic background flusher with backoff is future work.
 
+### Step 6k — Typing notifications (local + over federation) — ✅ built
+
+The second EDU; de-stubs the HS-6 typing endpoint.
+
+- **In-memory handler** (`typing_state.py`, `TypingHandler`): per-room typing with
+  expiry, a monotonic `serial` (so `/sync` settles instead of long-polling forever),
+  and lazy pruning of expired entries.
+- **CS endpoint** (`api/client_misc.py`): `PUT /rooms/{roomId}/typing/{userId}` sets
+  typing (own user only) and federates it.
+- **`/sync`** (`sync/service.py`): joined rooms gain an `m.typing` ephemeral event
+  listing current typers, gated by a sixth (typing) token component.
+- **Federation** (`FederationSender.send_typing` `m.typing` EDU; transaction
+  `_process_edus` applies inbound typing for shared rooms).
+
+Acceptance criterion met — **a two-server typing test**: Alice starts typing and
+appears in **Bob's `/sync`** `m.typing` on B; she stops and drops off. ruff + mypy
+clean (115 files); 186 tests pass.
+
+Honest scope / deferred: typing state is in-memory (single-process); expiry is
+applied on read, not via a timer (so a stop-typing that's purely a timeout surfaces
+on the next sync, not as an instant long-poll wake); **presence** is still stubbed.
+
 Next steps in HS-7: validate state res v2 against conformance vectors and wire it
-into durable state application for forks; then **typing**/**presence** EDUs and a
-background retry flusher. The cross-server conformance milestone (Complement) needs
-Docker + Go and is tracked as HS-8.
+into durable state application for forks; then a background retry flusher and
+**presence**. The cross-server conformance milestone (Complement) needs Docker + Go
+and is tracked as HS-8.

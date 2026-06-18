@@ -26,6 +26,7 @@ from neuron_server.storage import receipts as receipts_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 from neuron_server.sync.notifier import StreamNotifier
+from neuron_server.typing_state import TypingHandler
 
 _TIMELINE_LIMIT = 20
 _TO_DEVICE_LIMIT = 100
@@ -52,14 +53,18 @@ class _Token:
     device_list: int
     invites: int = 0
     receipts: int = 0
+    typing: int = 0
 
 
 class SyncService:
     """Produces ``/sync`` responses for clients and bots."""
 
-    def __init__(self, db: Database, notifier: StreamNotifier) -> None:
+    def __init__(
+        self, db: Database, notifier: StreamNotifier, typing: TypingHandler | None = None
+    ) -> None:
         self._db = db
         self._notifier = notifier
+        self._typing = typing
 
     async def sync(
         self, user_id: str, device_id: str, *, since: str | None, timeout_ms: int
@@ -83,6 +88,7 @@ class SyncService:
             device_list = int(parts[2]) if len(parts) > 2 else 0
             invites = int(parts[3]) if len(parts) > 3 else 0
             receipts = int(parts[4]) if len(parts) > 4 else 0
+            typing = int(parts[5]) if len(parts) > 5 else 0
         except ValueError as exc:
             raise MatrixError(400, "M_INVALID_PARAM", "Invalid sync token") from exc
         return _Token(
@@ -91,6 +97,7 @@ class SyncService:
             device_list=device_list,
             invites=invites,
             receipts=receipts,
+            typing=typing,
         )
 
     async def _build(
@@ -106,6 +113,8 @@ class SyncService:
         changed = False
 
         new_receipts = await receipts_store.max_receipt_stream(self._db)
+        new_typing = self._typing.serial if self._typing is not None else 0
+        typing_changed = new_typing > token.typing
 
         for room_id, membership in memberships:
             if membership == "join":
@@ -115,9 +124,12 @@ class SyncService:
                 )
                 if receipt_event is not None:
                     section["ephemeral"]["events"].append(receipt_event)
-                if initial or room_changed or receipts_changed:
+                typing_event = self._typing_event(room_id)
+                if typing_event is not None:
+                    section["ephemeral"]["events"].append(typing_event)
+                if initial or room_changed or receipts_changed or typing_changed:
                     join[room_id] = section
-                    changed = changed or room_changed or receipts_changed
+                    changed = changed or room_changed or receipts_changed or typing_changed
             elif membership == "invite":
                 include, section = await self._invited_room(
                     room_id, user_id, token.events, initial
@@ -148,7 +160,8 @@ class SyncService:
             changed = True
 
         next_batch = (
-            f"{current_events}.{new_to_device}.{new_device_list}.{new_invites}.{new_receipts}"
+            f"{current_events}.{new_to_device}.{new_device_list}"
+            f".{new_invites}.{new_receipts}.{new_typing}"
         )
         body = {
             "next_batch": next_batch,
@@ -215,6 +228,15 @@ class SyncService:
             "ephemeral": {"events": []},
         }
         return section, room_changed
+
+    def _typing_event(self, room_id: str) -> dict[str, Any] | None:
+        """The room's ``m.typing`` ephemeral event, or ``None`` if nobody is typing."""
+        if self._typing is None:
+            return None
+        users = self._typing.typing_users(room_id)
+        if not users:
+            return None
+        return {"type": "m.typing", "content": {"user_ids": users}}
 
     async def _room_receipts(
         self, room_id: str, since_receipts: int, initial: bool

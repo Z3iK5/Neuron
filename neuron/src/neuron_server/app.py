@@ -60,6 +60,7 @@ from neuron_server.storage.metadata import get_metadata, set_metadata
 from neuron_server.storage.migrations import run_migrations
 from neuron_server.sync.notifier import StreamNotifier
 from neuron_server.sync.service import SyncService
+from neuron_server.typing_state import TypingHandler
 
 log = get_logger(__name__)
 
@@ -99,6 +100,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         notifier = StreamNotifier()
         app.state.db = db
         app.state.notify = notifier.notify
+        app.state.typing = TypingHandler(notify=notifier.notify)
         app.state.server_keys = await ServerKeyService.load_or_create(db, settings)
         app.state.federation_client = FederationClient(
             settings.name, app.state.server_keys.signing_key
@@ -126,7 +128,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             notify=notifier.notify,
             apply_event=app.state.rooms.apply_remote_event,
         )
-        app.state.sync = SyncService(db, notifier)
+        app.state.sync = SyncService(db, notifier, typing=app.state.typing)
         app.state.media = MediaService(
             FilesystemMediaStore(settings.media_store_path),
             db,

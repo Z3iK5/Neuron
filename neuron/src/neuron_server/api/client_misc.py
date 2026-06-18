@@ -229,8 +229,18 @@ async def set_presence(
 
 @router.put("/v3/rooms/{room_id}/typing/{user_id}")
 async def typing(
-    room_id: str, user_id: str, who: Authenticated = Depends(require_user)
+    room_id: str,
+    user_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
 ) -> dict[str, Any]:
+    if user_id != who.user_id:
+        raise MatrixError(403, "M_FORBIDDEN", "Cannot set another user's typing state")
+    body = await _json_body(request)
+    is_typing = bool(body.get("typing"))
+    timeout = int(body.get("timeout", 30000))
+    request.app.state.typing.set_typing(room_id, user_id, is_typing, timeout)
+    await request.app.state.federation_sender.send_typing(room_id, user_id, is_typing)
     return {}
 
 
