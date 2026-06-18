@@ -4,10 +4,11 @@
 # Build (from the `neuron/` directory, after `pip install -e ".[desktop-gui]"`):
 #     pyinstaller --noconfirm packaging/neuron_desktop.spec
 #
-# Produces a one-folder bundle in `dist/Neuron/`. The CI workflow
-# (.github/workflows/desktop-installers.yml) builds this on macOS, Windows and
-# Linux and uploads the zipped bundle as a release artifact. Wrapping the bundle
-# in native installer formats (.dmg / .msi / AppImage) is a follow-up.
+# Produces a one-folder bundle in `dist/Neuron/`. On macOS it additionally wraps
+# that bundle into a proper `dist/Neuron.app` (so it can be packaged as a `.dmg`
+# by packaging/make_dmg.sh). The CI workflow (.github/workflows/desktop-installers.yml)
+# builds this on macOS, Windows and Linux. Code signing / notarization are follow-ups
+# (see DESKTOP-PLAN.md D4).
 
 import os
 
@@ -71,3 +72,23 @@ exe = EXE(
     icon=_icon,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="Neuron")
+
+# On macOS, wrap the one-folder bundle into a real `.app` so it can be dragged to
+# /Applications and packaged as a `.dmg`. (Windows/Linux keep the plain folder.)
+# Keep the version in step with the project version in pyproject.toml.
+if sys.platform == "darwin":
+    app = BUNDLE(  # noqa: F821 (BUNDLE injected by PyInstaller)
+        coll,
+        name="Neuron.app",
+        icon=_icns if os.path.exists(_icns) else None,
+        bundle_identifier="org.neuron.desktop",
+        version="0.0.1",
+        info_plist={
+            "CFBundleName": "Neuron",
+            "CFBundleDisplayName": "Neuron",
+            "CFBundleShortVersionString": "0.0.1",
+            "CFBundleVersion": "0.0.1",
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "11.0",
+        },
+    )

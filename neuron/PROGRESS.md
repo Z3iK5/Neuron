@@ -948,3 +948,30 @@ ruff + mypy clean (120 files); full suite 221 passed, 3 integration skips.
 
 This completes the three onboarding QoL steps (in-browser onboarding → invite links
 + QR → doctor).
+
+---
+
+## Desktop D3 — macOS installer (.dmg) — ✅ built (CI-only)
+
+The desktop bundle is now packaged as a native macOS installer (unsigned for now;
+signing/notarization stay a D4 follow-up).
+
+- **`packaging/neuron_desktop.spec`** gained a macOS-only `BUNDLE` step that wraps
+  the one-folder bundle into a real `Neuron.app` (Info.plist: name, version,
+  `NSHighResolutionCapable`, `LSMinimumSystemVersion`; bundle id `org.neuron.desktop`).
+  Windows/Linux keep the plain one-folder bundle — that path is byte-for-byte
+  unchanged (the new block is guarded by `sys.platform == "darwin"`).
+- **`packaging/make_icns.py`** renders the NEURON mark at the Apple iconset sizes
+  (16→1024, via `neuron_desktop.icon.render_icon`, the single source of truth) and
+  runs `iconutil` to produce `packaging/icons/neuron.icns`. No-op off macOS.
+- **`packaging/make_dmg.sh`** stages `Neuron.app` beside an `/Applications` symlink
+  and `hdiutil create`s a compressed, drag-to-install `.dmg`.
+- **`.github/workflows/desktop-installers.yml`** gained macOS-only steps (render
+  `.icns` → build → smoke-test the `.app` → build `.dmg` → upload artifact + attach
+  to the release on a tag). Triggers on a `v*` tag or manual dispatch.
+
+Honest scope: the `.app`/`.dmg` build runs **only on the `macos-latest` runner** —
+it cannot be exercised in the Linux dev container. Validated locally: shell + spec
+syntax, `ruff` over `packaging/`, and the icon render at every iconset size; the
+`iconutil`/`hdiutil` packaging is exercised in CI. Windows (`.msi`/`.exe`) and Linux
+(AppImage/`.deb`) installers, plus code signing, remain follow-ups.
