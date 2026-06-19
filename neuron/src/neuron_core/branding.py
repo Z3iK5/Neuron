@@ -228,6 +228,7 @@ _CONSOLE_NAV: tuple[tuple[str, str], ...] = (
     ("/console/users", "Users"),
     ("/console/rooms", "Rooms"),
     ("/console/invites", "Invites"),
+    ("/console/reports", "Reports"),
 )
 
 

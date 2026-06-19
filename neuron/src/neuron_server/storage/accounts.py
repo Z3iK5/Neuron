@@ -22,6 +22,7 @@ class UserRow:
     admin: bool
     deactivated: bool
     created_ts: int
+    shadow_banned: bool = False
 
 
 @dataclass
@@ -48,7 +49,8 @@ async def create_user(
 
 async def get_user(db: Database, name: str) -> UserRow | None:
     rows = await db.fetchall(
-        "SELECT name, password_hash, admin, deactivated, created_ts FROM users WHERE name = ?",
+        "SELECT name, password_hash, admin, deactivated, created_ts, shadow_banned"
+        " FROM users WHERE name = ?",
         (name,),
     )
     if not rows:
@@ -60,6 +62,7 @@ async def get_user(db: Database, name: str) -> UserRow | None:
         admin=bool(row[2]),
         deactivated=bool(row[3]),
         created_ts=int(row[4]),
+        shadow_banned=bool(row[5]),
     )
 
 

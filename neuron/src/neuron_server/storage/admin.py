@@ -4,6 +4,8 @@ flags and registration tokens."""
 
 from __future__ import annotations
 
+import json
+import secrets
 from typing import Any
 
 from neuron_server.storage.accounts import UserRow
@@ -34,7 +36,7 @@ async def list_users(
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     params.extend([limit, offset])
     rows = await db.fetchall(
-        "SELECT u.name, u.admin, u.deactivated, u.created_ts, p.displayname"
+        "SELECT u.name, u.admin, u.deactivated, u.created_ts, p.displayname, u.shadow_banned"
         " FROM users u LEFT JOIN profiles p ON p.user_id = u.name"
         f"{clause} ORDER BY u.name LIMIT ? OFFSET ?",
         params,
@@ -46,7 +48,7 @@ async def list_users(
             "deactivated": bool(r[2]),
             "creation_ts": int(r[3]),
             "displayname": None if r[4] is None else str(r[4]),
-            "shadow_banned": False,
+            "shadow_banned": bool(r[5]),
             "is_guest": False,
             "user_type": None,
         }
@@ -68,6 +70,13 @@ async def set_user_deactivated(db: Database, name: str, deactivated: bool) -> No
     )
 
 
+async def set_user_shadow_banned(db: Database, name: str, shadow_banned: bool) -> None:
+    await db.execute(
+        "UPDATE users SET shadow_banned = ? WHERE name = ?",
+        (1 if shadow_banned else 0, name),
+    )
+
+
 def user_to_admin_dict(row: UserRow, displayname: str | None) -> dict[str, Any]:
     return {
         "name": row.name,
@@ -75,7 +84,7 @@ def user_to_admin_dict(row: UserRow, displayname: str | None) -> dict[str, Any]:
         "deactivated": row.deactivated,
         "creation_ts": row.created_ts,
         "displayname": displayname,
-        "shadow_banned": False,
+        "shadow_banned": row.shadow_banned,
         "is_guest": False,
         "user_type": None,
         "threepids": [],
@@ -163,3 +172,116 @@ async def consume_registration_token(db: Database, token: str, now_ms: int) -> b
             (token,),
         )
         return True
+
+
+# --- moderation: deletion/redaction status, reports, server-notices rooms ---
+
+
+async def record_room_deletion(
+    db: Database, room_id: str, kicked_users: list[str], *, ts: int
+) -> str:
+    """Store a completed room deletion and return its delete_id."""
+    delete_id = secrets.token_urlsafe(8)
+    await db.execute(
+        "INSERT INTO room_deletions (delete_id, room_id, status, kicked_users, created_ts)"
+        " VALUES (?, ?, 'complete', ?, ?)",
+        (delete_id, room_id, json.dumps(kicked_users), ts),
+    )
+    return delete_id
+
+
+async def get_room_deletion(db: Database, delete_id: str) -> dict[str, Any] | None:
+    rows = await db.fetchall(
+        "SELECT status, kicked_users FROM room_deletions WHERE delete_id = ?", (delete_id,)
+    )
+    if not rows:
+        return None
+    return {
+        "status": str(rows[0][0]),
+        "shutdown_room": {
+            "kicked_users": json.loads(rows[0][1]),
+            "failed_to_kick_users": [],
+        },
+    }
+
+
+async def record_redaction(
+    db: Database, user_id: str, total: int, failed: list[str], *, ts: int
+) -> str:
+    """Store a completed bulk redaction and return its redact_id."""
+    redact_id = secrets.token_urlsafe(8)
+    await db.execute(
+        "INSERT INTO room_redactions (redact_id, user_id, status, total, failed, created_ts)"
+        " VALUES (?, ?, 'complete', ?, ?, ?)",
+        (redact_id, user_id, total, json.dumps(failed), ts),
+    )
+    return redact_id
+
+
+async def get_redaction(db: Database, redact_id: str) -> dict[str, Any] | None:
+    rows = await db.fetchall(
+        "SELECT status, failed FROM room_redactions WHERE redact_id = ?", (redact_id,)
+    )
+    if not rows:
+        return None
+    failed = json.loads(rows[0][1])
+    return {
+        "status": str(rows[0][0]),
+        "failed_redactions": {event_id: "failed" for event_id in failed},
+    }
+
+
+async def add_event_report(
+    db: Database,
+    *,
+    room_id: str,
+    event_id: str,
+    reporter: str,
+    reason: str | None,
+    score: int | None,
+    ts: int,
+) -> None:
+    await db.execute(
+        "INSERT INTO event_reports (id, room_id, event_id, reporter, reason, score, received_ts)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (secrets.token_urlsafe(8), room_id, event_id, reporter, reason, score, ts),
+    )
+
+
+async def list_event_reports(
+    db: Database, *, offset: int = 0, limit: int = 100
+) -> tuple[list[dict[str, Any]], int]:
+    total = int(await db.fetchval("SELECT COUNT(*) FROM event_reports"))
+    rows = await db.fetchall(
+        "SELECT id, room_id, event_id, reporter, reason, score, received_ts FROM event_reports"
+        " ORDER BY received_ts DESC LIMIT ? OFFSET ?",
+        (limit, offset),
+    )
+    reports = [
+        {
+            "id": str(r[0]),
+            "room_id": str(r[1]),
+            "event_id": str(r[2]),
+            "user_id": str(r[3]),  # the reporter (Synapse Admin API naming)
+            "reason": None if r[4] is None else str(r[4]),
+            "score": None if r[5] is None else int(r[5]),
+            "received_ts": int(r[6]),
+        }
+        for r in rows
+    ]
+    return reports, total
+
+
+async def get_server_notices_room(db: Database, user_id: str) -> str | None:
+    value = await db.fetchval(
+        "SELECT room_id FROM server_notices_rooms WHERE user_id = ?", (user_id,)
+    )
+    return None if value is None else str(value)
+
+
+async def set_server_notices_room(db: Database, user_id: str, room_id: str) -> None:
+    await db.execute(
+        "INSERT INTO server_notices_rooms (user_id, room_id) VALUES (?, ?)"
+        " ON CONFLICT(user_id) DO UPDATE SET room_id = excluded.room_id",
+        (user_id, room_id),
+    )

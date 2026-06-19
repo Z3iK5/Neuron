@@ -289,6 +289,57 @@ MIGRATIONS: tuple[Migration, ...] = (
             " ON federation_outbox (destination, stream_id)",
         ),
     ),
+    Migration(
+        version=13,
+        name="moderation",
+        # Real backing for the admin moderation actions: a shadow-ban flag, a room
+        # block list, spec-shaped delete/redact status rows, abuse reports, and the
+        # per-user server-notices room mapping. (ADD COLUMN is portable across the
+        # SQLite/PostgreSQL backends, as in earlier migrations.)
+        statements=(
+            "ALTER TABLE users ADD COLUMN shadow_banned INTEGER NOT NULL DEFAULT 0",
+            # Rooms an operator has blocked on this server (joins/sends are refused).
+            "CREATE TABLE IF NOT EXISTS blocked_rooms ("
+            " room_id TEXT PRIMARY KEY,"
+            " blocked_by TEXT,"
+            " blocked_ts INTEGER NOT NULL"
+            ")",
+            # Result of an admin room deletion/purge (done synchronously here).
+            "CREATE TABLE IF NOT EXISTS room_deletions ("
+            " delete_id TEXT PRIMARY KEY,"
+            " room_id TEXT NOT NULL,"
+            " status TEXT NOT NULL,"
+            " kicked_users TEXT NOT NULL,"
+            " created_ts INTEGER NOT NULL"
+            ")",
+            # Result of an admin bulk redaction of a user's events.
+            "CREATE TABLE IF NOT EXISTS room_redactions ("
+            " redact_id TEXT PRIMARY KEY,"
+            " user_id TEXT NOT NULL,"
+            " status TEXT NOT NULL,"
+            " total INTEGER NOT NULL,"
+            " failed TEXT NOT NULL,"
+            " created_ts INTEGER NOT NULL"
+            ")",
+            # Abuse reports about events, submitted by users; listed in the console.
+            "CREATE TABLE IF NOT EXISTS event_reports ("
+            " id TEXT PRIMARY KEY,"
+            " room_id TEXT NOT NULL,"
+            " event_id TEXT NOT NULL,"
+            " reporter TEXT NOT NULL,"
+            " reason TEXT,"
+            " score INTEGER,"
+            " received_ts INTEGER NOT NULL"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_event_reports_ts"
+            " ON event_reports (received_ts)",
+            # Maps a target user to their single (reused) server-notices room.
+            "CREATE TABLE IF NOT EXISTS server_notices_rooms ("
+            " user_id TEXT PRIMARY KEY,"
+            " room_id TEXT NOT NULL"
+            ")",
+        ),
+    ),
 )
 
 
