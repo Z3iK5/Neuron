@@ -246,6 +246,36 @@ async def redact_event(
     return {"event_id": redaction_id}
 
 
+# --- reporting -------------------------------------------------------------
+
+
+@router.post("/v3/rooms/{room_id}/report/{event_id}")
+async def report_event(
+    room_id: str,
+    event_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    rooms: RoomService = Depends(get_rooms),
+) -> dict[str, Any]:
+    """Report an event for abuse; admins review reports in the console."""
+    body = await _json_body(request)
+    await rooms.get_event(room_id, event_id)  # 404 if the event isn't in the room
+    raw_score = body.get("score")
+    try:
+        score = None if raw_score is None else int(raw_score)
+    except (TypeError, ValueError):
+        score = None
+    reason = body.get("reason")
+    await request.app.state.admin.report_event(
+        room_id=room_id,
+        event_id=event_id,
+        reporter=who.user_id,
+        reason=None if reason is None else str(reason),
+        score=score,
+    )
+    return {}
+
+
 # --- reads -----------------------------------------------------------------
 
 

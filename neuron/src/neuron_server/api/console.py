@@ -192,12 +192,12 @@ async def overview(request: Request, _: str = Depends(require_console_admin)) ->
         '<a class="btn ghost" href="/console/invites">Invites</a>'
         '<a class="btn ghost" href="/get-started">Create account</a></div></div>'
     )
-    soon = (
+    moderation = (
         '<div class="panel"><h2>Moderation</h2>'
-        '<p class="muted">Shadow-ban, server notices, room block/delete, redaction and '
-        'content reports are coming in a future update.</p></div>'
+        '<p class="muted">Block or delete rooms, shadow-ban or redact a user, and review '
+        "reported events from the Users, Rooms and Reports tabs.</p></div>"
     )
-    body = f'<h1 class="page">Overview</h1>{stats}{quick}{soon}'
+    body = f'<h1 class="page">Overview</h1>{stats}{quick}{moderation}'
     return _page(request, "Overview", "/console", body)
 
 
@@ -338,11 +338,26 @@ async def user_detail(
             f'<form method="post" action="/console/users/{quoted}/deactivate">{csrf}'
             '<button class="btn danger" type="submit">Deactivate account</button></form></div>'
         )
+    shadow_banned = bool(user.get("shadow_banned"))
+    sb_label = "Remove shadow-ban" if shadow_banned else "Shadow-ban"
+    sb_value = "false" if shadow_banned else "true"
+    sb_pill = _pill(shadow_banned, "on", "off")
     actions += (
         '<div class="panel"><h2>Moderation</h2>'
-        '<div class="row"><button class="btn ghost disabled" disabled>Shadow-ban</button>'
-        '<button class="btn ghost disabled" disabled>Redact messages</button>'
-        '<span class="soon">coming soon</span></div></div>'
+        f'<p class="note" style="margin-bottom:.8rem">Shadow-ban {sb_pill}'
+        " — a shadow-banned user can still post, but no one else sees their messages.</p>"
+        '<div class="row">'
+        f'<form class="inline" method="post" action="/console/users/{quoted}/shadow-ban">{csrf}'
+        f'<input type="hidden" name="banned" value="{sb_value}">'
+        f'<button class="btn" type="submit">{sb_label}</button></form>'
+        f'<form class="inline" method="post" action="/console/users/{quoted}/redact" '
+        "onsubmit=\"return confirm('Redact all messages from this user?')\">"
+        f'{csrf}<button class="btn danger" type="submit">Redact all messages</button></form>'
+        "</div></div>"
+        '<div class="panel"><h2>Send server notice</h2>'
+        f'<form method="post" action="/console/users/{quoted}/notice">{csrf}'
+        '<input name="message" placeholder="A message delivered to this user" required>'
+        '<button class="btn" type="submit">Send notice</button></form></div>'
     )
     body = (
         f'<h1 class="page">{_e(user_id)}</h1>'
@@ -350,6 +365,47 @@ async def user_detail(
         '<p class="muted"><a href="/console/users">&larr; All users</a></p>'
     )
     return _page(request, user_id, "/console/users", body)
+
+
+@router.post("/console/users/{user_id}/shadow-ban", include_in_schema=False)
+async def user_shadow_ban(
+    request: Request,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    banned: bool = Form(False),
+) -> Response:
+    await _admin(request).set_shadow_ban(user_id, banned)
+    _flash(request, "Shadow-banned." if banned else "Shadow-ban removed.")
+    return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
+
+
+@router.post("/console/users/{user_id}/redact", include_in_schema=False)
+async def user_redact(
+    request: Request,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    result = await _admin(request).redact_user_events(user_id)
+    await _admin(request).get_redact_status(result["redact_id"])
+    _flash(request, "Redacted the user's messages.")
+    return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
+
+
+@router.post("/console/users/{user_id}/notice", include_in_schema=False)
+async def user_server_notice(
+    request: Request,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    message: str = Form(...),
+) -> Response:
+    await _admin(request).send_server_notice(
+        user_id, {"msgtype": "m.text", "body": message}
+    )
+    _flash(request, "Server notice sent.")
+    return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
 
 
 @router.post("/console/users/{user_id}/admin", include_in_schema=False)
@@ -449,11 +505,26 @@ async def room_detail(
         if member_items
         else ""
     )
+    blocked = await admin.is_room_blocked(room_id)
+    csrf = _csrf_field(request)
+    quoted = _quote(room_id)
+    block_label = "Unblock room" if blocked else "Block room"
+    block_value = "false" if blocked else "true"
     mod = (
-        '<div class="panel"><h2>Moderation</h2><div class="row">'
-        '<button class="btn ghost disabled" disabled>Block</button>'
-        '<button class="btn ghost disabled" disabled>Delete &amp; purge</button>'
-        '<span class="soon">coming soon</span></div></div>'
+        '<div class="panel"><h2>Moderation</h2>'
+        f'<p class="note" style="margin-bottom:.8rem">Block {_pill(blocked, "on", "off")}'
+        " — a blocked room rejects all sends and joins.</p>"
+        '<div class="row">'
+        f'<form class="inline" method="post" action="/console/rooms/{quoted}/block">{csrf}'
+        f'<input type="hidden" name="block" value="{block_value}">'
+        f'<button class="btn" type="submit">{block_label}</button></form>'
+        f'<form class="inline" method="post" action="/console/rooms/{quoted}/delete" '
+        "onsubmit=\"return confirm('Delete and purge this room? This cannot be undone.')\">"
+        f"{csrf}"
+        '<label class="muted" style="margin:0 .4rem"><input type="checkbox" name="purge" '
+        'value="true" checked style="width:auto"> purge</label>'
+        '<button class="btn danger" type="submit">Delete room</button></form>'
+        "</div></div>"
     )
     body = (
         f'<h1 class="page">{_e(room.get("name") or room_id)}</h1>'
@@ -461,6 +532,32 @@ async def room_detail(
         '<p class="muted"><a href="/console/rooms">&larr; All rooms</a></p>'
     )
     return _page(request, "Room", "/console/rooms", body)
+
+
+@router.post("/console/rooms/{room_id}/block", include_in_schema=False)
+async def room_block(
+    request: Request,
+    room_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    block: bool = Form(False),
+) -> Response:
+    await _admin(request).set_room_block(room_id, block)
+    _flash(request, "Room blocked." if block else "Room unblocked.")
+    return RedirectResponse(f"/console/rooms/{_quote(room_id)}", status_code=303)
+
+
+@router.post("/console/rooms/{room_id}/delete", include_in_schema=False)
+async def room_delete(
+    request: Request,
+    room_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    purge: bool = Form(False),
+) -> Response:
+    await _admin(request).delete_room(room_id, purge=purge, block=not purge)
+    _flash(request, "Room deleted.")
+    return RedirectResponse("/console/rooms", status_code=303)
 
 
 # --- invites / registration tokens -----------------------------------------
@@ -658,6 +755,29 @@ async def settings_save(
     else:
         _flash(request, "This server is not managed by the desktop app; settings were not saved.")
     return RedirectResponse("/console/settings", status_code=303)
+
+
+# --- reports ----------------------------------------------------------------
+@router.get("/console/reports", include_in_schema=False)
+async def reports_page(request: Request, _: str = Depends(require_console_admin)) -> Response:
+    data = await _admin(request).list_event_reports(limit=100)
+    rows = ""
+    for r in data.get("event_reports", []):
+        rid = str(r.get("room_id", ""))
+        rows += (
+            f'<tr><td>{_e(str(r.get("user_id", "")))}</td>'
+            f'<td><a href="/console/rooms/{_quote(rid)}">{_e(rid)}</a></td>'
+            f'<td><code>{_e(str(r.get("event_id", "")))}</code></td>'
+            f'<td>{_e(r.get("reason") or "")}</td></tr>'
+        )
+    if not rows:
+        rows = '<tr><td colspan="4" class="muted">No reports yet.</td></tr>'
+    body = (
+        f'<h1 class="page">Reports <span class="muted">({data.get("total", 0)})</span></h1>'
+        '<div class="panel"><table class="tbl"><thead><tr><th>Reporter</th><th>Room</th>'
+        f"<th>Event</th><th>Reason</th></tr></thead><tbody>{rows}</tbody></table></div>"
+    )
+    return _page(request, "Reports", "/console/reports", body)
 
 
 # --- pagination helper ------------------------------------------------------

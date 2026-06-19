@@ -129,22 +129,34 @@ async def reset_password(
 
 
 @router.post("/v1/users/{user_id}/shadow_ban")
-@router.delete("/v1/users/{user_id}/shadow_ban")
 async def shadow_ban(
     user_id: str,
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    return await admin.set_shadow_ban(user_id)
+    return await admin.set_shadow_ban(user_id, True)
+
+
+@router.delete("/v1/users/{user_id}/shadow_ban")
+async def shadow_unban(
+    user_id: str,
+    who: Authenticated = Depends(require_admin),
+    admin: AdminService = Depends(get_admin),
+) -> dict[str, Any]:
+    return await admin.set_shadow_ban(user_id, False)
 
 
 @router.post("/v1/user/{user_id}/redact")
 async def redact_user(
     user_id: str,
+    request: Request,
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    return await admin.redact_user_events(user_id)
+    body = await _json_body(request)
+    rooms = body.get("rooms")
+    rooms_list = [str(r) for r in rooms] if isinstance(rooms, list) else None
+    return await admin.redact_user_events(user_id, rooms=rooms_list)
 
 
 @router.get("/v1/user/redact_status/{redact_id}")
@@ -216,10 +228,14 @@ async def room_block(
 @router.delete("/v2/rooms/{room_id}")
 async def delete_room(
     room_id: str,
+    request: Request,
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    return await admin.delete_room(room_id)
+    body = await _json_body(request)
+    return await admin.delete_room(
+        room_id, block=bool(body.get("block", False)), purge=bool(body.get("purge", True))
+    )
 
 
 @router.get("/v2/rooms/delete_status/{delete_id}")
@@ -303,4 +319,17 @@ async def send_server_notice(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    return await admin.send_server_notice()
+    body = await _json_body(request)
+    user_id = str(body.get("user_id") or "")
+    if not user_id:
+        raise MatrixError(400, "M_MISSING_PARAM", "user_id is required")
+    content = body.get("content")
+    if not isinstance(content, dict):
+        raise MatrixError(400, "M_BAD_JSON", "content must be an object")
+    state_key = body.get("state_key")
+    return await admin.send_server_notice(
+        user_id,
+        content,
+        event_type=str(body.get("type") or "m.room.message"),
+        state_key=None if state_key is None else str(state_key),
+    )

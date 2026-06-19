@@ -10,6 +10,7 @@ of the federation epic, HS-7). Every client-originated event is checked against
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -20,6 +21,7 @@ from neuron_server.errors import MatrixError
 from neuron_server.rooms import authrules, versions
 from neuron_server.rooms.authrules import AuthState
 from neuron_server.rooms.events import Event, generate_room_id
+from neuron_server.storage import accounts
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 
@@ -157,6 +159,11 @@ class RoomService:
         room = await store.get_room(self._db, room_id)
         if room is None:
             raise MatrixError(404, "M_NOT_FOUND", "Unknown room")
+        # A blocked room is closed to client traffic (sends, joins, reads). Admin
+        # inspection goes through AdminService/storage directly and is unaffected;
+        # admin_delete_room checks existence via store.get_room to bypass this.
+        if await store.is_room_blocked(self._db, room_id):
+            raise MatrixError(403, "M_FORBIDDEN", "This room has been blocked on this server")
         return room
 
     # --- create ------------------------------------------------------------
@@ -243,6 +250,15 @@ class RoomService:
         existing = await store.get_txn_event(self._db, sender, txn_id)
         if existing is not None:
             return existing
+
+        # Shadow-banned senders: silently accept the message (return a real-looking
+        # event id, dedupe the txn) but never persist or propagate it, so it is
+        # invisible to everyone else. Matches Synapse's shadow-ban semantics.
+        sender_row = await accounts.get_user(self._db, sender)
+        if sender_row is not None and sender_row.shadow_banned:
+            fake_id = "$" + secrets.token_urlsafe(24)
+            await store.put_txn_event(self._db, sender, txn_id, fake_id)
+            return fake_id
 
         state = await self._load_state(room_id)
         probe = Event(
@@ -453,6 +469,65 @@ class RoomService:
                 content={"membership": "join"}, state_key=user_id,
             )
         self._wake_syncs()
+
+    async def admin_force_leave(self, room_id: str, user_id: str) -> None:
+        """Force ``user_id`` out of the room (bypasses power-level checks)."""
+        async with self._db.transaction():
+            await self._append(
+                room_id, etype="m.room.member", sender=user_id,
+                content={"membership": "leave"}, state_key=user_id,
+            )
+        self._wake_syncs()
+
+    async def admin_delete_room(
+        self, room_id: str, *, purge: bool = True, block: bool = False, by: str | None = None
+    ) -> dict[str, Any]:
+        """Force every member out and (optionally) purge the room's data / block it.
+
+        Synchronous — correct at desktop scale. Returns the kicked users.
+        """
+        # Bypass the block guard in _require_room so a blocked room can still be deleted.
+        if await store.get_room(self._db, room_id) is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Unknown room")
+        kicked = await store.get_joined_members(self._db, room_id)
+        for member in kicked:
+            await self.admin_force_leave(room_id, member)
+        if purge:
+            async with self._db.transaction():
+                await store.purge_room(self._db, room_id)
+        elif block:
+            await store.set_room_blocked(self._db, room_id, True, by=by, ts=_now_ms())
+        self._wake_syncs()
+        return {"kicked_users": kicked}
+
+    async def admin_redact_user_events(
+        self, user_id: str, *, room_id: str | None = None, limit: int | None = None
+    ) -> dict[str, Any]:
+        """Redact a user's message events (server authority). Returns total + failures."""
+        targets = await store.get_redactable_events_by_sender(
+            self._db, user_id, room_id=room_id, limit=limit
+        )
+        failed: list[str] = []
+        for rid, eid in targets:
+            try:
+                await self._admin_redact_one(rid, eid)
+            except Exception:  # noqa: BLE001 - record and continue the bulk job
+                failed.append(eid)
+        self._wake_syncs()
+        return {"total": len(targets), "failed": failed}
+
+    async def _admin_redact_one(self, room_id: str, event_id: str) -> None:
+        target = await store.get_event(self._db, room_id, event_id)
+        if target is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Unknown event")
+        room = await store.get_room(self._db, room_id)
+        redactor = room.creator if room is not None else target.sender
+        async with self._db.transaction():
+            redaction = await self._append(
+                room_id, etype="m.room.redaction", sender=redactor,
+                content={"redacts": event_id}, redacts=event_id,
+            )
+            await self._apply_redaction(target, redaction.event_id)
 
     # --- federated membership (resident side: make_join / send_join) --------
 

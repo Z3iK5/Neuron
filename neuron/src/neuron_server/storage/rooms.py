@@ -350,3 +350,73 @@ async def put_txn_event(db: Database, user_id: str, txn_id: str, event_id: str) 
         " ON CONFLICT(user_id, txn_id) DO NOTHING",
         (user_id, txn_id, event_id),
     )
+
+
+# --- moderation: room blocking ---------------------------------------------
+
+
+async def is_room_blocked(db: Database, room_id: str) -> bool:
+    """True if this room has been blocked on this server."""
+    return (
+        await db.fetchval("SELECT 1 FROM blocked_rooms WHERE room_id = ?", (room_id,))
+    ) is not None
+
+
+async def set_room_blocked(
+    db: Database, room_id: str, blocked: bool, *, by: str | None, ts: int
+) -> None:
+    if blocked:
+        await db.execute(
+            "INSERT INTO blocked_rooms (room_id, blocked_by, blocked_ts) VALUES (?, ?, ?)"
+            " ON CONFLICT(room_id) DO UPDATE SET blocked_by = excluded.blocked_by,"
+            " blocked_ts = excluded.blocked_ts",
+            (room_id, by, ts),
+        )
+    else:
+        await db.execute("DELETE FROM blocked_rooms WHERE room_id = ?", (room_id,))
+
+
+# --- moderation: bulk redaction + purge ------------------------------------
+
+
+async def get_redactable_events_by_sender(
+    db: Database, sender: str, *, room_id: str | None = None, limit: int | None = None
+) -> list[tuple[str, str]]:
+    """Return ``(room_id, event_id)`` of a sender's redactable message events.
+
+    Excludes redactions themselves and state events; ordered oldest-first.
+    """
+    where = ["sender = ?", "type != 'm.room.redaction'", "state_key IS NULL"]
+    params: list[Any] = [sender]
+    if room_id is not None:
+        where.append("room_id = ?")
+        params.append(room_id)
+    sql = (
+        "SELECT room_id, event_id FROM events WHERE "
+        + " AND ".join(where)
+        + " ORDER BY stream_ordering"
+    )
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    rows = await db.fetchall(sql, params)
+    return [(str(r[0]), str(r[1])) for r in rows]
+
+
+async def purge_room(db: Database, room_id: str) -> None:
+    """Delete all of a room's persisted data. Call inside a ``db.transaction()``.
+
+    ``event_txns`` and ``federation_outbox`` have no ``room_id`` column, so their
+    (harmless) rows are intentionally left behind.
+    """
+    for table in (
+        "events",
+        "current_state",
+        "room_memberships",
+        "account_data",
+        "receipts",
+        "federated_invites",
+        "blocked_rooms",
+        "rooms",
+    ):
+        await db.execute(f"DELETE FROM {table} WHERE room_id = ?", (room_id,))
