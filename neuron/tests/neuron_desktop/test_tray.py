@@ -1,19 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the D2 background-process supervisor and tray control logic.
 
-The tray *icon* needs a real desktop session (so ``run_tray`` is not exercised
-here), but the process management and the menu actions are pure logic and fully
-tested — including a real child process started and stopped.
+The tray *icon* needs a real desktop session, but the process management, the menu
+actions, the pystray menu adapter, and ``run_tray``'s failure cleanup are pure
+logic and fully tested — including a real child process started and stopped.
 """
 
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
+import pytest
+
+from neuron_desktop import tray as tray_module
 from neuron_desktop.config import DesktopConfig
 from neuron_desktop.process import ServerProcess, config_to_env
-from neuron_desktop.tray import TrayController, menu_items
+from neuron_desktop.tray import TrayController, adapt_menu_item, menu_items
 
 
 def _config(tmp_path: Path) -> DesktopConfig:
@@ -158,3 +162,82 @@ def test_menu_items_wire_to_controller(tmp_path: Path) -> None:
     # The quit item invokes the provided callback.
     items[-1].action()  # type: ignore[misc]
     assert quit_called == [True]
+
+
+class _FakeMenuItem:
+    """Mimics pystray.MenuItem just enough to reproduce its calling convention.
+
+    pystray invokes a *callable* label with the MenuItem as the sole positional
+    argument and an action as ``action(icon, item)`` — exactly what crashed the
+    real app before the adapter wrapped them.
+    """
+
+    def __init__(self, text: object, action: object, enabled: bool = True) -> None:
+        self.text = text
+        self.action = action
+        self.enabled = enabled
+
+
+def test_adapt_menu_item_wraps_callable_label(tmp_path: Path) -> None:
+    # Regression for the Windows/macOS tray crash: a zero-arg controller method
+    # used as a dynamic label must survive pystray calling it as ``label(item)``.
+    fake = _FakeServer()
+    controller = TrayController(
+        _config(tmp_path), server=fake, console_opener=lambda url: None  # type: ignore[arg-type]
+    )
+    items = [
+        adapt_menu_item(item, _FakeMenuItem)
+        for item in menu_items(controller, on_quit=lambda: None)
+    ]
+    toggle, status = items[0], items[1]
+
+    # pystray passes the MenuItem to a callable label — this used to raise
+    # "TypeError: toggle_text() takes 1 positional argument but 2 were given".
+    assert callable(toggle.text)
+    assert toggle.text(toggle) == "Start server"
+    assert status.text(status) == "Server: stopped"
+    # A plain string label is passed through unchanged (not wrapped).
+    assert items[2].text == "Open console"
+
+    # The action is invoked as ``action(icon, item)`` and drives the controller.
+    toggle.action(object(), toggle)
+    assert fake.is_running()
+    assert toggle.text(toggle) == "Stop server"
+
+
+def test_run_tray_stops_child_when_backend_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # If the GUI backend fails *after* autostart, run_tray must stop the child it
+    # started so a foreground fallback can bind the port (no two servers racing).
+    fake = _FakeServer()
+    real_ctor = tray_module.TrayController
+
+    def _ctor(config: DesktopConfig) -> TrayController:
+        return real_ctor(config, server=fake, console_opener=lambda url: None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(tray_module, "TrayController", _ctor)
+    monkeypatch.setattr(tray_module, "_icon_image", lambda: object())
+
+    class _ExplodingIcon:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.menu: object = None
+
+        def run(self) -> None:
+            raise RuntimeError("no display available")
+
+        def stop(self) -> None:  # pragma: no cover - not reached in this test
+            pass
+
+    fake_pystray = types.SimpleNamespace(
+        Icon=_ExplodingIcon,
+        Menu=lambda *items: list(items),
+        MenuItem=_FakeMenuItem,
+    )
+    monkeypatch.setitem(sys.modules, "pystray", fake_pystray)
+
+    with pytest.raises(RuntimeError):
+        tray_module.run_tray(_config(tmp_path))
+
+    # autostart started the server; the backend failure cleaned it back up.
+    assert not fake.is_running()

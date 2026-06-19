@@ -63,7 +63,13 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     :param level: a Python log level name, e.g. "DEBUG", "INFO", "WARNING".
     :param fmt: "json" for machine-readable logs, "console" for human-readable.
     """
-    handler = logging.StreamHandler(stream=sys.stdout)
+    # A windowed / frozen build (PyInstaller ``console=False`` on Windows) has
+    # ``sys.stdout``/``sys.stderr`` set to None. Fall back to stderr, then to a
+    # handler that drops records, so configuring logging never itself crashes.
+    stream = sys.stdout if sys.stdout is not None else sys.stderr
+    handler: logging.Handler = (
+        logging.StreamHandler(stream=stream) if stream is not None else logging.NullHandler()
+    )
     if fmt == "json":
         handler.setFormatter(JsonFormatter())
     else:

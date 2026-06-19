@@ -27,7 +27,10 @@ from neuron_server.doctor import doctor_main
 def _serve(settings: NeuronServerSettings) -> None:
     configure_logging(level=settings.log_level, fmt=settings.log_format)
     app = create_app(settings)
-    uvicorn.run(app, host=settings.bind_host, port=settings.bind_port)
+    # ``log_config=None``: keep our own logging (configured above) and stop uvicorn
+    # installing its default config, whose colourised formatter probes
+    # ``sys.stdout.isatty()`` and crashes when stdout is None (windowed frozen app).
+    uvicorn.run(app, host=settings.bind_host, port=settings.bind_port, log_config=None)
 
 
 def _doctor(settings: NeuronServerSettings, *, offline: bool, strict: bool) -> int:
