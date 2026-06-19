@@ -36,6 +36,17 @@ links (with QR codes) so other people can sign up. Moderation actions (shadow-ba
 notices, room block/delete, redaction, content reports) are shown as "coming soon" and will be
 enabled as the homeserver gains the backing for them.
 
+## Settings & server name
+
+Your **server name** (e.g. `chat.example.org`) is the homeserver's permanent identity — it's
+built into every account, room and message, so it **cannot be changed once the server starts**.
+On first run a small **Settings window** lets you choose it (it defaults to your computer's
+name); you can reopen that window any time from the tray's **Settings…** item to adjust
+pre-start options. Click the server name next to **Sign out** in the console to open
+**Server settings**, which shows the name (read-only), runs the **doctor** health checks, and
+lets you toggle open registration. Changes apply after a restart — use the tray's **Restart
+server** item.
+
 ## Where your data lives
 
 All state — database, media, the federation signing key, and `config.json` — is kept in

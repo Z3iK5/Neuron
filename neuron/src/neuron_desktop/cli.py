@@ -60,7 +60,52 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("where", help="Print the data directory and config path.")
     sub.add_parser("console", help="Open the admin console in a browser.")
     sub.add_parser("tray", help="Run the menu-bar / system-tray app (needs a desktop).")
+    sub.add_parser("settings", help="Open the native settings window (needs a desktop).")
     return parser
+
+
+def _open_settings_window(base: Path) -> int:
+    """Open the native settings window for the current (or default) config."""
+    from neuron_desktop import settings_window
+
+    first = setup.is_first_run(base)
+    current = setup.default_first_run_config(base) if first else config_module.load(
+        paths.config_path(base)
+    )
+    try:
+        updated = settings_window.open_settings_window(current, first_run=first)
+    except Exception as exc:  # no display / tkinter unavailable
+        print(f"Settings window unavailable: {exc}")
+        return 1
+    if updated is None:
+        return 0
+    if first:
+        setup.write_first_run_config(base, updated)
+    else:
+        config_module.save(updated, paths.config_path(base))
+    print("Settings saved.")
+    return 0
+
+
+def _first_run_choose_name(base: Path) -> None:
+    """On first run, let the user name the server in the native window before start.
+
+    Falls back silently to the non-interactive default (hostname) when there's no
+    display or the user cancels — `_configured` then performs that default setup.
+    """
+    try:
+        from neuron_desktop import settings_window
+
+        chosen = settings_window.open_settings_window(
+            setup.default_first_run_config(base), first_run=True
+        )
+    except Exception as exc:  # no display / tkinter unavailable
+        print(f"Settings window unavailable ({exc}); using defaults.")
+        return
+    if chosen is not None:
+        setup.write_first_run_config(base, chosen)
+        if setup.welcome_path(base).exists():
+            _reveal(setup.welcome_path(base))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -97,7 +142,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Opening {url}")
         return 0
 
+    if args.command == "settings":
+        return _open_settings_window(base)
+
     if args.command == "tray":
+        if setup.is_first_run(base):
+            _first_run_choose_name(base)
         config = _configured(base)
         try:
             from neuron_desktop import tray

@@ -173,7 +173,7 @@ def welcome_html(server_name: str, user_id: str) -> str:
   <p class="note">This is your Matrix ID — sign in with it and your password:</p>
   <div class="idbox">{html.escape(user_id)}</div>
   <div class="actions">
-    <a class="btn-full primary" href="/console">Manage your server</a>
+    <a class="btn-full primary" href="/console/settings">Set up your server</a>
     <a class="btn-full secondary" href="/get-started">Create another account</a>
   </div>
   {_connect_html(server_name)}"""
@@ -282,7 +282,8 @@ def admin_shell(
         f'<header class="topbar"><div class="brand">'
         f'<div class="mark">{mark_svg(WHITE)}</div><div class="name">{NAME}</div></div>'
         f"<nav>{nav}</nav>"
-        f'<span class="host-tag">{html.escape(server_name)}</span>'
+        f'<a class="host-tag" href="/console/settings" title="Server settings">'
+        f"{html.escape(server_name)}</a>"
         f'<a class="out" href="/console/logout">Sign out</a></header>'
         f'<main class="wrap">{flash_html}{body}</main>'
     )
@@ -363,8 +364,9 @@ body.admin{display:block;align-items:stretch;justify-content:flex-start;padding:
 .topbar nav a{color:#B7C6D6;text-decoration:none;padding:7px 13px;border-radius:9px;font-size:14px}
 .topbar nav a:hover{background:rgba(143,166,188,.16);color:#fff}
 .topbar nav a.active{background:#1C3D5F;color:#fff}
-.topbar .host-tag{color:#8FA6BC;font-size:12.5px;
+.topbar a.host-tag{color:#8FA6BC;font-size:12.5px;text-decoration:none;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.topbar a.host-tag:hover{color:#fff;text-decoration:underline}
 .topbar .out{color:#8FA6BC;text-decoration:none;font-size:13px}
 .topbar .out:hover{color:#fff}
 .wrap{max-width:1000px;margin:0 auto;padding:30px 24px 64px;width:100%}
@@ -407,6 +409,7 @@ h1.page{font-family:'Cinzel',Georgia,serif;font-weight:600;color:#1C3D5F;font-si
 .pill.on{background:#e8f3ec;color:#1a6b3a}
 .pill.off{background:#f0eee8;color:#7C8896}
 .pill.warn{background:#fdecef;color:#b00020}
+.pill.amber{background:#fdf3e2;color:#946200}
 form.inline{display:inline;margin:0}
 .admin input.q{width:auto;display:inline-block;margin:0;max-width:260px}
 .admin select{width:auto;display:inline-block;margin:0;padding:.5rem .6rem;border:1px solid #DEDCD6;

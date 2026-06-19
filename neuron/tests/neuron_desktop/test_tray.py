@@ -33,10 +33,40 @@ def test_config_to_env_maps_settings(tmp_path: Path) -> None:
     # first_user_admin must reach the child server, else the first /get-started
     # account never becomes an admin and can't sign in to the console.
     assert env["NEURON_SERVER_FIRST_USER_ADMIN"] == "False"
+    # registration + the desktop config path reach the child so the console can edit them.
+    assert env["NEURON_SERVER_REGISTRATION_ENABLED"] == "True"
+    assert env["NEURON_SERVER_DESKTOP_CONFIG_PATH"] == str(tmp_path / "config.json")
     admin_env = config_to_env(
-        DesktopConfig("hs.test", str(tmp_path), "admin", first_user_admin=True)
+        DesktopConfig(
+            "hs.test", str(tmp_path), "admin", first_user_admin=True, registration_enabled=False
+        )
     )
     assert admin_env["NEURON_SERVER_FIRST_USER_ADMIN"] == "True"
+    assert admin_env["NEURON_SERVER_REGISTRATION_ENABLED"] == "False"
+
+
+def test_config_to_env_keys_round_trip_into_server_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The NEURON_SERVER_* keys config_to_env emits must map onto real settings.
+
+    Loading them through the actual environment (as the child server does) guards
+    against env-name typos (e.g. DESKTOP_CONFIG vs DESKTOP_CONFIG_PATH) that the
+    server would otherwise silently ignore.
+    """
+    from neuron_server.config import NeuronServerSettings
+
+    env = config_to_env(
+        DesktopConfig("hs.test", str(tmp_path), "admin", registration_enabled=False)
+    )
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    settings = NeuronServerSettings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.name == "hs.test"
+    assert settings.registration_enabled is False
+    assert settings.first_user_admin is False
+    assert settings.desktop_config_path == str(tmp_path / "config.json")
 
 
 class _FakePopen:
@@ -156,7 +186,15 @@ def test_menu_items_wire_to_controller(tmp_path: Path) -> None:
     items = menu_items(controller, on_quit=lambda: quit_called.append(True))
 
     labels = [item.text() if callable(item.text) else item.text for item in items]
-    assert labels == ["Start server", "Server: stopped", "Open console", "Open data folder", "Quit"]
+    assert labels == [
+        "Start server",
+        "Server: stopped",
+        "Open console",
+        "Settings…",
+        "Restart server",
+        "Open data folder",
+        "Quit",
+    ]
 
     # The status item is a non-actionable label.
     status_item = items[1]
@@ -220,7 +258,7 @@ def test_run_tray_stops_child_when_backend_fails(
     fake = _FakeServer()
     real_ctor = tray_module.TrayController
 
-    def _ctor(config: DesktopConfig) -> TrayController:
+    def _ctor(config: DesktopConfig, **kwargs: object) -> TrayController:
         return real_ctor(config, server=fake, console_opener=lambda url: None)  # type: ignore[arg-type]
 
     monkeypatch.setattr(tray_module, "TrayController", _ctor)
@@ -248,3 +286,36 @@ def test_run_tray_stops_child_when_backend_fails(
 
     # autostart started the server; the backend failure cleaned it back up.
     assert not fake.is_running()
+
+
+def test_restart_reloads_config_and_rebuilds_server(tmp_path: Path) -> None:
+    from neuron_desktop import config as config_module
+
+    cfg = _config(tmp_path)
+    # config_path(data_dir) == data_dir/config.json, which restart() reloads.
+    config_module.save(cfg, tmp_path / "config.json")
+    made: list[_FakeServer] = []
+
+    def factory(_c: DesktopConfig) -> _FakeServer:
+        s = _FakeServer()
+        made.append(s)
+        return s
+
+    controller = TrayController(cfg, server_factory=factory)  # type: ignore[arg-type]
+    controller.start()
+    assert made[0].is_running()
+
+    controller.restart()
+    assert not made[0].is_running()  # the old server was stopped
+    assert made[1].is_running()  # a fresh server (from reloaded config) is running
+
+
+def test_open_settings_invokes_launcher(tmp_path: Path) -> None:
+    calls: list[bool] = []
+    controller = TrayController(
+        _config(tmp_path), server=_FakeServer(), settings_launcher=lambda: calls.append(True)
+    )
+    controller.open_settings()
+    assert calls == [True]
+    # With no launcher configured it is a safe no-op.
+    TrayController(_config(tmp_path), server=_FakeServer()).open_settings()
