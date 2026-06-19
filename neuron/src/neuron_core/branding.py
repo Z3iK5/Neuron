@@ -108,8 +108,8 @@ def landing_page_html(server_name: str) -> str:
   <a class="cta" href="/get-started">Get started</a>
   <div class="host">Matrix homeserver for <code>{html.escape(server_name)}</code></div>
   <div class="links">
+    <a href="/console">Admin console</a>
     <a href="/_matrix/client/versions">Client API</a>
-    <a href="/_matrix/key/v2/server">Server keys</a>
     <a href="https://github.com/Z3iK5/Neuron">Source</a>
   </div>
 </div>"""
@@ -173,7 +173,8 @@ def welcome_html(server_name: str, user_id: str) -> str:
   <p class="note">This is your Matrix ID — sign in with it and your password:</p>
   <div class="idbox">{html.escape(user_id)}</div>
   {_connect_html(server_name)}
-  <div class="foot"><a href="/get-started">Create another account</a></div>"""
+  <div class="foot"><a href="/console">Manage your server</a>
+    &middot; <a href="/get-started">Create another account</a></div>"""
     inner = f'<div class="card">{_card_head()}<div class="card-body">{body}</div></div>'
     return _shell(f"Welcome · {NAME}", inner)
 
@@ -200,15 +201,90 @@ def _connect_html(server_name: str) -> str:
 </div>"""
 
 
-def _shell(title: str, inner: str) -> str:
+def _shell(title: str, inner: str, *, body_class: str = "") -> str:
+    cls = f' class="{body_class}"' if body_class else ""
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f"<title>{html.escape(title)}</title>"
         f'<meta name="description" content="{DESCRIPTION}">'
         f'<link rel="icon" href="{favicon_data_uri()}">{FONTS_LINK}'
-        f"<style>{_PAGE_CSS}</style></head><body>{inner}</body></html>"
+        f"<style>{_PAGE_CSS}</style></head><body{cls}>{inner}</body></html>"
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin console chrome (the merged neuron_server admin UI). Rendered as branded
+# pure-Python HTML — same single source of truth as the landing/get-started pages,
+# so no Jinja templates or static files are needed (which also keeps the frozen
+# desktop bundle simple).
+# ---------------------------------------------------------------------------
+
+# The console's navigation, as (href, label) pairs. ``active`` matches the href.
+_CONSOLE_NAV: tuple[tuple[str, str], ...] = (
+    ("/console", "Overview"),
+    ("/console/users", "Users"),
+    ("/console/rooms", "Rooms"),
+    ("/console/invites", "Invites"),
+)
+
+
+def login_card_html(
+    server_name: str,
+    *,
+    csrf_token: str,
+    error: str | None = None,
+    username: str = "",
+    next_url: str = "/console",
+) -> str:
+    """The branded 'Sign in to your homeserver' card (the merged console login).
+
+    Authenticates the operator's own **admin account** (Matrix username + password),
+    matching the brand's login lockup.
+    """
+    err = f'<div class="error">{html.escape(error)}</div>' if error else ""
+    safe_name = html.escape(server_name)
+    body = f"""<h2>Sign in to your homeserver</h2>{err}
+  <form method="post" action="/console/login">
+    <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
+    <input type="hidden" name="next" value="{html.escape(next_url)}">
+    <label for="u">Username</label>
+    <input id="u" name="username" value="{html.escape(username)}" placeholder="you"
+      autocapitalize="none" autocorrect="off" autofocus required>
+    <label for="p">Password</label>
+    <input id="p" name="password" type="password" placeholder="your password" required>
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="note" style="margin-top:.85rem">Use the admin account for
+    <code>{safe_name}</code> (the first account you created).</p>"""
+    inner = f'<div class="card">{_card_head()}<div class="card-body">{body}</div></div>'
+    return _shell(f"Sign in · {NAME}", inner)
+
+
+def admin_shell(
+    title: str,
+    body: str,
+    *,
+    active: str,
+    server_name: str,
+    flash: str | None = None,
+) -> str:
+    """Wrap console page ``body`` in the branded top-bar + content layout."""
+    def _nav_link(href: str, label: str) -> str:
+        cls = ' class="active"' if href == active else ""
+        return f'<a href="{href}"{cls}>{label}</a>'
+
+    nav = "".join(_nav_link(href, label) for href, label in _CONSOLE_NAV)
+    flash_html = f'<div class="flash">{html.escape(flash)}</div>' if flash else ""
+    inner = (
+        f'<header class="topbar"><div class="brand">'
+        f'<div class="mark">{mark_svg(WHITE)}</div><div class="name">{NAME}</div></div>'
+        f"<nav>{nav}</nav>"
+        f'<span class="host-tag">{html.escape(server_name)}</span>'
+        f'<a class="out" href="/console/logout">Sign out</a></header>'
+        f'<main class="wrap">{flash_html}{body}</main>'
+    )
+    return _shell(f"{title} · {NAME}", inner, body_class="admin")
 
 
 _PAGE_CSS = """
@@ -264,4 +340,70 @@ button:hover{background:#0E2740}
   word-break:break-all}
 .foot{margin-top:1.4rem;font-size:.85rem;color:#7C8896;text-align:center}
 .foot a{color:#5A6B7C}
+
+/* --- admin console (body.admin) --- */
+body.admin{display:block;align-items:stretch;justify-content:flex-start;padding:0;
+  background:#E4E2DC;color:#16324F;font-weight:400}
+.topbar{background:#0E2740;color:#fff;display:flex;align-items:center;gap:16px;padding:13px 24px;
+  flex-wrap:wrap}
+.topbar .brand{display:flex;align-items:center;gap:11px}
+.topbar .brand .mark{width:28px;height:28px;color:#fff}
+.topbar .brand .name{font-family:'Cinzel',Georgia,serif;font-weight:600;letter-spacing:.12em;
+  font-size:19px}
+.topbar nav{display:flex;gap:4px;margin-left:14px;flex:1}
+.topbar nav a{color:#B7C6D6;text-decoration:none;padding:7px 13px;border-radius:9px;font-size:14px}
+.topbar nav a:hover{background:rgba(143,166,188,.16);color:#fff}
+.topbar nav a.active{background:#1C3D5F;color:#fff}
+.topbar .host-tag{color:#8FA6BC;font-size:12.5px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.topbar .out{color:#8FA6BC;text-decoration:none;font-size:13px}
+.topbar .out:hover{color:#fff}
+.wrap{max-width:1000px;margin:0 auto;padding:30px 24px 64px;width:100%}
+.flash{background:#e8f3ec;border:1px solid #b9dcc6;color:#1a6b3a;padding:.7rem .9rem;
+  border-radius:10px;margin-bottom:1.2rem;font-size:.93rem}
+h1.page{font-family:'Cinzel',Georgia,serif;font-weight:600;color:#1C3D5F;font-size:1.5rem;
+  margin:0 0 1.1rem}
+.panel{background:#fff;border:1px solid #E2E0D9;border-radius:14px;padding:20px 22px;
+  margin-bottom:20px;box-shadow:0 1px 3px rgba(20,48,77,.06)}
+.panel h2{font-family:'Cinzel',Georgia,serif;font-weight:600;color:#1C3D5F;font-size:1.05rem;
+  margin:0 0 .9rem}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;
+  margin-bottom:22px}
+.stat{background:#fff;border:1px solid #E2E0D9;border-radius:14px;padding:18px 20px}
+.stat .num{font-size:2rem;font-weight:600;color:#1C3D5F;font-family:'Cinzel',Georgia,serif;
+  line-height:1}
+.stat .lbl{color:#5A6B7C;font-size:.78rem;letter-spacing:.05em;text-transform:uppercase;
+  margin-top:6px}
+.tbl{width:100%;border-collapse:collapse;font-size:.93rem}
+.tbl th{text-align:left;color:#7C8896;font-weight:500;font-size:.76rem;letter-spacing:.05em;
+  text-transform:uppercase;padding:0 12px 9px;border-bottom:1px solid #EDEBE5}
+.tbl td{padding:10px 12px;border-bottom:1px solid #F0EEE8;color:#16324F}
+.tbl tr:hover td{background:#FAF9F6}
+.tbl a{color:#1C3D5F;text-decoration:none;font-weight:500}
+.tbl a:hover{text-decoration:underline}
+.btn{display:inline-block;width:auto;background:#1C3D5F;color:#fff;border:none;border-radius:9px;
+  padding:.5rem 1rem;font-size:.9rem;font-weight:500;cursor:pointer;text-decoration:none;
+  font-family:inherit}
+.btn:hover{background:#0E2740}
+.btn.sm{padding:.34rem .68rem;font-size:.82rem}
+.btn.ghost{background:#ECEAE4;color:#1C3D5F}
+.btn.ghost:hover{background:#dedbd2}
+.btn.danger{background:#b00020}
+.btn.danger:hover{background:#8a0019}
+.btn[disabled],.btn.disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.muted{color:#7C8896;font-size:.88rem}
+.pill{display:inline-block;padding:.1em .6em;border-radius:999px;font-size:.76rem;font-weight:500}
+.pill.on{background:#e8f3ec;color:#1a6b3a}
+.pill.off{background:#f0eee8;color:#7C8896}
+.pill.warn{background:#fdecef;color:#b00020}
+form.inline{display:inline;margin:0}
+.admin input.q{width:auto;display:inline-block;margin:0;max-width:260px}
+.admin select{width:auto;display:inline-block;margin:0;padding:.5rem .6rem;border:1px solid #DEDCD6;
+  border-radius:9px;font-family:inherit;color:#16324F}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:7px 18px;font-size:.93rem;margin:0}
+.kv dt{color:#7C8896}
+.kv dd{margin:0;color:#16324F;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.soon{font-size:.78rem;color:#9aa0a8;font-style:italic;margin-left:6px}
 """

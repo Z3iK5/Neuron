@@ -25,7 +25,9 @@ for package in ("uvicorn", "neuron_server", "neuron_desktop"):
 # static analysis misses it and the onboarding form (POST /get-started) would
 # 500 with "python-multipart must be installed". Force it (both the modern
 # ``python_multipart`` and legacy ``multipart`` import names) into the bundle.
-for package in ("python_multipart", "multipart"):
+# The admin console also reaches segno lazily (inside the invite-QR route) and
+# itsdangerous via Starlette's SessionMiddleware; pull both in too.
+for package in ("python_multipart", "multipart", "segno", "itsdangerous"):
     try:
         hidden |= set(collect_submodules(package))
     except Exception as exc:  # noqa: BLE001 - one import alias may be absent
@@ -33,7 +35,7 @@ for package in ("python_multipart", "multipart"):
 # PyNaCl reaches its Ed25519 code through cffi's C extension, which the analysis
 # does not see; aiosqlite/asyncpg are imported by name by the storage layer.
 hidden |= {"aiosqlite", "asyncpg", "nacl", "platformdirs", "cffi", "_cffi_backend"}
-hidden |= {"python_multipart", "multipart"}
+hidden |= {"python_multipart", "multipart", "segno", "itsdangerous"}
 
 # Packages that ship data files / dynamically-loaded backends. ``pystray`` selects
 # a platform backend on import, which can fail on a headless builder; skip it
@@ -92,12 +94,12 @@ if sys.platform == "darwin":
         name="Neuron.app",
         icon=_icns if os.path.exists(_icns) else None,
         bundle_identifier="org.neuron.desktop",
-        version="0.0.4",
+        version="0.0.5",
         info_plist={
             "CFBundleName": "Neuron",
             "CFBundleDisplayName": "Neuron",
-            "CFBundleShortVersionString": "0.0.4",
-            "CFBundleVersion": "0.0.4",
+            "CFBundleShortVersionString": "0.0.5",
+            "CFBundleVersion": "0.0.5",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
         },

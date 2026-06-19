@@ -135,7 +135,7 @@ def test_tray_controller_actions(tmp_path: Path) -> None:
     assert not controller.is_running()
 
     controller.open_console()
-    assert opened == ["http://localhost:8123"]
+    assert opened == ["http://localhost:8123/console"]
     controller.open_data_folder()
     assert folders == [Path(str(tmp_path))]
 

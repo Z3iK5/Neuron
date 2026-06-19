@@ -13,7 +13,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neuron"
-version = "0.0.4"
+version = "0.0.5"
 description = "Neuron — an all-in-one, self-hosted Matrix platform (homeserver + operator tooling)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -66,9 +66,11 @@ e2e = [
 
 # Neuron's own homeserver (`neuron_server`). Install with:  pip install -e ".[server]"
 server = [
-    "fastapi>=0.111,<1.0",       # ASGI framework for the Client-Server API
+    "fastapi>=0.111,<1.0",       # ASGI framework for the Client-Server API + admin console
     "uvicorn[standard]>=0.30",   # ASGI server used to run the homeserver
-    "python-multipart>=0.0.9",   # parse the /get-started onboarding form (request.form())
+    "python-multipart>=0.0.9",   # parse the /get-started + /console forms (request.form())
+    "itsdangerous>=2.2",         # signs the admin-console session cookie (SessionMiddleware)
+    "segno>=1.6",                # QR codes for shareable invite links in the console
     "aiosqlite>=0.20",           # async SQLite driver (development backend)
     "asyncpg>=0.29",             # async PostgreSQL driver (production backend)
     "Pillow>=10.0",              # image thumbnailing for the media repository
