@@ -50,7 +50,8 @@ def config_to_env(config: DesktopConfig) -> dict[str, str]:
         "NEURON_SERVER_BIND_HOST": settings.bind_host,
         "NEURON_SERVER_BIND_PORT": str(settings.bind_port),
         # Lets the in-process console settings page edit the persisted config.
-        "NEURON_SERVER_DESKTOP_CONFIG": str(paths.config_path(config.data_path)),
+        # Must match NeuronServerSettings.desktop_config_path -> NEURON_SERVER_DESKTOP_CONFIG_PATH.
+        "NEURON_SERVER_DESKTOP_CONFIG_PATH": str(paths.config_path(config.data_path)),
     }
 
 

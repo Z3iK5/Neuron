@@ -35,7 +35,7 @@ def test_config_to_env_maps_settings(tmp_path: Path) -> None:
     assert env["NEURON_SERVER_FIRST_USER_ADMIN"] == "False"
     # registration + the desktop config path reach the child so the console can edit them.
     assert env["NEURON_SERVER_REGISTRATION_ENABLED"] == "True"
-    assert env["NEURON_SERVER_DESKTOP_CONFIG"] == str(tmp_path / "config.json")
+    assert env["NEURON_SERVER_DESKTOP_CONFIG_PATH"] == str(tmp_path / "config.json")
     admin_env = config_to_env(
         DesktopConfig(
             "hs.test", str(tmp_path), "admin", first_user_admin=True, registration_enabled=False
@@ -43,6 +43,30 @@ def test_config_to_env_maps_settings(tmp_path: Path) -> None:
     )
     assert admin_env["NEURON_SERVER_FIRST_USER_ADMIN"] == "True"
     assert admin_env["NEURON_SERVER_REGISTRATION_ENABLED"] == "False"
+
+
+def test_config_to_env_keys_round_trip_into_server_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The NEURON_SERVER_* keys config_to_env emits must map onto real settings.
+
+    Loading them through the actual environment (as the child server does) guards
+    against env-name typos (e.g. DESKTOP_CONFIG vs DESKTOP_CONFIG_PATH) that the
+    server would otherwise silently ignore.
+    """
+    from neuron_server.config import NeuronServerSettings
+
+    env = config_to_env(
+        DesktopConfig("hs.test", str(tmp_path), "admin", registration_enabled=False)
+    )
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    settings = NeuronServerSettings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.name == "hs.test"
+    assert settings.registration_enabled is False
+    assert settings.first_user_admin is False
+    assert settings.desktop_config_path == str(tmp_path / "config.json")
 
 
 class _FakePopen:
