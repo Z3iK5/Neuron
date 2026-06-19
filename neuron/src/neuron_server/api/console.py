@@ -114,6 +114,10 @@ def _pill(on: bool, on_label: str, off_label: str) -> str:
 async def login_form(request: Request) -> Response:
     if request.session.get("console_user"):
         return RedirectResponse("/console", status_code=303)
+    # A brand-new server has no account to sign in with yet — send the operator to
+    # create the first one (which becomes the admin) instead of a dead-end login.
+    if not await accounts.any_users(request.app.state.db):
+        return RedirectResponse("/get-started", status_code=303)
     csrf = get_csrf_token(request)  # seed the session cookie + token
     return HTMLResponse(branding.login_card_html(_settings(request).name, csrf_token=csrf))
 

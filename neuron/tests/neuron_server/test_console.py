@@ -63,10 +63,19 @@ def test_anonymous_is_redirected_to_login(tmp_path: Path) -> None:
 
 def test_login_page_renders_branded_card(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")  # an account must exist to sign in
         page = client.get(_LOGIN)
         assert page.status_code == 200
         assert "Sign in to your homeserver" in page.text
         assert 'name="username"' in page.text and 'name="password"' in page.text
+
+
+def test_login_redirects_to_get_started_on_empty_server(tmp_path: Path) -> None:
+    # A fresh server has no account, so "Open console" / the login page should send
+    # the operator to create the first account rather than a dead-end login.
+    with _client(tmp_path) as client:
+        resp = client.get(_LOGIN, follow_redirects=False)
+        assert resp.status_code == 303 and resp.headers["location"] == "/get-started"
 
 
 def test_wrong_password_is_rejected(tmp_path: Path) -> None:

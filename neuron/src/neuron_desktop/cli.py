@@ -87,27 +87,6 @@ def _open_settings_window(base: Path) -> int:
     return 0
 
 
-def _first_run_choose_name(base: Path) -> None:
-    """On first run, let the user name the server in the native window before start.
-
-    Falls back silently to the non-interactive default (hostname) when there's no
-    display or the user cancels — `_configured` then performs that default setup.
-    """
-    try:
-        from neuron_desktop import settings_window
-
-        chosen = settings_window.open_settings_window(
-            setup.default_first_run_config(base), first_run=True
-        )
-    except Exception as exc:  # no display / tkinter unavailable
-        print(f"Settings window unavailable ({exc}); using defaults.")
-        return
-    if chosen is not None:
-        setup.write_first_run_config(base, chosen)
-        if setup.welcome_path(base).exists():
-            _reveal(setup.welcome_path(base))
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(sys.argv[1:] if argv is None else argv)
 
@@ -146,18 +125,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _open_settings_window(base)
 
     if args.command == "tray":
-        if setup.is_first_run(base):
-            _first_run_choose_name(base)
-        config = _configured(base)
+        first = setup.is_first_run(base)
+        # On first run the tray shows the setup wizard (which writes the config and
+        # starts the server); otherwise load the existing config.
+        config = (
+            setup.default_first_run_config(base)
+            if first
+            else config_module.load(paths.config_path(base))
+        )
         try:
             from neuron_desktop import tray
 
-            tray.run_tray(config)
+            tray.run_tray(config, first_run=first)
         except (SystemExit, Exception) as exc:  # tray/GUI backend unavailable
             # Don't die silently — keep the homeserver running so the user can
             # still reach it in a browser (the console URL is in WELCOME.txt).
             print(f"Tray unavailable ({exc}); running the server in the foreground.")
-            supervisor.serve(config)
+            supervisor.serve(_configured(base))
         return 0
 
     # Default / "run": ensure configured, then serve.
