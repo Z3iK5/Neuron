@@ -172,9 +172,11 @@ def welcome_html(server_name: str, user_id: str) -> str:
     body = f"""<div class="success">&#10003; Account created</div>
   <p class="note">This is your Matrix ID — sign in with it and your password:</p>
   <div class="idbox">{html.escape(user_id)}</div>
-  {_connect_html(server_name)}
-  <div class="foot"><a href="/console">Manage your server</a>
-    &middot; <a href="/get-started">Create another account</a></div>"""
+  <div class="actions">
+    <a class="btn-full primary" href="/console">Manage your server</a>
+    <a class="btn-full secondary" href="/get-started">Create another account</a>
+  </div>
+  {_connect_html(server_name)}"""
     inner = f'<div class="card">{_card_head()}<div class="card-body">{body}</div></div>'
     return _shell(f"Welcome · {NAME}", inner)
 
@@ -340,6 +342,13 @@ button:hover{background:#0E2740}
   word-break:break-all}
 .foot{margin-top:1.4rem;font-size:.85rem;color:#7C8896;text-align:center}
 .foot a{color:#5A6B7C}
+.actions{display:flex;flex-direction:column;gap:.6rem;margin-top:1.3rem}
+.btn-full{display:block;width:100%;text-align:center;padding:.72rem;border-radius:10px;
+  font-size:1rem;font-weight:500;letter-spacing:.03em;text-decoration:none}
+.btn-full.primary{background:#1C3D5F;color:#fff}
+.btn-full.primary:hover{background:#0E2740}
+.btn-full.secondary{background:#ECEAE4;color:#1C3D5F}
+.btn-full.secondary:hover{background:#DEDBD2}
 
 /* --- admin console (body.admin) --- */
 body.admin{display:block;align-items:stretch;justify-content:flex-start;padding:0;
@@ -373,7 +382,7 @@ h1.page{font-family:'Cinzel',Georgia,serif;font-weight:600;color:#1C3D5F;font-si
 .stat .num{font-size:2rem;font-weight:600;color:#1C3D5F;font-family:'Cinzel',Georgia,serif;
   line-height:1}
 .stat .lbl{color:#5A6B7C;font-size:.78rem;letter-spacing:.05em;text-transform:uppercase;
-  margin-top:6px}
+  margin-bottom:8px}
 .tbl{width:100%;border-collapse:collapse;font-size:.93rem}
 .tbl th{text-align:left;color:#7C8896;font-weight:500;font-size:.76rem;letter-spacing:.05em;
   text-transform:uppercase;padding:0 12px 9px;border-bottom:1px solid #EDEBE5}

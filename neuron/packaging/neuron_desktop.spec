@@ -12,7 +12,7 @@
 
 import os
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 _entry = os.path.join(SPECPATH, "app_entry.py")  # noqa: F821 (SPECPATH injected by PyInstaller)
 
@@ -40,7 +40,13 @@ hidden |= {"python_multipart", "multipart", "segno", "itsdangerous"}
 # Packages that ship data files / dynamically-loaded backends. ``pystray`` selects
 # a platform backend on import, which can fail on a headless builder; skip it
 # gracefully so the (non-GUI) server bundle still builds there.
+# Ship the package's dist metadata so importlib.metadata.version("neuron") works
+# in the frozen app (the console's server-version display reads it).
 datas: list = []
+try:
+    datas += copy_metadata("neuron")
+except Exception as exc:  # noqa: BLE001 - metadata always present in a real build
+    print(f"[neuron spec] could not copy neuron metadata: {exc}")
 binaries: list = []
 for package in ("pystray", "PIL"):
     try:
@@ -94,12 +100,12 @@ if sys.platform == "darwin":
         name="Neuron.app",
         icon=_icns if os.path.exists(_icns) else None,
         bundle_identifier="org.neuron.desktop",
-        version="0.0.5",
+        version="0.0.6",
         info_plist={
             "CFBundleName": "Neuron",
             "CFBundleDisplayName": "Neuron",
-            "CFBundleShortVersionString": "0.0.5",
-            "CFBundleVersion": "0.0.5",
+            "CFBundleShortVersionString": "0.0.6",
+            "CFBundleVersion": "0.0.6",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
         },

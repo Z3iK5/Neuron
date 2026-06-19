@@ -96,6 +96,10 @@ def test_admin_login_opens_overview(tmp_path: Path) -> None:
         assert "Overview" in overview.text
         # Stat cards show real counts from the in-process service.
         assert "Users" in overview.text and "Rooms" in overview.text
+        # The Server card reflects the real running version (not a hard-coded 0.0.1).
+        from importlib.metadata import version
+
+        assert version("neuron") in overview.text
 
 
 # --- user management --------------------------------------------------------

@@ -166,16 +166,22 @@ async def overview(request: Request, _: str = Depends(require_console_admin)) ->
     version = admin.server_version()
     users = await admin.list_users(offset=0, limit=1, name=None, deactivated=None)
     rooms = await admin.list_rooms(offset=0, limit=1)
+    server_ver = _e(version.get("server_version", "").replace("Neuron ", "")) or "—"
+
+    def _stat(label: str, value: str) -> str:
+        # Label above the value (the description sits on top of each card).
+        return (
+            f'<div class="stat"><div class="lbl">{label}</div>'
+            f'<div class="num">{value}</div></div>'
+        )
+
     stats = (
-        f'<div class="stat-grid">'
-        f'<div class="stat"><div class="num">{users.get("total", 0)}</div>'
-        f'<div class="lbl">Users</div></div>'
-        f'<div class="stat"><div class="num">{rooms.get("total_rooms", 0)}</div>'
-        f'<div class="lbl">Rooms</div></div>'
-        f'<div class="stat"><div class="num">{_e(version.get("server_version", ""))}</div>'
-        f'<div class="lbl">Server</div></div>'
-        f'<div class="stat"><div class="num"><span class="pill on">running</span></div>'
-        f'<div class="lbl">Status</div></div></div>'
+        '<div class="stat-grid">'
+        + _stat("Users", str(users.get("total", 0)))
+        + _stat("Rooms", str(rooms.get("total_rooms", 0)))
+        + _stat("Server", server_ver)
+        + _stat("Status", '<span class="pill on">running</span>')
+        + "</div>"
     )
     quick = (
         '<div class="panel"><h2>Manage</h2><div class="row">'

@@ -30,6 +30,13 @@ def test_config_to_env_maps_settings(tmp_path: Path) -> None:
     assert env["NEURON_SERVER_ADMIN_USERS"] == "admin"
     assert env["NEURON_SERVER_BIND_PORT"] == "8123"
     assert str(tmp_path / "homeserver.db") in env["NEURON_SERVER_DATABASE_URL"]
+    # first_user_admin must reach the child server, else the first /get-started
+    # account never becomes an admin and can't sign in to the console.
+    assert env["NEURON_SERVER_FIRST_USER_ADMIN"] == "False"
+    admin_env = config_to_env(
+        DesktopConfig("hs.test", str(tmp_path), "admin", first_user_admin=True)
+    )
+    assert admin_env["NEURON_SERVER_FIRST_USER_ADMIN"] == "True"
 
 
 class _FakePopen:
