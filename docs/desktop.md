@@ -22,6 +22,20 @@ neuron-desktop console    # open the admin console in a browser
 neuron-desktop tray       # run the menu-bar / system-tray app (needs a desktop session)
 ```
 
+## Admin console
+
+The homeserver serves a built-in web admin console at **`/console`** (e.g.
+`http://localhost:8008/console`) — `neuron-desktop console` and the tray's *Open console*
+open it for you. Sign in with the **admin account you created** at first run (the same Matrix
+username + password); the console runs in the same app and talks to the server in-process, so
+there is no separate password or token.
+
+From it you can see a server **overview**, manage **users** (create, reset password,
+deactivate, grant/revoke admin), inspect **rooms** (members + state), and create **invite**
+links (with QR codes) so other people can sign up. Moderation actions (shadow-ban, server
+notices, room block/delete, redaction, content reports) are shown as "coming soon" and will be
+enabled as the homeserver gains the backing for them.
+
 ## Where your data lives
 
 All state — database, media, the federation signing key, and `config.json` — is kept in

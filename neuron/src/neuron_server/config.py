@@ -12,7 +12,9 @@ git-ignored ``.env`` for local dev).
 
 from __future__ import annotations
 
-from pydantic import Field
+import secrets
+
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -133,3 +135,23 @@ class NeuronServerSettings(BaseSettings):
         default="json",
         description="Log output format: 'json' (machine-readable) or 'console' (human).",
     )
+
+    # --- Admin console ------------------------------------------------------
+    # Secret used to sign the admin-console session cookie. If empty, a random one
+    # is generated at startup (fine for a single desktop server — sessions just
+    # won't survive a restart). Set NEURON_SERVER_CONSOLE_SESSION_SECRET to a stable
+    # random value to keep operators logged in across restarts.
+    console_session_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description="Secret signing key for the admin-console session cookie.",
+    )
+    # Name of the admin-console session cookie.
+    session_cookie_name: str = Field(
+        default="neuron_session",
+        description="Cookie name for the admin-console session.",
+    )
+
+    def effective_session_secret(self) -> str:
+        """Return the configured console session secret, or a random dev one."""
+        configured = self.console_session_secret.get_secret_value()
+        return configured or secrets.token_urlsafe(32)

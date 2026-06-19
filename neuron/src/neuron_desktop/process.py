@@ -41,6 +41,10 @@ def config_to_env(config: DesktopConfig) -> dict[str, str]:
         "NEURON_SERVER_MEDIA_STORE_PATH": settings.media_store_path,
         "NEURON_SERVER_SIGNING_KEY_PATH": settings.signing_key_path,
         "NEURON_SERVER_ADMIN_USERS": settings.admin_users,
+        # Without this, the child server runs with first_user_admin=False, so the
+        # first account created at /get-started never becomes an admin and can't
+        # sign in to the console.
+        "NEURON_SERVER_FIRST_USER_ADMIN": str(settings.first_user_admin),
         "NEURON_SERVER_BIND_HOST": settings.bind_host,
         "NEURON_SERVER_BIND_PORT": str(settings.bind_port),
     }

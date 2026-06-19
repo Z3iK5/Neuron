@@ -13,6 +13,8 @@ from __future__ import annotations
 import platform
 import secrets
 import time
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import Any
 
 from neuron_server.auth.passwords import hash_password
@@ -22,7 +24,17 @@ from neuron_server.storage import admin as admin_store
 from neuron_server.storage import rooms as rooms_store
 from neuron_server.storage.database import Database
 
-_SERVER_VERSION = "Neuron 0.0.1"
+
+def _server_version_string() -> str:
+    """The running server's version, read from the installed package metadata.
+
+    (Bundled into the frozen app via ``copy_metadata('neuron')`` in the spec, so it
+    reflects the real release instead of a hard-coded constant.)
+    """
+    try:
+        return f"Neuron {_pkg_version('neuron')}"
+    except PackageNotFoundError:  # pragma: no cover - metadata present when installed
+        return "Neuron"
 
 
 def _now_ms() -> int:
@@ -39,7 +51,10 @@ class AdminService:
     # --- server ------------------------------------------------------------
 
     def server_version(self) -> dict[str, Any]:
-        return {"server_version": _SERVER_VERSION, "python_version": platform.python_version()}
+        return {
+            "server_version": _server_version_string(),
+            "python_version": platform.python_version(),
+        }
 
     # --- users -------------------------------------------------------------
 

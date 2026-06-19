@@ -24,10 +24,12 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from neuron_core import branding, configure_logging, get_logger
 from neuron_server.admin.service import AdminService
+from neuron_server.api import console as console_ui
 from neuron_server.api.client_auth import router as client_auth_router
 from neuron_server.api.client_keys import router as client_keys_router
 from neuron_server.api.client_media import router as client_media_router
@@ -157,6 +159,15 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app = FastAPI(title="Neuron Server", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings
 
+    # Signed session cookie for the built-in admin console (login state + CSRF).
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.effective_session_secret(),
+        session_cookie=settings.session_cookie_name,
+        same_site="lax",
+        https_only=False,  # local/dev over HTTP; set True behind HTTPS in production
+    )
+
     @app.exception_handler(MatrixError)
     async def _on_matrix_error(request: Request, exc: MatrixError) -> JSONResponse:
         return exc.to_response()
@@ -262,6 +273,10 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(federation_leave_router)
     app.include_router(federation_invite_router)
     app.include_router(federation_backfill_router)
+
+    # The built-in admin console (web UI under /console/*) + its session-auth
+    # exception handlers. Backed by the in-process AdminService/AuthService above.
+    console_ui.install(app)
 
     # Anything else under /_matrix is an unknown endpoint: the spec says reply
     # 404 with M_UNRECOGNIZED. Registered last so specific routes match first.

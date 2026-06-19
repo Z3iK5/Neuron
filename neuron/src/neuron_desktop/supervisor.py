@@ -18,8 +18,8 @@ Opener = Callable[[str], bool]
 
 
 def open_console(config: DesktopConfig, *, opener: Opener = webbrowser.open) -> str:
-    """Open the admin console in a browser; return the URL that was opened."""
-    url = config.console_url()
+    """Open the built-in admin console in a browser; return the URL that was opened."""
+    url = config.admin_console_url()
     opener(url)
     return url
 

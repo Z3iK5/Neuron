@@ -68,7 +68,7 @@ class TrayController:
         return "Stop server" if self._server.is_running() else "Start server"
 
     def open_console(self) -> None:
-        self._console_opener(self._config.console_url())
+        self._console_opener(self._config.admin_console_url())
 
     def open_data_folder(self) -> None:
         self._folder_opener(self._config.data_path)

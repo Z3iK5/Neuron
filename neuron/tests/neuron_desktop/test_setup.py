@@ -99,7 +99,8 @@ def test_open_console_uses_injected_opener(tmp_path: Path) -> None:
     opened: list[str] = []
     config = DesktopConfig("hs", str(tmp_path), "admin", bind_port=8123)
     url = supervisor.open_console(config, opener=lambda u: bool(opened.append(u)))
-    assert url == "http://localhost:8123" and opened == [url]
+    # The desktop "open console" action opens the built-in admin console at /console.
+    assert url == "http://localhost:8123/console" and opened == [url]
 
 
 def _register_via_browser(client: TestClient, username: str, password: str) -> None:

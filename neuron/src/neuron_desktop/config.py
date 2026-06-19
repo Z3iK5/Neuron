@@ -40,11 +40,15 @@ class DesktopConfig:
         return Path(self.data_dir)
 
     def console_url(self) -> str:
-        """The URL to open in a browser for the admin console."""
+        """The homeserver's base URL (the address clients/browsers connect to)."""
         if self.public_base_url:
             return self.public_base_url
         host = "localhost" if self.bind_host in _LOOPBACK_BINDS else self.bind_host
         return f"http://{host}:{self.bind_port}"
+
+    def admin_console_url(self) -> str:
+        """The URL of the built-in admin console (the homeserver's ``/console``)."""
+        return self.console_url().rstrip("/") + "/console"
 
     def to_server_settings(self) -> NeuronServerSettings:
         base = self.data_path
