@@ -34,6 +34,9 @@ class DesktopConfig:
     # First-run (non-interactive) flow: the first account created in the browser
     # becomes the admin, so there's no pre-created default password.
     first_user_admin: bool = False
+    # Whether open registration is allowed (editable from the console settings page;
+    # defaults True so a fresh server lets you create the first account).
+    registration_enabled: bool = True
 
     @property
     def data_path(self) -> Path:
@@ -60,6 +63,7 @@ class DesktopConfig:
             signing_key_path=str(paths.signing_key_path(base)),
             admin_users=self.admin_username,
             first_user_admin=self.first_user_admin,
+            registration_enabled=self.registration_enabled,
             bind_host=self.bind_host,
             bind_port=self.bind_port,
         )

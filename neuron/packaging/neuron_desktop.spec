@@ -66,7 +66,7 @@ a = Analysis(
     hiddenimports=sorted(hidden),
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter"],
+    excludes=[],  # tkinter IS needed now: the native pre-start settings window uses it
     noarchive=False,
 )
 pyz = PYZ(a.pure)
@@ -100,12 +100,12 @@ if sys.platform == "darwin":
         name="Neuron.app",
         icon=_icns if os.path.exists(_icns) else None,
         bundle_identifier="org.neuron.desktop",
-        version="0.0.6",
+        version="0.0.7",
         info_plist={
             "CFBundleName": "Neuron",
             "CFBundleDisplayName": "Neuron",
-            "CFBundleShortVersionString": "0.0.6",
-            "CFBundleVersion": "0.0.6",
+            "CFBundleShortVersionString": "0.0.7",
+            "CFBundleVersion": "0.0.7",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
         },

@@ -155,6 +155,24 @@ def perform_first_run(
     return config
 
 
+def default_first_run_config(base: Path) -> DesktopConfig:
+    """The first-run config the GUI pre-fills (server name defaults to the hostname)."""
+    return DesktopConfig(
+        server_name=default_server_name(),
+        data_dir=str(base),
+        admin_username="admin",
+        first_user_admin=True,
+    )
+
+
+def write_first_run_config(base: Path, config: DesktopConfig, *, print_fn: PrintFn = print) -> None:
+    """Persist a chosen first-run ``config`` and write the welcome file."""
+    _write_config(base, config)
+    _write_welcome_file(base, config)
+    print_fn(f"Configured Neuron in {base}.")
+    print_fn(f"Finish setup at {config.console_url().rstrip('/')}/get-started")
+
+
 def perform_noninteractive_first_run(base: Path, *, print_fn: PrintFn = print) -> DesktopConfig:
     """First-run setup with no prompts — for the double-clicked desktop app.
 
@@ -163,16 +181,8 @@ def perform_noninteractive_first_run(base: Path, *, print_fn: PrintFn = print) -
     a WELCOME.txt pointing at the in-browser sign-up, and let the user choose their own
     username and password there.
     """
-    config = DesktopConfig(
-        server_name=default_server_name(),
-        data_dir=str(base),
-        admin_username="admin",
-        first_user_admin=True,
-    )
-    _write_config(base, config)
-    _write_welcome_file(base, config)
-    print_fn(f"Configured Neuron in {base}.")
-    print_fn(f"Finish setup at {config.console_url().rstrip('/')}/get-started")
+    config = default_first_run_config(base)
+    write_first_run_config(base, config, print_fn=print_fn)
     return config
 
 

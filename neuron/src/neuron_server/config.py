@@ -150,6 +150,13 @@ class NeuronServerSettings(BaseSettings):
         default="neuron_session",
         description="Cookie name for the admin-console session.",
     )
+    # Path to the desktop app's config.json, when run by neuron_desktop. If set, the
+    # console settings page can edit the persisted runtime settings (applied on the
+    # next server restart). Empty when running as a standalone server.
+    desktop_config_path: str = Field(
+        default="",
+        description="Path to the desktop config.json (enables console settings editing).",
+    )
 
     def effective_session_secret(self) -> str:
         """Return the configured console session secret, or a random dev one."""

@@ -16,8 +16,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from neuron_desktop import config as config_module
+from neuron_desktop import paths
 from neuron_desktop.config import DesktopConfig
 from neuron_desktop.process import ServerProcess
+
+# Opens the native settings window (in its own process so it doesn't block the tray's
+# event loop). The user applies any change with the separate "Restart server" item.
+SettingsLauncher = Callable[[], None]
+ServerFactory = Callable[[DesktopConfig], ServerProcess]
 
 
 def open_data_folder(path: Path) -> None:
@@ -38,13 +45,17 @@ class TrayController:
         config: DesktopConfig,
         *,
         server: ServerProcess | None = None,
+        server_factory: ServerFactory = ServerProcess,
         console_opener: Callable[[str], object] = webbrowser.open,
         folder_opener: Callable[[Path], None] = open_data_folder,
+        settings_launcher: SettingsLauncher | None = None,
     ) -> None:
         self._config = config
-        self._server = server or ServerProcess(config)
+        self._server_factory = server_factory
+        self._server = server if server is not None else server_factory(config)
         self._console_opener = console_opener
         self._folder_opener = folder_opener
+        self._settings_launcher = settings_launcher
 
     def start(self) -> None:
         self._server.start()
@@ -73,6 +84,22 @@ class TrayController:
     def open_data_folder(self) -> None:
         self._folder_opener(self._config.data_path)
 
+    def restart(self) -> None:
+        """Stop the server, reload config from disk, and start it again.
+
+        Reloading picks up edits made either in the native Settings window or saved
+        by the in-process console settings page.
+        """
+        self._server.stop()
+        self._config = config_module.load(paths.config_path(self._config.data_path))
+        self._server = self._server_factory(self._config)
+        self._server.start()
+
+    def open_settings(self) -> None:
+        """Open the native settings window (changes apply on the next restart)."""
+        if self._settings_launcher is not None:
+            self._settings_launcher()
+
     def quit(self) -> None:
         self._server.stop()
 
@@ -92,6 +119,8 @@ def menu_items(controller: TrayController, *, on_quit: Callable[[], None]) -> li
         TrayItem(controller.toggle_text, controller.toggle),
         TrayItem(controller.status_text, None, enabled=False),
         TrayItem("Open console", controller.open_console),
+        TrayItem("Settings…", controller.open_settings),
+        TrayItem("Restart server", controller.restart),
         TrayItem("Open data folder", controller.open_data_folder),
         TrayItem("Quit", on_quit),
     ]
@@ -120,6 +149,26 @@ def adapt_menu_item(item: TrayItem, menu_item_cls: Callable[..., object]) -> obj
     )
 
 
+def _settings_command() -> list[str]:
+    """Command that opens the native settings window in its own process.
+
+    A separate process keeps its tkinter event loop off the tray's (so the menu-bar
+    app never freezes). In a PyInstaller bundle we re-exec the app with ``settings``;
+    otherwise we run the module CLI.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "settings"]
+    return [sys.executable, "-m", "neuron_desktop", "settings"]
+
+
+def launch_settings_window() -> None:
+    """Open the native settings window (best effort; never raises into the tray)."""
+    try:
+        subprocess.Popen(_settings_command())
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"Could not open the settings window: {exc}")
+
+
 def _icon_image() -> object:
     """The NEURON app icon (Neural Shield mark on a navy squircle)."""
     from neuron_desktop.icon import render_icon
@@ -136,7 +185,7 @@ def run_tray(config: DesktopConfig, *, autostart: bool = True) -> None:
             "The tray app needs the GUI extras: pip install 'neuron[desktop-gui]'"
         ) from exc
 
-    controller = TrayController(config)
+    controller = TrayController(config, settings_launcher=launch_settings_window)
     if autostart:
         controller.start()
 

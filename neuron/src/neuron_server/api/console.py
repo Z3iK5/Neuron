@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import html
 import io
+import json
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -31,7 +33,7 @@ from neuron_server.admin.service import AdminService
 from neuron_server.auth.passwords import verify_password
 from neuron_server.config import NeuronServerSettings
 from neuron_server.security import get_csrf_token, verify_csrf
-from neuron_server.storage import accounts
+from neuron_server.storage import accounts, metadata
 
 router = APIRouter()
 
@@ -544,6 +546,118 @@ async def invite_qr(
     buf = io.BytesIO()
     segno.make(url, error="m").save(buf, kind="svg", scale=5, border=2)
     return Response(buf.getvalue(), media_type="image/svg+xml")
+
+
+# --- settings + doctor ------------------------------------------------------
+_DOCTOR_PILL = {"ok": "on", "warn": "amber", "fail": "warn"}
+
+
+def _save_desktop_config_key(path: str, key: str, value: Any) -> None:
+    """Update one key in the desktop app's flat config.json (no neuron_desktop import)."""
+    p = Path(path)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    data[key] = value
+    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+@router.get("/console/settings", include_in_schema=False)
+async def settings_page(
+    request: Request, _: str = Depends(require_console_admin), net: int = 0
+) -> Response:
+    from neuron_server import doctor  # local import: pulls federation/network deps
+
+    settings = _settings(request)
+    db = request.app.state.db
+    committed = await metadata.get_metadata(db, "server_name") or settings.name
+    editable = bool(settings.desktop_config_path)
+
+    # Identity (server name is permanent — shown read-only with an explanation).
+    identity = (
+        '<div class="panel"><h2>Identity</h2>'
+        '<dl class="kv">'
+        f"<dt>Server name</dt><dd>{_e(committed)}</dd>"
+        f"<dt>Public URL</dt><dd>{_e(settings.public_base_url)}</dd>"
+        f"<dt>Listening on</dt><dd>{_e(settings.bind_host)}:{settings.bind_port}</dd></dl>"
+        '<p class="note" style="margin-top:.7rem">Your server\'s name is permanent — it is '
+        "built into every account, room and message, so it cannot be changed after the server "
+        "starts. To use a different name, set it in the desktop <em>Settings…</em> window "
+        "before first run, or create a new server.</p></div>"
+    )
+
+    # Registration (editable when run by the desktop app).
+    checked = " checked" if settings.registration_enabled else ""
+    if editable:
+        registration = (
+            '<div class="panel"><h2>Registration</h2>'
+            '<form method="post" action="/console/settings">'
+            f"{_csrf_field(request)}"
+            '<label class="row" style="font-weight:400;margin:.2rem 0 1rem">'
+            f'<input type="checkbox" name="registration_enabled" value="true"{checked} '
+            'style="width:auto;margin:0 .5rem 0 0"> Allow open registration '
+            "(anyone can create an account)</label>"
+            '<button class="btn" type="submit">Save</button></form>'
+            '<p class="note" style="margin-top:.6rem">Changes take effect after a server '
+            "restart (Neuron tray menu &rarr; <em>Restart server</em>).</p></div>"
+        )
+    else:
+        state = "open" if settings.registration_enabled else "closed (invite-only)"
+        registration = (
+            f'<div class="panel"><h2>Registration</h2><p class="note">Registration is '
+            f"<strong>{state}</strong>. Editing settings here needs the desktop app; set "
+            "<code>NEURON_SERVER_REGISTRATION_ENABLED</code> in the environment "
+            "otherwise.</p></div>"
+        )
+
+    # Doctor — structured health checks rendered inline.
+    checks = await doctor.run_checks(settings, offline=(net == 0))
+    rows = ""
+    for c in checks:
+        status = str(c.status)
+        rows += (
+            f'<tr><td>{_e(c.name)}</td>'
+            f'<td><span class="pill {_DOCTOR_PILL.get(status, "off")}">{_e(status)}</span></td>'
+            f"<td>{_e(c.detail)}</td></tr>"
+        )
+    n_fail = sum(1 for c in checks if str(c.status) == "fail")
+    n_warn = sum(1 for c in checks if str(c.status) == "warn")
+    n_ok = sum(1 for c in checks if str(c.status) == "ok")
+    toggle = (
+        '<a class="btn sm ghost" href="/console/settings">Quick checks only</a>'
+        if net
+        else '<a class="btn sm ghost" href="/console/settings?net=1">Include network checks</a>'
+    )
+    doctor_panel = (
+        '<div class="panel"><div class="spread"><h2>Health check</h2>'
+        f"{toggle}</div>"
+        f'<p class="muted">{n_ok} ok &middot; {n_warn} warning(s) &middot; {n_fail} failure(s)</p>'
+        '<table class="tbl"><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></div>"
+    )
+
+    body = f'<h1 class="page">Server settings</h1>{identity}{registration}{doctor_panel}'
+    return _page(request, "Server settings", "/console/settings", body)
+
+
+@router.post("/console/settings", include_in_schema=False)
+async def settings_save(
+    request: Request,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    registration_enabled: bool = Form(False),
+) -> Response:
+    settings = _settings(request)
+    if settings.desktop_config_path:
+        _save_desktop_config_key(
+            settings.desktop_config_path, "registration_enabled", registration_enabled
+        )
+        _flash(
+            request,
+            "Settings saved. Restart the server to apply "
+            "(Neuron tray menu → Restart server).",
+        )
+    else:
+        _flash(request, "This server is not managed by the desktop app; settings were not saved.")
+    return RedirectResponse("/console/settings", status_code=303)
 
 
 # --- pagination helper ------------------------------------------------------

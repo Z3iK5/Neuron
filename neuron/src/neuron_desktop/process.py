@@ -15,6 +15,7 @@ import sys
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from neuron_desktop import paths
 from neuron_desktop.config import DesktopConfig
 
 
@@ -45,8 +46,11 @@ def config_to_env(config: DesktopConfig) -> dict[str, str]:
         # first account created at /get-started never becomes an admin and can't
         # sign in to the console.
         "NEURON_SERVER_FIRST_USER_ADMIN": str(settings.first_user_admin),
+        "NEURON_SERVER_REGISTRATION_ENABLED": str(settings.registration_enabled),
         "NEURON_SERVER_BIND_HOST": settings.bind_host,
         "NEURON_SERVER_BIND_PORT": str(settings.bind_port),
+        # Lets the in-process console settings page edit the persisted config.
+        "NEURON_SERVER_DESKTOP_CONFIG": str(paths.config_path(config.data_path)),
     }
 
 
