@@ -97,6 +97,29 @@ def menu_items(controller: TrayController, *, on_quit: Callable[[], None]) -> li
     ]
 
 
+def adapt_menu_item(item: TrayItem, menu_item_cls: Callable[..., object]) -> object:
+    """Adapt a GUI-agnostic :class:`TrayItem` to a pystray ``MenuItem``.
+
+    pystray invokes a *callable* menu label with the ``MenuItem`` as a positional
+    argument (its ``MenuItem.text`` property does ``self._text(self)``), and an
+    action as ``action(icon, item)``. Our controller exposes zero-argument methods
+    (e.g. ``toggle_text``), so passing them through unwrapped makes pystray call
+    them with an extra argument -> ``TypeError: ... takes 1 positional argument but
+    2 were given`` the instant the menu is built (the crash seen on Windows and
+    macOS). Wrap both callables so they accept and ignore the extra argument(s).
+
+    ``menu_item_cls`` is ``pystray.MenuItem`` in production; tests pass a stub to
+    assert the wrapped label is callable with the item argument.
+    """
+    text = item.text
+    action = item.action
+    return menu_item_cls(
+        (lambda _item: text()) if callable(text) else text,
+        (lambda _icon, _item: action()) if action is not None else None,
+        enabled=item.enabled,
+    )
+
+
 def _icon_image() -> object:
     """The NEURON app icon (Neural Shield mark on a navy squircle)."""
     from neuron_desktop.icon import render_icon
@@ -117,19 +140,23 @@ def run_tray(config: DesktopConfig, *, autostart: bool = True) -> None:
     if autostart:
         controller.start()
 
-    icon = pystray.Icon("Neuron", _icon_image(), "Neuron")
-
     def _quit() -> None:
         controller.quit()
         icon.stop()
 
-    def _to_item(item: TrayItem) -> pystray.MenuItem:
-        action = item.action
-        return pystray.MenuItem(
-            item.text,
-            (lambda _icon, _item: action()) if action is not None else None,
-            enabled=item.enabled,
+    try:
+        icon = pystray.Icon("Neuron", _icon_image(), "Neuron")
+        icon.menu = pystray.Menu(
+            *(
+                adapt_menu_item(item, pystray.MenuItem)
+                for item in menu_items(controller, on_quit=_quit)
+            )
         )
-
-    icon.menu = pystray.Menu(*(_to_item(item) for item in menu_items(controller, on_quit=_quit)))
-    icon.run()
+        icon.run()
+    except BaseException:
+        # If the tray backend fails *after* we autostarted the homeserver child,
+        # stop it so any foreground fallback (see cli.py) can bind the port
+        # cleanly instead of two servers racing for it (which hangs the GUI).
+        if autostart:
+            controller.stop()
+        raise
