@@ -131,6 +131,14 @@ class NeuronServerSettings(BaseSettings):
         gt=0,
         description="Interval for retrying queued outbound federation transactions.",
     )
+    # Route inbound-federation authorization through state resolution v2. Off by
+    # default: the linear single-extremity model makes it a no-op today, but it
+    # keeps the (already-tested) algorithm on the live path and is the seam for
+    # real multi-extremity resolution once forward extremities exist.
+    state_res_v2: bool = Field(
+        default=False,
+        description="Use state resolution v2 for inbound federation authorization.",
+    )
 
     # Where the ASGI server binds when run via `python -m neuron_server`.
     bind_host: str = Field(default="127.0.0.1", description="ASGI bind host.")
