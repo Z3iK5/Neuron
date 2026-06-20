@@ -117,6 +117,11 @@ def _fmt_ts(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+# The onchange handler on each bulk-select row checkbox (recomputes the selection
+# count and shows/hides the bulk action bar).
+_BULK_ONCHANGE = " onchange=\"neuronBulk(this.closest('.bulk-form'))\""
+
+
 # --- auth -------------------------------------------------------------------
 @router.get("/console/login", include_in_schema=False)
 async def login_form(request: Request) -> Response:
@@ -240,13 +245,15 @@ async def users_list(
         link = f'/console/users/{_quote(uid)}'
         display = _e(u.get("displayname") or "")
         rows += (
-            f'<tr><td><a href="{link}">{_e(uid)}</a></td>'
+            f'<tr><td class="check"><input type="checkbox" class="rowcheck"'
+            f' name="user_ids" value="{_e(uid)}"{_BULK_ONCHANGE}></td>'
+            f'<td><a href="{link}">{_e(uid)}</a></td>'
             f"<td>{display}</td>"
             f'<td>{_pill(bool(u.get("admin")), "admin", "user")}</td>'
             f'<td>{_pill(not u.get("deactivated"), "active", "deactivated")}</td></tr>'
         )
     if not rows:
-        rows = '<tr><td colspan="4" class="muted">No users found.</td></tr>'
+        rows = '<tr><td colspan="5" class="muted">No users found.</td></tr>'
     total = page.get("total", 0)
     search = (
         '<form class="row searchbar" method="get" action="/console/users">'
@@ -258,10 +265,53 @@ async def users_list(
     body = (
         f'<div class="spread"><h1 class="page">Users <span class="muted">({total})</span></h1>'
         f"{search}</div>"
-        '<div class="panel"><table class="tbl"><thead><tr><th>User</th><th>Display name</th>'
-        f"<th>Role</th><th>Status</th></tr></thead><tbody>{rows}</tbody></table>{nav}</div>"
+        '<form class="bulk-form" method="post" action="/console/users/bulk">'
+        f"{_csrf_field(request)}"
+        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
+        '<button class="btn sm" name="action" value="shadow_ban">Shadow-ban</button>'
+        '<button class="btn sm ghost" name="action" value="unshadow_ban">Un-shadow-ban</button>'
+        '<button class="btn sm danger" name="action" value="deactivate">Deactivate</button></div>'
+        '<div class="panel"><table class="tbl"><thead><tr>'
+        '<th class="check"><input type="checkbox" class="checkall"'
+        ' onchange="neuronCheckAll(this)"></th>'
+        '<th>User</th><th>Display name</th><th>Role</th><th>Status</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>{nav}</div></form>"
     )
     return _page(request, "Users", "/console/users", body)
+
+
+@router.post("/console/users/bulk", include_in_schema=False)
+async def users_bulk(
+    request: Request,
+    me: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    action: str = Form(""),
+    user_ids: list[str] = Form([]),
+) -> Response:
+    admin = _admin(request)
+    done = 0
+    for uid in user_ids:
+        if uid == me and action in ("deactivate", "shadow_ban"):
+            continue  # never let an admin lock themselves out in bulk
+        try:
+            if action == "deactivate":
+                await admin.deactivate_user(uid)
+            elif action == "shadow_ban":
+                await admin.set_shadow_ban(uid, True)
+            elif action == "unshadow_ban":
+                await admin.set_shadow_ban(uid, False)
+            else:
+                break
+            done += 1
+        except Exception:  # noqa: BLE001 - best-effort bulk; skip per-item failures
+            continue
+    labels = {
+        "deactivate": "Deactivated",
+        "shadow_ban": "Shadow-banned",
+        "unshadow_ban": "Un-shadow-banned",
+    }
+    _flash(request, f"{labels.get(action, 'Updated')} {done} user(s).")
+    return RedirectResponse("/console/users", status_code=303)
 
 
 @router.get("/console/users/new", include_in_schema=False)
@@ -479,22 +529,62 @@ async def rooms_list(
         rid = str(r.get("room_id", ""))
         link = f"/console/rooms/{_quote(rid)}"
         rows += (
-            f'<tr><td><a href="{link}">{_e(r.get("name") or rid)}</a>'
+            f'<tr><td class="check"><input type="checkbox" class="rowcheck"'
+            f' name="room_ids" value="{_e(rid)}"{_BULK_ONCHANGE}></td>'
+            f'<td><a href="{link}">{_e(r.get("name") or rid)}</a>'
             f'<div class="muted">{_e(rid)}</div></td>'
             f'<td>{r.get("joined_members", 0)}</td>'
             f'<td>{_pill(bool(r.get("encryption")), "encrypted", "plain")}</td>'
             f'<td>{_e(r.get("version") or "")}</td></tr>'
         )
     if not rows:
-        rows = '<tr><td colspan="4" class="muted">No rooms yet.</td></tr>'
+        rows = '<tr><td colspan="5" class="muted">No rooms yet.</td></tr>'
     total = page.get("total_rooms", 0)
     nav = _pager("/console/rooms", offset, _PAGE_SIZE, total, "")
     body = (
         f'<h1 class="page">Rooms <span class="muted">({total})</span></h1>'
-        '<div class="panel"><table class="tbl"><thead><tr><th>Room</th><th>Members</th>'
-        f"<th>Encryption</th><th>Version</th></tr></thead><tbody>{rows}</tbody></table>{nav}</div>"
+        '<form class="bulk-form" method="post" action="/console/rooms/bulk">'
+        f"{_csrf_field(request)}"
+        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
+        '<button class="btn sm" name="action" value="block">Block</button>'
+        '<button class="btn sm ghost" name="action" value="unblock">Unblock</button>'
+        '<button class="btn sm danger" name="action" value="delete">'
+        "Delete &amp; purge</button></div>"
+        '<div class="panel"><table class="tbl"><thead><tr>'
+        '<th class="check"><input type="checkbox" class="checkall"'
+        ' onchange="neuronCheckAll(this)"></th>'
+        '<th>Room</th><th>Members</th><th>Encryption</th><th>Version</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>{nav}</div></form>"
     )
     return _page(request, "Rooms", "/console/rooms", body)
+
+
+@router.post("/console/rooms/bulk", include_in_schema=False)
+async def rooms_bulk(
+    request: Request,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    action: str = Form(""),
+    room_ids: list[str] = Form([]),
+) -> Response:
+    admin = _admin(request)
+    done = 0
+    for rid in room_ids:
+        try:
+            if action == "block":
+                await admin.set_room_block(rid, True)
+            elif action == "unblock":
+                await admin.set_room_block(rid, False)
+            elif action == "delete":
+                await admin.delete_room(rid)
+            else:
+                break
+            done += 1
+        except Exception:  # noqa: BLE001 - best-effort bulk; skip per-item failures
+            continue
+    labels = {"block": "Blocked", "unblock": "Unblocked", "delete": "Deleted"}
+    _flash(request, f"{labels.get(action, 'Updated')} {done} room(s).")
+    return RedirectResponse("/console/rooms", status_code=303)
 
 
 @router.get("/console/rooms/{room_id}", include_in_schema=False)
