@@ -158,6 +158,16 @@ class NeuronServerSettings(BaseSettings):
         description="Path to the desktop config.json (enables console settings editing).",
     )
 
+    # WebAuthn relying-party id + origin for console passkeys. Leave empty to derive
+    # from the request (rp_id = hostname, origin = scheme://host:port) — correct for
+    # the desktop's localhost. Set them when serving the console behind a domain.
+    webauthn_rp_id: str = Field(
+        default="", description="WebAuthn relying-party id (else derived per-request)."
+    )
+    webauthn_origin: str = Field(
+        default="", description="WebAuthn expected origin (else derived per-request)."
+    )
+
     def effective_session_secret(self) -> str:
         """Return the configured console session secret, or a random dev one."""
         configured = self.console_session_secret.get_secret_value()

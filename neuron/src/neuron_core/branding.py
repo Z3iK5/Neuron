@@ -229,6 +229,7 @@ _CONSOLE_NAV: tuple[tuple[str, str], ...] = (
     ("/console/rooms", "Rooms"),
     ("/console/invites", "Invites"),
     ("/console/reports", "Reports"),
+    ("/console/passkeys", "Passkeys"),
 )
 
 
@@ -239,14 +240,25 @@ def login_card_html(
     error: str | None = None,
     username: str = "",
     next_url: str = "/console",
+    passkey_button: bool = False,
+    script: str = "",
 ) -> str:
     """The branded 'Sign in to your homeserver' card (the merged console login).
 
     Authenticates the operator's own **admin account** (Matrix username + password),
-    matching the brand's login lockup.
+    matching the brand's login lockup. When ``passkey_button`` is set, a "Sign in
+    with a passkey" button is shown and ``script`` (the WebAuthn JS) is injected.
     """
     err = f'<div class="error">{html.escape(error)}</div>' if error else ""
     safe_name = html.escape(server_name)
+    passkey_html = (
+        '<div class="or">or</div>'
+        '<button type="button" id="pk-login" class="btn-full secondary">'
+        "Sign in with a passkey</button>"
+        '<div class="error" id="pk-login-err" hidden></div>'
+        if passkey_button
+        else ""
+    )
     body = f"""<h2>Sign in to your homeserver</h2>{err}
   <form method="post" action="/console/login">
     <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
@@ -257,10 +269,10 @@ def login_card_html(
     <label for="p">Password</label>
     <input id="p" name="password" type="password" placeholder="your password" required>
     <button type="submit">Sign in</button>
-  </form>
+  </form>{passkey_html}
   <p class="note" style="margin-top:.85rem">Use the admin account for
     <code>{safe_name}</code> (the first account you created).</p>"""
-    inner = f'<div class="card">{_card_head()}<div class="card-body">{body}</div></div>'
+    inner = f'<div class="card">{_card_head()}<div class="card-body">{body}</div></div>{script}'
     return _shell(f"Sign in · {NAME}", inner)
 
 
@@ -351,6 +363,7 @@ button:hover{background:#0E2740}
 .btn-full.primary:hover{background:#0E2740}
 .btn-full.secondary{background:#ECEAE4;color:#1C3D5F}
 .btn-full.secondary:hover{background:#DEDBD2}
+.or{text-align:center;color:#9aa0a8;font-size:.82rem;margin:.8rem 0 .6rem}
 
 /* --- admin console (body.admin) --- */
 body.admin{display:block;align-items:stretch;justify-content:flex-start;padding:0;

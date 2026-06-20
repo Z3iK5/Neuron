@@ -285,3 +285,69 @@ async def set_server_notices_room(db: Database, user_id: str, room_id: str) -> N
         " ON CONFLICT(user_id) DO UPDATE SET room_id = excluded.room_id",
         (user_id, room_id),
     )
+
+
+# --- passkeys (WebAuthn) ---------------------------------------------------
+
+
+def _passkey_row(r: tuple[Any, ...]) -> dict[str, Any]:
+    return {
+        "credential_id": str(r[0]),
+        "owner": str(r[1]),
+        "public_key": str(r[2]),
+        "sign_count": int(r[3]),
+        "label": str(r[4]),
+        "created_ts": int(r[5]),
+    }
+
+
+_PASSKEY_COLS = "credential_id, owner, public_key, sign_count, label, created_ts"
+
+
+async def list_passkeys(db: Database, owner: str) -> list[dict[str, Any]]:
+    rows = await db.fetchall(
+        f"SELECT {_PASSKEY_COLS} FROM passkeys WHERE owner = ? ORDER BY created_ts", (owner,)
+    )
+    return [_passkey_row(r) for r in rows]
+
+
+async def all_passkey_ids(db: Database) -> list[str]:
+    rows = await db.fetchall("SELECT credential_id FROM passkeys")
+    return [str(r[0]) for r in rows]
+
+
+async def get_passkey(db: Database, credential_id: str) -> dict[str, Any] | None:
+    rows = await db.fetchall(
+        f"SELECT {_PASSKEY_COLS} FROM passkeys WHERE credential_id = ?", (credential_id,)
+    )
+    return _passkey_row(rows[0]) if rows else None
+
+
+async def add_passkey(
+    db: Database,
+    *,
+    credential_id: str,
+    owner: str,
+    public_key: str,
+    sign_count: int,
+    label: str,
+    ts: int,
+) -> None:
+    await db.execute(
+        f"INSERT INTO passkeys ({_PASSKEY_COLS}) VALUES (?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(credential_id) DO UPDATE SET public_key = excluded.public_key,"
+        " sign_count = excluded.sign_count, label = excluded.label",
+        (credential_id, owner, public_key, sign_count, label, ts),
+    )
+
+
+async def remove_passkey(db: Database, owner: str, credential_id: str) -> None:
+    await db.execute(
+        "DELETE FROM passkeys WHERE owner = ? AND credential_id = ?", (owner, credential_id)
+    )
+
+
+async def set_passkey_sign_count(db: Database, credential_id: str, sign_count: int) -> None:
+    await db.execute(
+        "UPDATE passkeys SET sign_count = ? WHERE credential_id = ?", (sign_count, credential_id)
+    )

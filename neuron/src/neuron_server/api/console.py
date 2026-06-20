@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from neuron_core import branding
 from neuron_server.admin.service import AdminService
@@ -34,6 +34,7 @@ from neuron_server.auth.passwords import verify_password
 from neuron_server.config import NeuronServerSettings
 from neuron_server.security import get_csrf_token, verify_csrf
 from neuron_server.storage import accounts, metadata
+from neuron_server.storage import admin as admin_store
 
 router = APIRouter()
 
@@ -119,7 +120,15 @@ async def login_form(request: Request) -> Response:
     if not await accounts.any_users(request.app.state.db):
         return RedirectResponse("/get-started", status_code=303)
     csrf = get_csrf_token(request)  # seed the session cookie + token
-    return HTMLResponse(branding.login_card_html(_settings(request).name, csrf_token=csrf))
+    has_passkeys = bool(await admin_store.all_passkey_ids(request.app.state.db))
+    return HTMLResponse(
+        branding.login_card_html(
+            _settings(request).name,
+            csrf_token=csrf,
+            passkey_button=has_passkeys,
+            script=_passkey_script(request) if has_passkeys else "",
+        )
+    )
 
 
 @router.post("/console/login", include_in_schema=False)
@@ -759,6 +768,244 @@ async def settings_save(
     else:
         _flash(request, "This server is not managed by the desktop app; settings were not saved.")
     return RedirectResponse("/console/settings", status_code=303)
+
+
+# --- passkeys (WebAuthn) ----------------------------------------------------
+# Client-side enrolment + login ceremony. py_webauthn emits/consumes base64url for
+# binary fields, so this converts to/from ArrayBuffers. Inlined (the console serves
+# no static files). Wires the #pk-add (passkeys page) and #pk-login (login) buttons.
+_PASSKEY_JS = """<script>
+(function(){
+"use strict";
+function b2b(s){
+  s=s.replace(/-/g,'+').replace(/_/g,'/');
+  while(s.length%4)s+='=';
+  var b=atob(s),u=new Uint8Array(b.length);
+  for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
+  return u.buffer;
+}
+function f2b(buf){
+  var by=new Uint8Array(buf),s='';
+  for(var i=0;i<by.length;i++)s+=String.fromCharCode(by[i]);
+  return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
+}
+function err(id,m){
+  var e=id&&document.getElementById(id);
+  if(e){e.textContent=m;e.hidden=false;}else{alert(m);}
+}
+async function pj(url,body,h){
+  var r=await fetch(url,{
+    method:'POST',
+    headers:Object.assign({'Content-Type':'application/json'},h||{}),
+    body:body?JSON.stringify(body):'{}',
+    credentials:'same-origin'
+  });
+  var d={};
+  try{d=await r.json();}catch(e){}
+  if(!r.ok)throw new Error((d&&d.error)||('Request failed ('+r.status+')'));
+  return d;
+}
+function sc(c){
+  var r=c.response;
+  return{id:c.id,rawId:f2b(c.rawId),type:c.type,response:{
+    clientDataJSON:f2b(r.clientDataJSON),
+    attestationObject:f2b(r.attestationObject),
+    transports:r.getTransports?r.getTransports():[]
+  },clientExtensionResults:c.getClientExtensionResults()};
+}
+function sg(c){
+  var r=c.response;
+  return{id:c.id,rawId:f2b(c.rawId),type:c.type,response:{
+    clientDataJSON:f2b(r.clientDataJSON),
+    authenticatorData:f2b(r.authenticatorData),
+    signature:f2b(r.signature),
+    userHandle:r.userHandle?f2b(r.userHandle):null
+  },clientExtensionResults:c.getClientExtensionResults()};
+}
+window.neuronPasskeyRegister=async function(label,eid){
+  if(!window.PublicKeyCredential)
+    return err(eid,'This browser does not support passkeys.');
+  try{
+    var csrf=window.NEURON_CSRF||'';
+    var o=await pj('/console/passkeys/register/options',{},{'X-CSRF-Token':csrf});
+    o.challenge=b2b(o.challenge);
+    o.user.id=b2b(o.user.id);
+    (o.excludeCredentials||[]).forEach(function(c){c.id=b2b(c.id);});
+    var cred=await navigator.credentials.create({publicKey:o});
+    await pj('/console/passkeys/register/verify',
+      {credential:sc(cred),label:label},{'X-CSRF-Token':csrf});
+    window.location.reload();
+  }catch(e){err(eid,e.message||String(e));}
+};
+window.neuronPasskeyLogin=async function(eid){
+  if(!window.PublicKeyCredential)
+    return err(eid,'This browser does not support passkeys.');
+  try{
+    var o=await pj('/console/passkeys/login/options',{});
+    o.challenge=b2b(o.challenge);
+    (o.allowCredentials||[]).forEach(function(c){c.id=b2b(c.id);});
+    var cred=await navigator.credentials.get({publicKey:o});
+    await pj('/console/passkeys/login/verify',{credential:sg(cred)});
+    window.location.assign('/console');
+  }catch(e){err(eid,e.message||String(e));}
+};
+document.addEventListener('DOMContentLoaded',function(){
+  var a=document.getElementById('pk-add');
+  if(a)a.addEventListener('click',function(){
+    neuronPasskeyRegister((document.getElementById('pk-label')||{}).value||'','pk-err');
+  });
+  var l=document.getElementById('pk-login');
+  if(l)l.addEventListener('click',function(){neuronPasskeyLogin('pk-login-err');});
+});
+})();
+</script>"""
+
+
+def _rp(request: Request) -> tuple[str, str]:
+    """Resolve the WebAuthn relying-party id + expected origin for this request."""
+    settings = _settings(request)
+    rp_id = settings.webauthn_rp_id or (request.url.hostname or "localhost")
+    origin = settings.webauthn_origin or f"{request.url.scheme}://{request.url.netloc}"
+    return rp_id, origin
+
+
+async def _owner_is_admin(request: Request, user_id: str) -> bool:
+    settings = _settings(request)
+    if user_id in settings.admin_user_ids():
+        return True
+    row = await accounts.get_user(request.app.state.db, user_id)
+    return bool(row and row.admin and not row.deactivated)
+
+
+def _passkey_script(request: Request) -> str:
+    csrf = json.dumps(get_csrf_token(request))
+    return f"<script>window.NEURON_CSRF={csrf};</script>{_PASSKEY_JS}"
+
+
+@router.get("/console/passkeys", include_in_schema=False)
+async def passkeys_page(request: Request, who: str = Depends(require_console_admin)) -> Response:
+    keys = await admin_store.list_passkeys(request.app.state.db, who)
+    rows = ""
+    for k in keys:
+        rows += (
+            f'<tr><td>{_e(str(k["label"]))}</td>'
+            '<td><form class="inline" method="post" action="/console/passkeys/delete">'
+            f'{_csrf_field(request)}'
+            f'<input type="hidden" name="credential_id" value="{_e(str(k["credential_id"]))}">'
+            '<button class="btn sm danger" type="submit">Remove</button></form></td></tr>'
+        )
+    if not rows:
+        rows = '<tr><td colspan="2" class="muted">No passkeys yet.</td></tr>'
+    body = (
+        '<h1 class="page">Passkeys</h1>'
+        '<div class="panel"><p class="note">Sign in to the console with a device passkey '
+        "(Touch ID, a security key, your phone) instead of a password.</p>"
+        '<div class="row" style="margin:.7rem 0">'
+        '<input class="q" id="pk-label" placeholder="Label (e.g. MacBook)">'
+        '<button class="btn" id="pk-add" type="button">Add a passkey</button></div>'
+        '<div class="error" id="pk-err" hidden></div>'
+        '<table class="tbl"><thead><tr><th>Passkey</th><th></th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></div>{_passkey_script(request)}"
+    )
+    return _page(request, "Passkeys", "/console/passkeys", body)
+
+
+@router.post("/console/passkeys/register/options", include_in_schema=False)
+async def passkey_register_options(
+    request: Request, who: str = Depends(require_console_admin)
+) -> Response:
+    if not verify_csrf(request, request.headers.get("x-csrf-token", "")):
+        raise CsrfError()
+    from neuron_server import passkeys as pk
+
+    rp_id, _origin = _rp(request)
+    keys = await admin_store.list_passkeys(request.app.state.db, who)
+    exclude = [k["credential_id"] for k in keys]
+    options_json, challenge = pk.registration_options(rp_id, user_id=who, exclude_ids=exclude)
+    request.session["webauthn_reg_challenge"] = challenge
+    return Response(options_json, media_type="application/json")
+
+
+@router.post("/console/passkeys/register/verify", include_in_schema=False)
+async def passkey_register_verify(
+    request: Request, who: str = Depends(require_console_admin)
+) -> Response:
+    if not verify_csrf(request, request.headers.get("x-csrf-token", "")):
+        raise CsrfError()
+    from neuron_server import passkeys as pk
+
+    body = await request.json()
+    challenge = str(request.session.pop("webauthn_reg_challenge", ""))
+    rp_id, origin = _rp(request)
+    try:
+        cred = pk.verify_registration(
+            json.dumps(body["credential"]), challenge, rp_id, origin,
+            label=str(body.get("label", "")),
+        )
+    except Exception as exc:  # noqa: BLE001 - report verification failure to the UI
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    await admin_store.add_passkey(
+        request.app.state.db,
+        credential_id=str(cred["credential_id"]),
+        owner=who,
+        public_key=str(cred["public_key"]),
+        sign_count=int(cred["sign_count"]),
+        label=str(cred["label"]),
+        ts=int(cred["created_ts"]),
+    )
+    return JSONResponse({"ok": True})
+
+
+@router.post("/console/passkeys/delete", include_in_schema=False)
+async def passkey_delete(
+    request: Request,
+    who: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    credential_id: str = Form(...),
+) -> Response:
+    await admin_store.remove_passkey(request.app.state.db, who, credential_id)
+    _flash(request, "Passkey removed.")
+    return RedirectResponse("/console/passkeys", status_code=303)
+
+
+@router.post("/console/passkeys/login/options", include_in_schema=False)
+async def passkey_login_options(request: Request) -> Response:
+    from neuron_server import passkeys as pk
+
+    rp_id, _origin = _rp(request)
+    allow = await admin_store.all_passkey_ids(request.app.state.db)
+    options_json, challenge = pk.authentication_options(rp_id, allow_ids=allow)
+    request.session["webauthn_login_challenge"] = challenge
+    return Response(options_json, media_type="application/json")
+
+
+@router.post("/console/passkeys/login/verify", include_in_schema=False)
+async def passkey_login_verify(request: Request) -> Response:
+    from neuron_server import passkeys as pk
+
+    body = await request.json()
+    challenge = str(request.session.pop("webauthn_login_challenge", ""))
+    rp_id, origin = _rp(request)
+    credential = json.dumps(body["credential"])
+    try:
+        stored = await admin_store.get_passkey(
+            request.app.state.db, pk.credential_id_of(credential)
+        )
+        if stored is None:
+            raise ValueError("Unknown passkey")
+        if not await _owner_is_admin(request, str(stored["owner"])):
+            raise ValueError("That account is not a server administrator")
+        new_count = pk.verify_authentication(
+            credential, challenge, rp_id, origin,
+            public_key=str(stored["public_key"]), sign_count=int(stored["sign_count"]),
+        )
+    except Exception as exc:  # noqa: BLE001 - any failure is an auth failure
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    await admin_store.set_passkey_sign_count(
+        request.app.state.db, str(stored["credential_id"]), new_count
+    )
+    request.session["console_user"] = str(stored["owner"])
+    return JSONResponse({"ok": True})
 
 
 # --- reports ----------------------------------------------------------------

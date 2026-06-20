@@ -13,7 +13,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neuron"
-version = "0.0.10"
+version = "0.0.11"
 description = "Neuron — an all-in-one, self-hosted Matrix platform (homeserver + operator tooling)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -71,6 +71,7 @@ server = [
     "python-multipart>=0.0.9",   # parse the /get-started + /console forms (request.form())
     "itsdangerous>=2.2",         # signs the admin-console session cookie (SessionMiddleware)
     "segno>=1.6",                # QR codes for shareable invite links in the console
+    "webauthn>=2.0",             # passkey (WebAuthn) sign-in for the console
     "aiosqlite>=0.20",           # async SQLite driver (development backend)
     "asyncpg>=0.29",             # async PostgreSQL driver (production backend)
     "Pillow>=10.0",              # image thumbnailing for the media repository
