@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
-from neuron_server.storage.database import Database
+from neuron_server.storage.database import STREAMS, Database
 
 
 class SQLiteDatabase(Database):
@@ -59,6 +59,13 @@ class SQLiteDatabase(Database):
         finally:
             await cursor.close()
         return row[0] if row else None
+
+    async def next_stream_id(self, name: str) -> int:
+        # MAX(col)+1 is race-free here: the single connection serializes all writes.
+        table, col = STREAMS[name]
+        return int(
+            await self.fetchval(f"SELECT COALESCE(MAX({col}), 0) + 1 FROM {table}")
+        )
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:

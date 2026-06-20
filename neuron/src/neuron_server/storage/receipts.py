@@ -25,7 +25,7 @@ async def upsert_receipt(
     db: Database, room_id: str, user_id: str, receipt_type: str, event_id: str, ts: int
 ) -> int:
     """Record (or move forward) a user's receipt; returns the new stream id."""
-    stream_id = int(await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) + 1 FROM receipts"))
+    stream_id = await db.next_stream_id("receipts")
     await db.execute(
         "INSERT INTO receipts (room_id, user_id, receipt_type, event_id, ts, stream_id)"
         " VALUES (?, ?, ?, ?, ?, ?)"

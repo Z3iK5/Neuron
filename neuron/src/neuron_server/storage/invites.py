@@ -30,9 +30,7 @@ async def store_invite(
     invite_state: list[dict[str, Any]],
 ) -> int:
     """Record (or refresh) an invite; returns its new stream id."""
-    stream_id = int(
-        await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) + 1 FROM federated_invites")
-    )
+    stream_id = await db.next_stream_id("federated_invites")
     await db.execute(
         "INSERT INTO federated_invites"
         " (user_id, room_id, event_json, invite_state_json, stream_id)"

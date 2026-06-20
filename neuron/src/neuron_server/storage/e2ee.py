@@ -146,9 +146,7 @@ async def add_to_device_message(
     event_type: str,
     content: dict[str, Any],
 ) -> int:
-    stream_id = int(
-        await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) + 1 FROM to_device_messages")
-    )
+    stream_id = await db.next_stream_id("to_device")
     await db.execute(
         "INSERT INTO to_device_messages"
         " (stream_id, target_user, target_device, sender, type, content_json)"
@@ -196,9 +194,7 @@ async def max_to_device_stream(db: Database) -> int:
 
 
 async def bump_device_list(db: Database, user_id: str) -> int:
-    stream_id = int(
-        await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) + 1 FROM device_list_changes")
-    )
+    stream_id = await db.next_stream_id("device_lists")
     await db.execute(
         "INSERT INTO device_list_changes (stream_id, user_id) VALUES (?, ?)",
         (stream_id, user_id),

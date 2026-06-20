@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
-from neuron_server.storage.database import Database
+from neuron_server.storage.database import STREAMS, Database
 
 # The connection pinned to the current transaction (None when not in one). A
 # context variable rather than instance state, so concurrent tasks each see only
@@ -90,6 +90,36 @@ class PostgresDatabase(Database):
     async def fetchval(self, sql: str, params: Sequence[Any] = ()) -> Any:
         async with self._conn() as conn:
             return await conn.fetchval(_to_pg(sql), *tuple(params))
+
+    @staticmethod
+    def _seq(name: str) -> str:
+        return f"neuron_{name}_seq"
+
+    async def ensure_stream_sequences(self) -> None:
+        """Create each stream's SEQUENCE once, seeded above any existing rows.
+
+        Seeded only when first created, never re-seeded — so a restart (or a
+        second worker) never moves a live sequence backwards into ids another
+        connection may have already handed out.
+        """
+        async with self._pool.acquire() as conn:
+            for name, (table, col) in STREAMS.items():
+                seq = self._seq(name)
+                existed = await conn.fetchval(
+                    "SELECT 1 FROM pg_class WHERE relkind = 'S' AND relname = $1", seq
+                )
+                await conn.execute(f"CREATE SEQUENCE IF NOT EXISTS {seq}")
+                if not existed:
+                    start = int(
+                        await conn.fetchval(f"SELECT COALESCE(MAX({col}), 0) + 1 FROM {table}")
+                    )
+                    # is_called=false -> the first nextval returns exactly ``start``.
+                    await conn.execute(f"SELECT setval('{seq}', {start}, false)")
+
+    async def next_stream_id(self, name: str) -> int:
+        # nextval is non-transactional: concurrent connections get distinct ids
+        # with no lock held for the duration of the caller's transaction.
+        return int(await self.fetchval(f"SELECT nextval('{self._seq(name)}')"))
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:

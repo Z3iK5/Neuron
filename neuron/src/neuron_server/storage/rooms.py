@@ -87,8 +87,7 @@ async def get_room(db: Database, room_id: str) -> RoomRow | None:
 
 
 async def next_stream_ordering(db: Database) -> int:
-    value = await db.fetchval("SELECT COALESCE(MAX(stream_ordering), 0) + 1 FROM events")
-    return int(value)
+    return await db.next_stream_id("events")
 
 
 async def next_depth(db: Database, room_id: str) -> int:

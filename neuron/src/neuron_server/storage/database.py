@@ -22,6 +22,20 @@ from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
+# Monotonic id streams: name -> (table, column). Each is a server-wide ascending
+# counter. SQLite allocates with MAX(col)+1 (race-free under its single serialized
+# connection); PostgreSQL uses a dedicated SEQUENCE so concurrent connections never
+# collide. ``next_depth`` is deliberately NOT here — DAG depth is per-room and may
+# legitimately repeat, so it keeps its MAX+1 computation.
+STREAMS: dict[str, tuple[str, str]] = {
+    "events": ("events", "stream_ordering"),
+    "to_device": ("to_device_messages", "stream_id"),
+    "device_lists": ("device_list_changes", "stream_id"),
+    "federated_invites": ("federated_invites", "stream_id"),
+    "receipts": ("receipts", "stream_id"),
+    "outbox": ("federation_outbox", "stream_id"),
+}
+
 
 class Database(abc.ABC):
     """A minimal async database connection used by the storage layer."""
@@ -49,6 +63,20 @@ class Database(abc.ABC):
     @abc.abstractmethod
     def transaction(self) -> AbstractAsyncContextManager[None]:
         """An async context manager that commits on success and rolls back on error."""
+
+    @abc.abstractmethod
+    async def next_stream_id(self, name: str) -> int:
+        """Allocate the next id for the ``name`` stream (see :data:`STREAMS`).
+
+        Must be race-free across concurrent connections/transactions.
+        """
+
+    async def ensure_stream_sequences(self) -> None:
+        """Create/seed any backend objects the stream allocator needs.
+
+        Called once after migrations. No-op by default (SQLite needs nothing).
+        """
+        return None
 
 
 def connect_database(url: str, *, pool_size: int = 1) -> Database:
