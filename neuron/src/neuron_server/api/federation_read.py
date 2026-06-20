@@ -14,6 +14,8 @@ state (state groups) is also deferred.
 from __future__ import annotations
 
 import time
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -25,7 +27,12 @@ from neuron_server.storage import rooms as store
 router = APIRouter(prefix="/_matrix/federation/v1")
 
 _SERVER_NAME = "Neuron"
-_SERVER_VERSION = "0.0.1"
+try:
+    # Reported to every federating homeserver via GET /_matrix/federation/v1/version;
+    # read from the installed package metadata so it never goes stale.
+    _SERVER_VERSION = _pkg_version("neuron")
+except PackageNotFoundError:  # pragma: no cover - metadata present when installed
+    _SERVER_VERSION = "0.0.0"
 
 
 def _domain_of(user_id: str) -> str:

@@ -10,9 +10,16 @@ See the repository docs (``docs/architecture.md``, ``docs/configuration.md``) fo
 the full picture and how to run it.
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
 from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
 
 __all__ = ["create_app", "NeuronServerSettings"]
 
-__version__ = "0.0.1"
+# Single source of truth: the installed package metadata (pyproject version).
+try:
+    __version__ = _version("neuron")
+except PackageNotFoundError:  # pragma: no cover - metadata present when installed
+    __version__ = "0.0.0"

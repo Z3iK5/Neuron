@@ -16,6 +16,9 @@ Public API (the things services import):
   the exception types we raise.
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
 from neuron_core.admin_client import (
     AdminClient,
     EventReportPage,
@@ -47,4 +50,8 @@ __all__ = [
     "get_logger",
 ]
 
-__version__ = "0.0.1"
+# Single source of truth: the installed package metadata (pyproject version).
+try:
+    __version__ = _version("neuron")
+except PackageNotFoundError:  # pragma: no cover - metadata present when installed
+    __version__ = "0.0.0"
