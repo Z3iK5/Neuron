@@ -340,6 +340,22 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=14,
+        name="passkeys",
+        # WebAuthn passkeys for console sign-in, owned by a (admin) user account.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS passkeys ("
+            " credential_id TEXT PRIMARY KEY,"
+            " owner TEXT NOT NULL,"
+            " public_key TEXT NOT NULL,"
+            " sign_count INTEGER NOT NULL,"
+            " label TEXT NOT NULL,"
+            " created_ts INTEGER NOT NULL"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_passkeys_owner ON passkeys (owner)",
+        ),
+    ),
 )
 
 
