@@ -118,6 +118,22 @@ class RoomService:
         if self._notify is not None:
             self._notify()
 
+    async def is_shadow_banned(self, user_id: str) -> bool:
+        """Whether ``user_id`` is shadow-banned.
+
+        A shadow-banned user's content-producing actions (messages, state events,
+        redactions, invites) are silently accepted but never take effect, so the
+        user cannot tell they have been banned. Their own membership (join/leave)
+        is left alone for the same reason.
+        """
+        row = await accounts.get_user(self._db, user_id)
+        return row is not None and row.shadow_banned
+
+    @staticmethod
+    def _fake_event_id() -> str:
+        """A plausible-looking event id returned for a silently-dropped action."""
+        return "$" + secrets.token_urlsafe(24)
+
     # --- internals ---------------------------------------------------------
 
     async def _load_state(self, room_id: str) -> AuthState:
@@ -220,6 +236,10 @@ class RoomService:
 
         room_id = generate_room_id(self._server_name)
         ts = _now_ms()
+        # A shadow-banned creator still gets their (private) room so they can't tell
+        # they are banned, but their invites are dropped — otherwise the createRoom
+        # invite list would be an open bypass of the invite shadow-ban.
+        invitees = [] if await self.is_shadow_banned(creator) else (body.get("invite") or [])
 
         async with self._db.transaction():
             await store.create_room_row(self._db, room_id, creator, room_version, ts)
@@ -268,7 +288,7 @@ class RoomService:
                     content={"topic": body["topic"]}, state_key="", ts=ts,
                 )
 
-            for invitee in body.get("invite") or []:
+            for invitee in invitees:
                 await self._append(
                     room_id, etype="m.room.member", sender=creator,
                     content={"membership": "invite"}, state_key=str(invitee), ts=ts,
@@ -290,9 +310,8 @@ class RoomService:
         # Shadow-banned senders: silently accept the message (return a real-looking
         # event id, dedupe the txn) but never persist or propagate it, so it is
         # invisible to everyone else. Matches Synapse's shadow-ban semantics.
-        sender_row = await accounts.get_user(self._db, sender)
-        if sender_row is not None and sender_row.shadow_banned:
-            fake_id = "$" + secrets.token_urlsafe(24)
+        if await self.is_shadow_banned(sender):
+            fake_id = self._fake_event_id()
             await store.put_txn_event(self._db, sender, txn_id, fake_id)
             return fake_id
 
@@ -314,6 +333,9 @@ class RoomService:
         self, room_id: str, sender: str, etype: str, state_key: str, content: dict[str, Any]
     ) -> str:
         await self._require_room(room_id)
+        # Shadow-banned senders: silently no-op (state changes stay invisible).
+        if await self.is_shadow_banned(sender):
+            return self._fake_event_id()
         state = await self._load_state(room_id)
         probe = Event(
             event_id="", room_id=room_id, type=etype, sender=sender, content=content,
@@ -402,6 +424,12 @@ class RoomService:
         existing = await store.get_txn_event(self._db, sender, txn_id)
         if existing is not None:
             return existing
+
+        # Shadow-banned senders: silently no-op (the target stays un-redacted).
+        if await self.is_shadow_banned(sender):
+            fake_id = self._fake_event_id()
+            await store.put_txn_event(self._db, sender, txn_id, fake_id)
+            return fake_id
 
         target = await store.get_event(self._db, room_id, target_event_id)
         if target is None:
