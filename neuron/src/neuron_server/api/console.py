@@ -22,6 +22,7 @@ import html
 import io
 import json
 import urllib.parse
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,12 @@ def _csrf_field(request: Request) -> str:
 def _pill(on: bool, on_label: str, off_label: str) -> str:
     cls = "on" if on else "off"
     return f'<span class="pill {cls}">{_e(on_label if on else off_label)}</span>'
+
+
+def _fmt_ts(ms: int) -> str:
+    if not ms:
+        return "—"
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 # --- auth -------------------------------------------------------------------
@@ -1009,26 +1016,91 @@ async def passkey_login_verify(request: Request) -> Response:
 
 
 # --- reports ----------------------------------------------------------------
+_REPORTS_PER_PAGE = 25
+
+
 @router.get("/console/reports", include_in_schema=False)
-async def reports_page(request: Request, _: str = Depends(require_console_admin)) -> Response:
-    data = await _admin(request).list_event_reports(limit=100)
+async def reports_page(
+    request: Request, _: str = Depends(require_console_admin), offset: int = 0
+) -> Response:
+    offset = max(0, offset)
+    data = await _admin(request).list_event_reports(offset=offset, limit=_REPORTS_PER_PAGE)
+    total = int(data.get("total", 0))
     rows = ""
     for r in data.get("event_reports", []):
         rid = str(r.get("room_id", ""))
+        report_url = f'/console/reports/{_quote(str(r.get("id", "")))}'
         rows += (
-            f'<tr><td>{_e(str(r.get("user_id", "")))}</td>'
+            f'<tr><td><a href="{report_url}">{_e(str(r.get("user_id", "")))}</a></td>'
             f'<td><a href="/console/rooms/{_quote(rid)}">{_e(rid)}</a></td>'
             f'<td><code>{_e(str(r.get("event_id", "")))}</code></td>'
-            f'<td>{_e(r.get("reason") or "")}</td></tr>'
+            f'<td>{_e(r.get("reason") or "")}</td>'
+            f'<td><a class="btn sm ghost" href="{report_url}">Review</a></td></tr>'
         )
     if not rows:
-        rows = '<tr><td colspan="4" class="muted">No reports yet.</td></tr>'
+        rows = (
+            '<tr><td colspan="5"><div class="empty"><div class="big">No reports</div>'
+            "Nothing has been reported on this server.</div></td></tr>"
+        )
     body = (
-        f'<h1 class="page">Reports <span class="muted">({data.get("total", 0)})</span></h1>'
+        f'<h1 class="page">Reports <span class="muted">({total})</span></h1>'
         '<div class="panel"><table class="tbl"><thead><tr><th>Reporter</th><th>Room</th>'
-        f"<th>Event</th><th>Reason</th></tr></thead><tbody>{rows}</tbody></table></div>"
+        f"<th>Event</th><th>Reason</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
+        f'{_pager("/console/reports", offset, _REPORTS_PER_PAGE, total, "")}</div>'
     )
     return _page(request, "Reports", "/console/reports", body)
+
+
+@router.get("/console/reports/{report_id}", include_in_schema=False)
+async def report_detail(
+    request: Request, report_id: str, _: str = Depends(require_console_admin)
+) -> Response:
+    admin = _admin(request)
+    report = await admin.get_event_report(report_id)  # 404 if unknown
+    room_id = str(report.get("room_id", ""))
+    event_id = str(report.get("event_id", ""))
+    event = await admin.get_event(room_id, event_id)
+    if event is not None:
+        content = json.dumps(event.get("content", {}), indent=2, ensure_ascii=False)
+        event_html = (
+            '<dl class="kv">'
+            f'<dt>Sender</dt><dd>{_e(str(event.get("sender", "")))}</dd>'
+            f'<dt>Type</dt><dd>{_e(str(event.get("type", "")))}</dd></dl>'
+            f'<pre class="codeblock">{_e(content)}</pre>'
+        )
+    else:
+        event_html = (
+            '<p class="muted">The reported event is no longer available '
+            "(deleted, redacted, or purged).</p>"
+        )
+    score = report.get("score")
+    body = (
+        '<div class="spread"><h1 class="page">Report</h1>'
+        '<a class="btn sm ghost" href="/console/reports">&larr; All reports</a></div>'
+        f'<div class="panel"><h2>Reported by {_e(str(report.get("user_id", "")))}</h2>'
+        '<dl class="kv">'
+        f'<dt>Room</dt><dd><a href="/console/rooms/{_quote(room_id)}">{_e(room_id)}</a></dd>'
+        f'<dt>Event</dt><dd><code>{_e(event_id)}</code></dd>'
+        f'<dt>Reason</dt><dd>{_e(report.get("reason") or "—")}</dd>'
+        f'<dt>Score</dt><dd>{_e(str(score)) if score is not None else "—"}</dd>'
+        f'<dt>Received</dt><dd>{_e(_fmt_ts(int(report.get("received_ts", 0))))}</dd></dl>'
+        f'<form class="inline" method="post" action="/console/reports/{_quote(report_id)}/dismiss">'
+        f'{_csrf_field(request)}<button class="btn danger">Dismiss report</button></form></div>'
+        f'<div class="panel"><h2>Reported event</h2>{event_html}</div>'
+    )
+    return _page(request, "Report", "/console/reports", body)
+
+
+@router.post("/console/reports/{report_id}/dismiss", include_in_schema=False)
+async def report_dismiss(
+    request: Request,
+    report_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    await _admin(request).delete_event_report(report_id)
+    _flash(request, "Report dismissed.")
+    return RedirectResponse("/console/reports", status_code=303)
 
 
 # --- pagination helper ------------------------------------------------------

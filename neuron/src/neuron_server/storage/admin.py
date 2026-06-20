@@ -248,28 +248,42 @@ async def add_event_report(
     )
 
 
+_REPORT_COLS = "id, room_id, event_id, reporter, reason, score, received_ts"
+
+
+def _event_report_dict(r: Any) -> dict[str, Any]:
+    return {
+        "id": str(r[0]),
+        "room_id": str(r[1]),
+        "event_id": str(r[2]),
+        "user_id": str(r[3]),  # the reporter (Synapse Admin API naming)
+        "reason": None if r[4] is None else str(r[4]),
+        "score": None if r[5] is None else int(r[5]),
+        "received_ts": int(r[6]),
+    }
+
+
 async def list_event_reports(
     db: Database, *, offset: int = 0, limit: int = 100
 ) -> tuple[list[dict[str, Any]], int]:
     total = int(await db.fetchval("SELECT COUNT(*) FROM event_reports"))
     rows = await db.fetchall(
-        "SELECT id, room_id, event_id, reporter, reason, score, received_ts FROM event_reports"
+        f"SELECT {_REPORT_COLS} FROM event_reports"
         " ORDER BY received_ts DESC LIMIT ? OFFSET ?",
         (limit, offset),
     )
-    reports = [
-        {
-            "id": str(r[0]),
-            "room_id": str(r[1]),
-            "event_id": str(r[2]),
-            "user_id": str(r[3]),  # the reporter (Synapse Admin API naming)
-            "reason": None if r[4] is None else str(r[4]),
-            "score": None if r[5] is None else int(r[5]),
-            "received_ts": int(r[6]),
-        }
-        for r in rows
-    ]
-    return reports, total
+    return [_event_report_dict(r) for r in rows], total
+
+
+async def get_event_report(db: Database, report_id: str) -> dict[str, Any] | None:
+    rows = await db.fetchall(
+        f"SELECT {_REPORT_COLS} FROM event_reports WHERE id = ?", (report_id,)
+    )
+    return _event_report_dict(rows[0]) if rows else None
+
+
+async def delete_event_report(db: Database, report_id: str) -> None:
+    await db.execute("DELETE FROM event_reports WHERE id = ?", (report_id,))
 
 
 async def get_server_notices_room(db: Database, user_id: str) -> str | None:

@@ -321,6 +321,43 @@ async def test_event_report_capture_and_list(tmp_path: Path) -> None:
         assert body["event_reports"][0]["user_id"] == "@bob:neuron.local"
 
 
+async def test_event_report_detail_and_dismiss(tmp_path: Path) -> None:
+    async with _env(tmp_path) as env:
+        room = await _make_room_with_bob(env)
+        _, sent = await env.send(room, env.admin, "hello", "t1")
+        event_id = sent["event_id"]
+        await env.raw.post(
+            f"/_matrix/client/v3/rooms/{room}/report/{event_id}",
+            headers=_auth(env.bob),
+            json={"reason": "spam", "score": -100},
+        )
+        report_id = (
+            await env.raw.get(f"{_ADMIN}/v1/event_reports", headers=_auth(env.admin))
+        ).json()["event_reports"][0]["id"]
+
+        # Detail: a single report by id.
+        detail = await env.raw.get(
+            f"{_ADMIN}/v1/event_reports/{report_id}", headers=_auth(env.admin)
+        )
+        assert detail.status_code == 200
+        assert detail.json()["reason"] == "spam"
+        assert detail.json()["user_id"] == "@bob:neuron.local"
+
+        # Dismiss (delete) it.
+        d = await env.raw.request(
+            "DELETE", f"{_ADMIN}/v1/event_reports/{report_id}", headers=_auth(env.admin)
+        )
+        assert d.status_code == 200
+
+        # It is gone: detail 404s and the queue is empty.
+        gone = await env.raw.get(
+            f"{_ADMIN}/v1/event_reports/{report_id}", headers=_auth(env.admin)
+        )
+        assert gone.status_code == 404
+        listed = await env.raw.get(f"{_ADMIN}/v1/event_reports", headers=_auth(env.admin))
+        assert listed.json()["total"] == 0
+
+
 async def test_server_notice_reaches_user(tmp_path: Path) -> None:
     async with _env(tmp_path) as env:
         r = await env.raw.post(

@@ -297,6 +297,25 @@ class AdminService:
         )
         return {"event_reports": reports, "total": total}
 
+    async def get_event_report(self, report_id: str) -> dict[str, Any]:
+        report = await admin_store.get_event_report(self._db, report_id)
+        if report is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Unknown report")
+        return report
+
+    async def delete_event_report(self, report_id: str) -> dict[str, Any]:
+        """Dismiss (delete) a report. 404 if it doesn't exist."""
+        if await admin_store.get_event_report(self._db, report_id) is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Unknown report")
+        await admin_store.delete_event_report(self._db, report_id)
+        return {}
+
+    async def get_event(self, room_id: str, event_id: str) -> dict[str, Any] | None:
+        """The reported/inspected event in Client-Server shape, or None if we no
+        longer hold it (deleted, redacted away, or purged)."""
+        event = await rooms_store.get_event(self._db, room_id, event_id)
+        return event.client_dict() if event is not None else None
+
     async def send_server_notice(
         self,
         user_id: str,

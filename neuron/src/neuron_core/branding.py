@@ -613,4 +613,8 @@ form.inline{display:inline;margin:0}
 .pager a:hover{text-decoration:underline}
 .empty{text-align:center;color:var(--text-muted);padding:40px 20px}
 .empty .big{font-size:1.05rem;color:var(--text);margin-bottom:6px}
+.codeblock{background:var(--surface-sunken);border:1px solid var(--border);
+  border-radius:var(--radius-control);padding:12px 14px;font-family:var(--font-mono);
+  font-size:.85rem;overflow-x:auto;white-space:pre-wrap;word-break:break-word;
+  margin:.4rem 0 0;color:var(--text)}
 """

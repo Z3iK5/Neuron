@@ -308,9 +308,31 @@ async def delete_registration_token(
 
 @router.get("/v1/event_reports")
 async def event_reports(
-    who: Authenticated = Depends(require_admin), admin: AdminService = Depends(get_admin)
+    request: Request,
+    who: Authenticated = Depends(require_admin),
+    admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    return await admin.list_event_reports()
+    return await admin.list_event_reports(
+        offset=_int_param(request, "from", 0), limit=_int_param(request, "limit", 100)
+    )
+
+
+@router.get("/v1/event_reports/{report_id}")
+async def event_report(
+    report_id: str,
+    who: Authenticated = Depends(require_admin),
+    admin: AdminService = Depends(get_admin),
+) -> dict[str, Any]:
+    return await admin.get_event_report(report_id)
+
+
+@router.delete("/v1/event_reports/{report_id}")
+async def delete_event_report(
+    report_id: str,
+    who: Authenticated = Depends(require_admin),
+    admin: AdminService = Depends(get_admin),
+) -> dict[str, Any]:
+    return await admin.delete_event_report(report_id)
 
 
 @router.post("/v1/send_server_notice")
