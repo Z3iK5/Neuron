@@ -1,18 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""In-memory typing notifications (HS-7 step 6k).
+"""Typing notifications (HS-7 step 6k), backed by shared storage.
 
-Typing is ephemeral and time-limited, so it lives in memory rather than the
-database. A monotonic ``serial`` is bumped on every change so ``/sync`` can tell
-when typing changed (without it, long-polling would never settle); expired entries
-are pruned lazily on read.
-
-Single-process only — a multi-worker deployment would need shared state.
+Typing is ephemeral and time-limited, but it must be visible across workers, so
+state lives in the database rather than process memory (see
+:mod:`neuron_server.storage.typing`). A monotonic ``serial`` (the max typing
+stream id) lets ``/sync`` tell when typing changed; expired entries are filtered
+on read. The handler keeps its small method surface — ``set_typing``,
+``typing_users``, ``serial`` — so ``/sync`` and the federation/client call sites
+are unchanged apart from awaiting them.
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
+
+from neuron_server.storage import typing as typing_store
+from neuron_server.storage.database import Database
 
 # Default lifetime for a typing notification received over federation (the EDU
 # carries no timeout of its own).
@@ -24,38 +28,35 @@ def _now_ms() -> int:
 
 
 class TypingHandler:
-    """Tracks which users are currently typing in each room."""
+    """Tracks which users are currently typing in each room (DB-backed)."""
 
-    def __init__(self, notify: Callable[[], None] | None = None) -> None:
-        self._typing: dict[str, dict[str, int]] = {}  # room_id -> {user_id: expiry_ms}
-        self._serial = 0
+    def __init__(self, db: Database, notify: Callable[[], None] | None = None) -> None:
+        self._db = db
         self._notify = notify
 
-    @property
-    def serial(self) -> int:
-        return self._serial
+    async def serial(self) -> int:
+        """The monotonic typing stream position (for ``/sync`` change detection)."""
+        return await typing_store.max_typing_stream(self._db)
 
-    def set_typing(
+    async def set_typing(
         self, room_id: str, user_id: str, typing: bool, timeout_ms: int = _DEFAULT_TIMEOUT_MS
     ) -> None:
-        users = self._typing.setdefault(room_id, {})
         if typing:
-            users[user_id] = _now_ms() + max(0, timeout_ms)
+            await typing_store.set_typing(
+                self._db, room_id, user_id, _now_ms() + max(0, timeout_ms)
+            )
             changed = True
         else:
-            changed = users.pop(user_id, None) is not None
-        if changed:
-            self._serial += 1
-            if self._notify is not None:
-                self._notify()
+            # Only a transition (was typing -> not) is a change worth waking on,
+            # matching the previous in-memory semantics.
+            if await typing_store.is_typing(self._db, room_id, user_id, _now_ms()):
+                await typing_store.set_typing(self._db, room_id, user_id, 0)
+                changed = True
+            else:
+                changed = False
+        if changed and self._notify is not None:
+            self._notify()
 
-    def typing_users(self, room_id: str) -> list[str]:
-        """The currently-typing users in a room (expired entries pruned)."""
-        users = self._typing.get(room_id)
-        if not users:
-            return []
-        now = _now_ms()
-        expired = [user_id for user_id, expiry in users.items() if expiry <= now]
-        for user_id in expired:
-            del users[user_id]
-        return sorted(users)
+    async def typing_users(self, room_id: str) -> list[str]:
+        """The currently-typing users in a room (expired entries excluded)."""
+        return await typing_store.typing_users(self._db, room_id, _now_ms())

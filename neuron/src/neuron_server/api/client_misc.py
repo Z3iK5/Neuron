@@ -239,7 +239,7 @@ async def typing(
     body = await _json_body(request)
     is_typing = bool(body.get("typing"))
     timeout = int(body.get("timeout", 30000))
-    request.app.state.typing.set_typing(room_id, user_id, is_typing, timeout)
+    await request.app.state.typing.set_typing(room_id, user_id, is_typing, timeout)
     await request.app.state.federation_sender.send_typing(room_id, user_id, is_typing)
     return {}
 

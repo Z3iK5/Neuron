@@ -12,10 +12,15 @@ in the block runs on the same connection — the connection-affinity the storage
 layer needs, kept entirely internal so call sites pass ``db`` around unchanged.
 
 The pool size defaults to **1**, which keeps writes serialized exactly like the
-original single-connection backend. That default is deliberate: stream-id
-allocation still uses ``MAX(col)+1``, which only stays race-free while a single
-connection is in flight. Raise the pool size for real concurrency *after* IDs
-come from database sequences.
+original single-connection backend. **Keep it at 1 for now.** Stream ids come
+from sequences (so concurrent connections no longer *collide* on an id), but
+``/sync`` still derives each stream's high-water mark from ``MAX(col)`` on a
+separate READ COMMITTED connection. With pool_size>1 (or a second worker process)
+a sequence id can be allocated before, yet committed after, a higher one; a
+``/sync`` that reads ``MAX`` in that window advances its token past the
+not-yet-committed row and then never returns it — a silent lost event. Raising
+the pool / running multiple workers is safe only once a multi-writer position
+tracker (contiguous "persisted upto") replaces the ``MAX``-based watermark.
 """
 
 from __future__ import annotations
@@ -67,6 +72,17 @@ class PostgresDatabase(Database):
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
+
+    async def acquire_listener(self) -> Any:
+        """Open a dedicated connection *outside* the pool, for ``LISTEN``.
+
+        A ``LISTEN`` connection blocks waiting for notifications, so it must not be
+        one of the pool's connections (with the default ``pool_size=1`` that would
+        starve every query). The caller owns this connection and must close it.
+        """
+        import asyncpg
+
+        return await asyncpg.connect(self._dsn)
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[Any]:

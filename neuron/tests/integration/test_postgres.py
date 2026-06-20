@@ -88,6 +88,106 @@ async def test_core_flow_on_postgres() -> None:
         assert ver["server_version"].startswith("Neuron ")
 
 
+@contextlib.asynccontextmanager
+async def _two_workers(
+    pool_size: int = 4,
+) -> AsyncIterator[tuple[httpx.AsyncClient, httpx.AsyncClient]]:
+    """Two app instances sharing one Postgres DB — a faithful two-worker setup.
+
+    Each gets its own ``BroadcastNotifier`` and dedicated ``LISTEN`` connection, so
+    a wake published by one must reach a ``/sync`` parked on the other only via
+    real Postgres ``NOTIFY`` (not any in-process shortcut).
+    """
+    await _reset_schema()
+
+    def _mk() -> object:
+        return create_app(
+            NeuronServerSettings(
+                name="pg.test", database_url=_PG, db_pool_size=pool_size, first_user_admin=True
+            )
+        )
+
+    app_a, app_b = _mk(), _mk()
+    async with app_a.router.lifespan_context(app_a), app_b.router.lifespan_context(app_b):
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app_a), base_url="http://a.pg.test"
+            ) as a,
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app_b), base_url="http://b.pg.test"
+            ) as b,
+        ):
+            yield a, b
+
+
+def _typing_users(sync_json: dict, room_id: str) -> list[str]:
+    room = sync_json["rooms"]["join"].get(room_id, {})
+    for event in room.get("ephemeral", {}).get("events", []):
+        if event["type"] == "m.typing":
+            return event["content"].get("user_ids", [])
+    return []
+
+
+async def test_cross_worker_sync_wakeup() -> None:
+    """A send on worker A must wake a /sync long-poll parked on worker B, via
+    Postgres LISTEN/NOTIFY — otherwise B only returns when its own timeout fires."""
+    async with _two_workers() as (a, b):
+        h = {"Authorization": f"Bearer {await _register(a, 'alice')}"}
+        room = (
+            await a.post(f"{_CS}/createRoom", headers=h, json={"preset": "public_chat"})
+        ).json()["room_id"]
+        since = (await b.get(f"{_CS}/sync?timeout=0", headers=h)).json()["next_batch"]
+
+        # Park a 30s long-poll on B, then send from A. With cross-worker wakeup it
+        # returns near-instantly; without it, it would block the full 30s (so the
+        # 10s wait_for below would time out and fail the test).
+        sync_task = asyncio.create_task(
+            b.get(f"{_CS}/sync?since={since}&timeout=30000", headers=h)
+        )
+        await asyncio.sleep(0.3)
+        sent = await a.put(
+            f"{_CS}/rooms/{room}/send/m.room.message/t1",
+            headers=h,
+            json={"msgtype": "m.text", "body": "ping"},
+        )
+        assert sent.status_code == 200
+        resp = await asyncio.wait_for(sync_task, timeout=10)
+
+        body = resp.json()
+        assert room in body["rooms"]["join"]
+        bodies = [
+            e.get("content", {}).get("body")
+            for e in body["rooms"]["join"][room]["timeline"]["events"]
+        ]
+        assert "ping" in bodies
+
+
+async def test_cross_worker_typing_visible() -> None:
+    """Typing set on worker A is visible to a /sync on worker B (DB-backed typing)."""
+    async with _two_workers() as (a, b):
+        h = {"Authorization": f"Bearer {await _register(a, 'alice')}"}
+        room = (
+            await a.post(f"{_CS}/createRoom", headers=h, json={"preset": "public_chat"})
+        ).json()["room_id"]
+
+        await a.put(
+            f"{_CS}/rooms/{room}/typing/@alice:pg.test",
+            headers=h,
+            json={"typing": True, "timeout": 30000},
+        )
+        sync = (await b.get(f"{_CS}/sync", headers=h)).json()
+        assert "@alice:pg.test" in _typing_users(sync, room)
+
+        # Stopping on A clears it for B too.
+        await a.put(
+            f"{_CS}/rooms/{room}/typing/@alice:pg.test",
+            headers=h,
+            json={"typing": False},
+        )
+        sync2 = (await b.get(f"{_CS}/sync", headers=h)).json()
+        assert "@alice:pg.test" not in _typing_users(sync2, room)
+
+
 async def test_concurrent_sends_get_distinct_stream_ids() -> None:
     """Concurrent transactions across pool connections must each get a distinct
     stream id from the sequence; the old MAX+1 allocation collided on the unique

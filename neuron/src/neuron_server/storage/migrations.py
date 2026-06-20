@@ -361,6 +361,24 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX IF NOT EXISTS idx_passkeys_owner ON passkeys (owner)",
         ),
     ),
+    Migration(
+        version=15,
+        name="typing",
+        # Cross-process typing state. One row per (room, user) ever seen; rows are
+        # UPSERTed (expiry_ms in the past = not typing) and never deleted, so
+        # MAX(stream_id) is a monotonic serial that /sync can compare across
+        # workers. A worker shows a user as typing while expiry_ms > now.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS typing ("
+            " room_id TEXT NOT NULL,"
+            " user_id TEXT NOT NULL,"
+            " expiry_ms BIGINT NOT NULL,"
+            " stream_id BIGINT NOT NULL,"
+            " PRIMARY KEY (room_id, user_id)"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_typing_room ON typing (room_id, expiry_ms)",
+        ),
+    ),
 )
 
 

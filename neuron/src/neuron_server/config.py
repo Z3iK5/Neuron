@@ -53,11 +53,22 @@ class NeuronServerSettings(BaseSettings):
         description="Async database URL (sqlite:///... or postgresql://...).",
     )
     # PostgreSQL connection-pool size (ignored for SQLite). Default 1 keeps writes
-    # serialized — today's single-connection behaviour. Leave it at 1 until stream
-    # ids come from database sequences instead of MAX(col)+1, which races across
-    # concurrent connections; raising it before then risks duplicate stream ids.
+    # serialized — today's single-connection behaviour. KEEP IT AT 1: stream ids
+    # now come from sequences (no id *collisions*), but /sync still uses a
+    # MAX(col)-based watermark that can skip an event committed out of sequence
+    # order across connections (a silent lost event). pool_size>1 / multiple
+    # workers is safe only once a multi-writer position tracker replaces it.
     db_pool_size: int = Field(
         default=1, gt=0, description="PostgreSQL connection pool size (SQLite ignores this)."
+    )
+    # How ``/sync`` long-polls are woken across worker processes. ``auto`` (the
+    # default) stays in-process for SQLite and uses Postgres LISTEN/NOTIFY for a
+    # postgresql:// URL — so a wake on one worker reaches syncs parked on another.
+    # ``inprocess`` forces the single-process notifier; ``pg`` requires Postgres;
+    # ``redis`` is reserved for a future Redis transport.
+    notifier_backend: str = Field(
+        default="auto",
+        description="Cross-worker /sync wake backend: auto | inprocess | pg | redis.",
     )
 
     # Whether open registration (POST /register) is allowed. Convenient for a

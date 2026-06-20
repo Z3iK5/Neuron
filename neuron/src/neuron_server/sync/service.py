@@ -25,7 +25,7 @@ from neuron_server.storage import invites as invites_store
 from neuron_server.storage import receipts as receipts_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
-from neuron_server.sync.notifier import StreamNotifier
+from neuron_server.sync.notifier import Notifier
 from neuron_server.typing_state import TypingHandler
 
 _TIMELINE_LIMIT = 20
@@ -60,7 +60,7 @@ class SyncService:
     """Produces ``/sync`` responses for clients and bots."""
 
     def __init__(
-        self, db: Database, notifier: StreamNotifier, typing: TypingHandler | None = None
+        self, db: Database, notifier: Notifier, typing: TypingHandler | None = None
     ) -> None:
         self._db = db
         self._notifier = notifier
@@ -113,7 +113,7 @@ class SyncService:
         changed = False
 
         new_receipts = await receipts_store.max_receipt_stream(self._db)
-        new_typing = self._typing.serial if self._typing is not None else 0
+        new_typing = await self._typing.serial() if self._typing is not None else 0
         typing_changed = new_typing > token.typing
 
         for room_id, membership in memberships:
@@ -124,7 +124,7 @@ class SyncService:
                 )
                 if receipt_event is not None:
                     section["ephemeral"]["events"].append(receipt_event)
-                typing_event = self._typing_event(room_id)
+                typing_event = await self._typing_event(room_id)
                 if typing_event is not None:
                     section["ephemeral"]["events"].append(typing_event)
                 if initial or room_changed or receipts_changed or typing_changed:
@@ -229,11 +229,11 @@ class SyncService:
         }
         return section, room_changed
 
-    def _typing_event(self, room_id: str) -> dict[str, Any] | None:
+    async def _typing_event(self, room_id: str) -> dict[str, Any] | None:
         """The room's ``m.typing`` ephemeral event, or ``None`` if nobody is typing."""
         if self._typing is None:
             return None
-        users = self._typing.typing_users(room_id)
+        users = await self._typing.typing_users(room_id)
         if not users:
             return None
         return {"type": "m.typing", "content": {"user_ids": users}}
