@@ -95,7 +95,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        db = connect_database(settings.database_url)
+        db = connect_database(settings.database_url, pool_size=settings.db_pool_size)
         await db.connect()
         newly = await run_migrations(db)
         log.info("database ready", extra={"newly_applied_migrations": newly})

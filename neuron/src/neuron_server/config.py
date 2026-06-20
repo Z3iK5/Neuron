@@ -52,6 +52,13 @@ class NeuronServerSettings(BaseSettings):
         default="sqlite:///./neuron_server.db",
         description="Async database URL (sqlite:///... or postgresql://...).",
     )
+    # PostgreSQL connection-pool size (ignored for SQLite). Default 1 keeps writes
+    # serialized — today's single-connection behaviour. Leave it at 1 until stream
+    # ids come from database sequences instead of MAX(col)+1, which races across
+    # concurrent connections; raising it before then risks duplicate stream ids.
+    db_pool_size: int = Field(
+        default=1, gt=0, description="PostgreSQL connection pool size (SQLite ignores this)."
+    )
 
     # Whether open registration (POST /register) is allowed. Convenient for a
     # fresh MVP server so you can create the first account; gate this in

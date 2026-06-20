@@ -6,9 +6,12 @@ A tiny interface over the two backends we support — **SQLite** (development) a
 small API. SQL is written with ``?`` placeholders; each backend adapts it to its
 own paramstyle (PostgreSQL's ``$1``/``$2``).
 
-This is deliberately minimal for the HS-0 foundation: a single connection per
-``Database`` (connection pooling is a later performance concern, HS-8). Concrete
-implementations live in :mod:`neuron_server.storage.sqlite` and
+SQLite uses a single connection (correct for the embedded/desktop default);
+PostgreSQL uses an ``asyncpg`` pool whose size is configurable (default 1, which
+matches the original serialized behaviour). Connection-affinity within a
+:meth:`Database.transaction` is handled internally by each backend, so the
+storage layer just passes a ``Database`` around and never sees connections.
+Concrete implementations live in :mod:`neuron_server.storage.sqlite` and
 :mod:`neuron_server.storage.postgres`.
 """
 
@@ -48,12 +51,13 @@ class Database(abc.ABC):
         """An async context manager that commits on success and rolls back on error."""
 
 
-def connect_database(url: str) -> Database:
+def connect_database(url: str, *, pool_size: int = 1) -> Database:
     """Build (but do not yet connect) a :class:`Database` for the given URL.
 
     Supports ``sqlite:///...`` and ``postgresql://...`` / ``postgres://...``.
     The driver is imported lazily by the concrete class, so only the backend you
-    actually use needs its driver installed.
+    actually use needs its driver installed. ``pool_size`` applies to PostgreSQL
+    only (SQLite is always single-connection).
     """
     if url.startswith("sqlite"):
         from neuron_server.storage.sqlite import SQLiteDatabase
@@ -62,7 +66,7 @@ def connect_database(url: str) -> Database:
     if url.startswith(("postgresql://", "postgres://")):
         from neuron_server.storage.postgres import PostgresDatabase
 
-        return PostgresDatabase(url)
+        return PostgresDatabase(url, pool_size=pool_size)
     raise ValueError(f"Unsupported database URL: {url!r}")
 
 

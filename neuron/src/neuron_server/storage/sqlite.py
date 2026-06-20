@@ -32,6 +32,9 @@ class SQLiteDatabase(Database):
         # Autocommit mode: no implicit transactions; we manage them ourselves.
         self._conn = await aiosqlite.connect(self._path, isolation_level=None)
         await self._conn.execute("PRAGMA foreign_keys = ON")
+        # WAL lets readers run concurrently with the single writer (a no-op for
+        # :memory: databases, which ignore it and stay in "memory" journal mode).
+        await self._conn.execute("PRAGMA journal_mode = WAL")
 
     async def disconnect(self) -> None:
         if self._conn is not None:

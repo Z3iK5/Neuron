@@ -6,8 +6,13 @@ statements. :func:`run_migrations` applies any that haven't run yet (tracked in 
 ``schema_migrations`` table) and is **idempotent** — safe to run on every start.
 
 SQL is written portably (``?`` placeholders, ``IF NOT EXISTS``, ``ON CONFLICT``)
-so the same statements work on both SQLite and PostgreSQL. Later phases append new
-migrations; we never edit a migration that has shipped.
+so the same statements work on both SQLite and PostgreSQL. Integer columns are
+declared ``BIGINT`` because PostgreSQL's ``INTEGER`` is only 32 bits — too small
+for millisecond timestamps and stream positions — whereas SQLite treats ``BIGINT``
+as the same flexible-width INTEGER affinity, so existing SQLite databases are
+unaffected. Later phases append new migrations; we never edit a *shipped* migration
+in a way that changes an already-created table (these type names only take effect
+on a fresh ``CREATE TABLE``).
 """
 
 from __future__ import annotations
@@ -49,16 +54,16 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE TABLE IF NOT EXISTS users ("
             " name TEXT PRIMARY KEY,"
             " password_hash TEXT,"
-            " admin INTEGER NOT NULL DEFAULT 0,"
-            " deactivated INTEGER NOT NULL DEFAULT 0,"
-            " created_ts INTEGER NOT NULL"
+            " admin BIGINT NOT NULL DEFAULT 0,"
+            " deactivated BIGINT NOT NULL DEFAULT 0,"
+            " created_ts BIGINT NOT NULL"
             ")",
             # A user's logged-in devices.
             "CREATE TABLE IF NOT EXISTS devices ("
             " user_id TEXT NOT NULL,"
             " device_id TEXT NOT NULL,"
             " display_name TEXT,"
-            " created_ts INTEGER NOT NULL,"
+            " created_ts BIGINT NOT NULL,"
             " PRIMARY KEY (user_id, device_id)"
             ")",
             # Bearer access tokens, each bound to a (user, device).
@@ -66,7 +71,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             " token TEXT PRIMARY KEY,"
             " user_id TEXT NOT NULL,"
             " device_id TEXT NOT NULL,"
-            " created_ts INTEGER NOT NULL"
+            " created_ts BIGINT NOT NULL"
             ")",
             "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (user_id)",
             "CREATE INDEX IF NOT EXISTS idx_tokens_user ON access_tokens (user_id)",
@@ -80,7 +85,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             " room_id TEXT PRIMARY KEY,"
             " creator TEXT NOT NULL,"
             " room_version TEXT NOT NULL,"
-            " created_ts INTEGER NOT NULL"
+            " created_ts BIGINT NOT NULL"
             ")",
             "CREATE TABLE IF NOT EXISTS events ("
             " event_id TEXT PRIMARY KEY,"
@@ -89,9 +94,9 @@ MIGRATIONS: tuple[Migration, ...] = (
             " state_key TEXT,"
             " sender TEXT NOT NULL,"
             " content TEXT NOT NULL,"
-            " origin_server_ts INTEGER NOT NULL,"
-            " depth INTEGER NOT NULL,"
-            " stream_ordering INTEGER NOT NULL,"
+            " origin_server_ts BIGINT NOT NULL,"
+            " depth BIGINT NOT NULL,"
+            " stream_ordering BIGINT NOT NULL,"
             " unsigned TEXT,"
             " redacts TEXT"
             ")",
@@ -128,9 +133,9 @@ MIGRATIONS: tuple[Migration, ...] = (
             " media_id TEXT PRIMARY KEY,"
             " content_type TEXT NOT NULL,"
             " upload_name TEXT,"
-            " size INTEGER NOT NULL,"
+            " size BIGINT NOT NULL,"
             " uploader TEXT NOT NULL,"
-            " created_ts INTEGER NOT NULL"
+            " created_ts BIGINT NOT NULL"
             ")",
         ),
     ),
@@ -157,7 +162,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             " algorithm TEXT NOT NULL,"
             " key_alg_id TEXT NOT NULL,"
             " key_json TEXT NOT NULL,"
-            " used INTEGER NOT NULL DEFAULT 0,"
+            " used BIGINT NOT NULL DEFAULT 0,"
             " PRIMARY KEY (user_id, device_id, algorithm)"
             ")",
             "CREATE TABLE IF NOT EXISTS cross_signing_keys ("
@@ -167,7 +172,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             " PRIMARY KEY (user_id, key_type)"
             ")",
             "CREATE TABLE IF NOT EXISTS to_device_messages ("
-            " stream_id INTEGER PRIMARY KEY,"
+            " stream_id BIGINT PRIMARY KEY,"
             " target_user TEXT NOT NULL,"
             " target_device TEXT NOT NULL,"
             " sender TEXT NOT NULL,"
@@ -177,7 +182,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX IF NOT EXISTS idx_to_device_target"
             " ON to_device_messages (target_user, target_device, stream_id)",
             "CREATE TABLE IF NOT EXISTS device_list_changes ("
-            " stream_id INTEGER PRIMARY KEY,"
+            " stream_id BIGINT PRIMARY KEY,"
             " user_id TEXT NOT NULL"
             ")",
         ),
@@ -206,10 +211,10 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
             "CREATE TABLE IF NOT EXISTS registration_tokens ("
             " token TEXT PRIMARY KEY,"
-            " uses_allowed INTEGER,"
-            " pending INTEGER NOT NULL DEFAULT 0,"
-            " completed INTEGER NOT NULL DEFAULT 0,"
-            " expiry_time INTEGER"
+            " uses_allowed BIGINT,"
+            " pending BIGINT NOT NULL DEFAULT 0,"
+            " completed BIGINT NOT NULL DEFAULT 0,"
+            " expiry_time BIGINT"
             ")",
         ),
     ),
@@ -230,7 +235,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             " server_name TEXT NOT NULL,"
             " key_id TEXT NOT NULL,"
             " verify_key TEXT NOT NULL,"
-            " valid_until_ts INTEGER NOT NULL,"
+            " valid_until_ts BIGINT NOT NULL,"
             " PRIMARY KEY (server_name, key_id)"
             ")",
         ),
@@ -255,7 +260,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         name="federated_invite_stream",
         # A stream position so /sync can tell which invites are new.
         statements=(
-            "ALTER TABLE federated_invites ADD COLUMN stream_id INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE federated_invites ADD COLUMN stream_id BIGINT NOT NULL DEFAULT 0",
         ),
     ),
     Migration(
@@ -269,8 +274,8 @@ MIGRATIONS: tuple[Migration, ...] = (
             " user_id TEXT NOT NULL,"
             " receipt_type TEXT NOT NULL,"
             " event_id TEXT NOT NULL,"
-            " ts INTEGER NOT NULL,"
-            " stream_id INTEGER NOT NULL,"
+            " ts BIGINT NOT NULL,"
+            " stream_id BIGINT NOT NULL,"
             " PRIMARY KEY (room_id, user_id, receipt_type)"
             ")",
         ),
@@ -281,7 +286,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         # Events that failed to send to a destination server, queued for retry.
         statements=(
             "CREATE TABLE IF NOT EXISTS federation_outbox ("
-            " stream_id INTEGER PRIMARY KEY,"
+            " stream_id BIGINT PRIMARY KEY,"
             " destination TEXT NOT NULL,"
             " pdu_json TEXT NOT NULL"
             ")",
@@ -297,12 +302,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         # per-user server-notices room mapping. (ADD COLUMN is portable across the
         # SQLite/PostgreSQL backends, as in earlier migrations.)
         statements=(
-            "ALTER TABLE users ADD COLUMN shadow_banned INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN shadow_banned BIGINT NOT NULL DEFAULT 0",
             # Rooms an operator has blocked on this server (joins/sends are refused).
             "CREATE TABLE IF NOT EXISTS blocked_rooms ("
             " room_id TEXT PRIMARY KEY,"
             " blocked_by TEXT,"
-            " blocked_ts INTEGER NOT NULL"
+            " blocked_ts BIGINT NOT NULL"
             ")",
             # Result of an admin room deletion/purge (done synchronously here).
             "CREATE TABLE IF NOT EXISTS room_deletions ("
@@ -310,16 +315,16 @@ MIGRATIONS: tuple[Migration, ...] = (
             " room_id TEXT NOT NULL,"
             " status TEXT NOT NULL,"
             " kicked_users TEXT NOT NULL,"
-            " created_ts INTEGER NOT NULL"
+            " created_ts BIGINT NOT NULL"
             ")",
             # Result of an admin bulk redaction of a user's events.
             "CREATE TABLE IF NOT EXISTS room_redactions ("
             " redact_id TEXT PRIMARY KEY,"
             " user_id TEXT NOT NULL,"
             " status TEXT NOT NULL,"
-            " total INTEGER NOT NULL,"
+            " total BIGINT NOT NULL,"
             " failed TEXT NOT NULL,"
-            " created_ts INTEGER NOT NULL"
+            " created_ts BIGINT NOT NULL"
             ")",
             # Abuse reports about events, submitted by users; listed in the console.
             "CREATE TABLE IF NOT EXISTS event_reports ("
@@ -328,8 +333,8 @@ MIGRATIONS: tuple[Migration, ...] = (
             " event_id TEXT NOT NULL,"
             " reporter TEXT NOT NULL,"
             " reason TEXT,"
-            " score INTEGER,"
-            " received_ts INTEGER NOT NULL"
+            " score BIGINT,"
+            " received_ts BIGINT NOT NULL"
             ")",
             "CREATE INDEX IF NOT EXISTS idx_event_reports_ts"
             " ON event_reports (received_ts)",
@@ -349,9 +354,9 @@ MIGRATIONS: tuple[Migration, ...] = (
             " credential_id TEXT PRIMARY KEY,"
             " owner TEXT NOT NULL,"
             " public_key TEXT NOT NULL,"
-            " sign_count INTEGER NOT NULL,"
+            " sign_count BIGINT NOT NULL,"
             " label TEXT NOT NULL,"
-            " created_ts INTEGER NOT NULL"
+            " created_ts BIGINT NOT NULL"
             ")",
             "CREATE INDEX IF NOT EXISTS idx_passkeys_owner ON passkeys (owner)",
         ),
@@ -367,7 +372,7 @@ async def run_migrations(db: Database, migrations: tuple[Migration, ...] = MIGRA
     """
     await db.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations ("
-        " version INTEGER PRIMARY KEY,"
+        " version BIGINT PRIMARY KEY,"
         " name TEXT NOT NULL,"
         " applied_at TEXT NOT NULL"
         ")"
