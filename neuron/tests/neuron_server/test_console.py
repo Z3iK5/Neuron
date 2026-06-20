@@ -237,6 +237,46 @@ def test_logout_clears_the_session(tmp_path: Path) -> None:
         assert client.get("/console", follow_redirects=False).status_code == 303
 
 
+def test_bulk_deactivate_users(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "bob", "bob-password-12")
+        _signup(client, "carol", "carol-password-12")
+        _console_login(client, "admin", "s3cret-password")
+
+        token = _csrf(client.get("/console/users").text)
+        resp = client.post(
+            "/console/users/bulk",
+            data={
+                "action": "deactivate",
+                "csrf_token": token,
+                "user_ids": ["@bob:neuron.local", "@carol:neuron.local"],
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+        page = client.get("/console/users").text
+        assert "Deactivated 2 user(s)." in page
+        # admin stays active; only bob + carol show the deactivated pill.
+        assert page.count(">deactivated</span>") == 2
+
+
+def test_bulk_action_requires_csrf(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "bob", "bob-password-12")
+        _console_login(client, "admin", "s3cret-password")
+        resp = client.post(
+            "/console/users/bulk",
+            data={"action": "deactivate", "user_ids": ["@bob:neuron.local"]},
+            follow_redirects=False,
+        )
+        # Missing CSRF token -> the request is rejected, not processed.
+        assert resp.status_code != 303
+        assert ">deactivated</span>" not in client.get("/console/users").text
+
+
 def _client_reuse(existing: TestClient) -> TestClient:
     """A second TestClient over the SAME app (fresh cookies) — for multi-user tests."""
     return TestClient(existing.app)
