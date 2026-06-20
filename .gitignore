@@ -1,0 +1,20 @@
+# Repository-root ignores (apply across the whole repo).
+# Package- and tooling-specific ignores live in neuron/.gitignore.
+
+# macOS finder / OS metadata — never commit these anywhere in the tree.
+.DS_Store
+.DS_Store?
+**/.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows OS metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp

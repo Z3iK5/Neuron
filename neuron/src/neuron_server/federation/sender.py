@@ -41,9 +41,19 @@ class FederationSender:
         }
 
     async def _send_transaction(
-        self, room_id: str, *, pdus: list[dict[str, Any]], edus: list[dict[str, Any]]
+        self,
+        room_id: str,
+        *,
+        pdus: list[dict[str, Any]],
+        edus: list[dict[str, Any]],
+        extra_destinations: set[str] | None = None,
     ) -> None:
         destinations = await self.remote_destinations(room_id)
+        if extra_destinations:
+            # A membership removal (kick/ban/leave) drops the affected server from
+            # the room's joined members, so the caller passes a pre-change snapshot
+            # to make sure that server still receives the event.
+            destinations |= {d for d in extra_destinations if d != self._server_name}
         for server in destinations:
             await self._deliver(server, new_pdus=pdus, edus=edus)
 
@@ -88,8 +98,12 @@ class FederationSender:
         for server in await outbox_store.destinations_with_pending(self._db):
             await self.retry(server)
 
-    async def send_event(self, room_id: str, pdu: dict[str, Any]) -> None:
-        await self._send_transaction(room_id, pdus=[pdu], edus=[])
+    async def send_event(
+        self, room_id: str, pdu: dict[str, Any], *, extra_destinations: set[str] | None = None
+    ) -> None:
+        await self._send_transaction(
+            room_id, pdus=[pdu], edus=[], extra_destinations=extra_destinations
+        )
 
     async def send_receipt(
         self, room_id: str, user_id: str, receipt_type: str, event_id: str, ts: int
