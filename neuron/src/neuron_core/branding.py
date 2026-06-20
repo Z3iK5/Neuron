@@ -203,19 +203,31 @@ def _connect_html(server_name: str) -> str:
 </div>"""
 
 
-# Runs in <head> before paint: applies the saved theme (or the OS preference on
-# first visit) to <html data-theme> so the admin console renders light/dark with
-# no flash; ``neuronToggleTheme`` is the topbar toggle handler. No persisted theme
-# leaves landing/auth pages on their fixed brand colours (they don't read tokens).
-_THEME_SCRIPT = (
-    "<script>(function(){try{var t=localStorage.getItem('neuron-theme');"
+# Runs in <head> before paint: applies the saved theme (or OS preference on first
+# visit) and the saved side-nav collapse state to <html>, so the admin console
+# renders light/dark and expanded/collapsed with no flash. The toggle handlers
+# (theme, nav collapse / mobile drawer) are defined here too. Harmless on the
+# landing/auth pages, which keep their fixed brand colours (they read no tokens).
+_HEAD_SCRIPT = (
+    "<script>(function(){try{var h=document.documentElement,"
+    "t=localStorage.getItem('neuron-theme');"
     "if(t!=='light'&&t!=='dark')t=window.matchMedia&&"
     "window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';"
-    "document.documentElement.setAttribute('data-theme',t);}catch(e){}})();"
+    "h.setAttribute('data-theme',t);"
+    "if(localStorage.getItem('neuron-nav')==='collapsed')"
+    "h.setAttribute('data-nav','collapsed');}catch(e){}})();"
     "function neuronToggleTheme(){var e=document.documentElement,"
     "n=e.getAttribute('data-theme')==='dark'?'light':'dark';"
     "e.setAttribute('data-theme',n);"
-    "try{localStorage.setItem('neuron-theme',n);}catch(_){}}</script>"
+    "try{localStorage.setItem('neuron-theme',n);}catch(_){}}"
+    "function neuronToggleNav(){var e=document.documentElement;"
+    "if(window.innerWidth<=960){e.setAttribute('data-drawer',"
+    "e.getAttribute('data-drawer')==='open'?'closed':'open');}"
+    "else{var c=e.getAttribute('data-nav')==='collapsed'?'expanded':'collapsed';"
+    "e.setAttribute('data-nav',c);"
+    "try{localStorage.setItem('neuron-nav',c);}catch(_){}}}"
+    "function neuronCloseDrawer(){"
+    "document.documentElement.setAttribute('data-drawer','closed');}</script>"
 )
 
 
@@ -227,7 +239,7 @@ def _shell(title: str, inner: str, *, body_class: str = "") -> str:
         f"<title>{html.escape(title)}</title>"
         f'<meta name="description" content="{DESCRIPTION}">'
         f'<link rel="icon" href="{favicon_data_uri()}">{FONTS_LINK}'
-        f"<style>{_PAGE_CSS}</style>{_THEME_SCRIPT}</head>"
+        f"<style>{_PAGE_CSS}</style>{_HEAD_SCRIPT}</head>"
         f"<body{cls}>{inner}</body></html>"
     )
 
@@ -260,14 +272,40 @@ _THEME_TOGGLE = (
 )
 
 
-# The console's navigation, as (href, label) pairs. ``active`` matches the href.
-_CONSOLE_NAV: tuple[tuple[str, str], ...] = (
-    ("/console", "Overview"),
-    ("/console/users", "Users"),
-    ("/console/rooms", "Rooms"),
-    ("/console/invites", "Invites"),
-    ("/console/reports", "Reports"),
-    ("/console/passkeys", "Passkeys"),
+def _icon(paths: str) -> str:
+    """Wrap inner SVG ``paths`` in a 24x24 line-icon (generic geometry)."""
+    return (
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"'
+        f' stroke-linecap="round" stroke-linejoin="round">{paths}</svg>'
+    )
+
+
+_HAMBURGER = _icon(
+    '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/>'
+    '<line x1="3" y1="18" x2="21" y2="18"/>'
+)
+
+# Side-nav: (href, label, icon). ``active`` matches the href.
+_CONSOLE_NAV: tuple[tuple[str, str, str], ...] = (
+    ("/console", "Overview", _icon(
+        '<rect x="3" y="3" width="7" height="7" rx="1"/>'
+        '<rect x="14" y="3" width="7" height="7" rx="1"/>'
+        '<rect x="14" y="14" width="7" height="7" rx="1"/>'
+        '<rect x="3" y="14" width="7" height="7" rx="1"/>')),
+    ("/console/users", "Users", _icon(
+        '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>'
+        '<circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/>'
+        '<path d="M16 3.13a4 4 0 0 1 0 7.75"/>')),
+    ("/console/rooms", "Rooms", _icon(
+        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>')),
+    ("/console/invites", "Invites", _icon(
+        '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>')),
+    ("/console/reports", "Reports", _icon(
+        '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>'
+        '<line x1="4" y1="22" x2="4" y2="15"/>')),
+    ("/console/passkeys", "Passkeys", _icon(
+        '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/>'
+        '<path d="m15.5 7.5 3 3L22 7l-3-3"/>')),
 )
 
 
@@ -322,22 +360,30 @@ def admin_shell(
     server_name: str,
     flash: str | None = None,
 ) -> str:
-    """Wrap console page ``body`` in the branded top-bar + content layout."""
-    def _nav_link(href: str, label: str) -> str:
-        cls = ' class="active"' if href == active else ""
-        return f'<a href="{href}"{cls}>{label}</a>'
+    """Wrap console page ``body`` in the branded app-bar + side-nav + content layout."""
+    def _nav_link(href: str, label: str, icon: str) -> str:
+        cls = "navitem active" if href == active else "navitem"
+        return (
+            f'<a class="{cls}" href="{href}" title="{html.escape(label)}">'
+            f'<span class="ico">{icon}</span><span class="lbl">{label}</span></a>'
+        )
 
-    nav = "".join(_nav_link(href, label) for href, label in _CONSOLE_NAV)
+    nav = "".join(_nav_link(href, label, icon) for href, label, icon in _CONSOLE_NAV)
     flash_html = f'<div class="flash">{html.escape(flash)}</div>' if flash else ""
     inner = (
-        f'<header class="topbar"><div class="brand">'
-        f'<div class="mark">{mark_svg(WHITE)}</div><div class="name">{NAME}</div></div>'
-        f"<nav>{nav}</nav>"
+        '<header class="appbar">'
+        '<button type="button" class="hamburger" onclick="neuronToggleNav()"'
+        f' aria-label="Toggle navigation">{_HAMBURGER}</button>'
+        f'<a class="brand" href="/console"><span class="mark">{mark_svg(WHITE)}</span>'
+        f'<span class="name">{NAME}</span></a>'
+        '<span class="appbar-spacer"></span>'
         f"{_THEME_TOGGLE}"
-        f'<a class="host-tag" href="/console/settings" title="Server settings">'
+        '<a class="host-tag" href="/console/settings" title="Server settings">'
         f"{html.escape(server_name)}</a>"
-        f'<a class="out" href="/console/logout">Sign out</a></header>'
-        f'<main class="wrap">{flash_html}{body}</main>'
+        '<a class="out" href="/console/logout">Sign out</a></header>'
+        f'<div class="layout"><nav class="sidenav">{nav}</nav>'
+        '<div class="scrim" onclick="neuronCloseDrawer()"></div>'
+        f'<main class="content"><div class="wrap">{flash_html}{body}</div></main></div>'
     )
     return _shell(f"{title} · {NAME}", inner, body_class="admin")
 
@@ -351,6 +397,7 @@ _PAGE_CSS = """
   --font-sans:'Jost',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   --radius-card:14px;--radius-control:9px;
+  --appbar-h:54px;--nav-w:230px;--nav-w-collapsed:62px;--dur:.18s;
   --bg:#E4E2DC;--surface:#fff;--surface-sunken:#ECEAE4;
   --appbar-bg:#0E2740;--appbar-fg:#fff;
   --nav-fg:#B7C6D6;--nav-fg-hover:#fff;--nav-active-bg:#1C3D5F;--nav-active-fg:#fff;
@@ -360,7 +407,7 @@ _PAGE_CSS = """
   --success:#1a6b3a;--success-bg:#e8f3ec;--success-bd:#b9dcc6;
   --warning:#946200;--warning-bg:#fdf3e2;--error:#b00020;--error-bg:#fdecef;
   --danger:#b00020;  /* danger button bg — readable with white text in both themes */
-  --shadow-1:0 1px 3px rgba(20,48,77,.06);
+  --shadow-1:0 1px 3px rgba(20,48,77,.06);--shadow-8:0 6px 24px rgba(14,39,64,.18);
 }
 [data-theme="dark"]{
   --bg:#0E1A26;--surface:#15273A;--surface-sunken:#0B1620;
@@ -374,7 +421,7 @@ _PAGE_CSS = """
   --success:#6FD79A;--success-bg:rgba(26,107,58,.22);--success-bd:rgba(111,215,154,.3);
   --warning:#E6B96B;--warning-bg:rgba(148,98,0,.22);
   --error:#F38A98;--error-bg:rgba(176,0,32,.26);--danger:#B23A48;
-  --shadow-1:0 1px 2px rgba(0,0,0,.5);
+  --shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-8:0 8px 28px rgba(0,0,0,.6);
 }
 html,body{margin:0;min-height:100%}
 body{background:#0E2740;color:#fff;font-family:'Jost',system-ui,-apple-system,sans-serif;
@@ -438,31 +485,63 @@ button:hover{background:#0E2740}
 
 /* --- admin console (body.admin) --- */
 body.admin{display:block;align-items:stretch;justify-content:flex-start;padding:0;
-  background:var(--bg);color:var(--text);font-weight:400}
-.topbar{background:var(--appbar-bg);color:var(--appbar-fg);display:flex;align-items:center;
-  gap:16px;padding:13px 24px;flex-wrap:wrap}
-.topbar .brand{display:flex;align-items:center;gap:11px}
-.topbar .brand .mark{width:28px;height:28px;color:var(--appbar-fg)}
-.topbar .brand .name{font-family:var(--font-serif);font-weight:600;letter-spacing:.12em;
-  font-size:19px}
-.topbar nav{display:flex;gap:4px;margin-left:14px;flex:1}
-.topbar nav a{color:var(--nav-fg);text-decoration:none;padding:7px 13px;border-radius:9px;
-  font-size:14px}
-.topbar nav a:hover{background:rgba(143,166,188,.16);color:var(--nav-fg-hover)}
-.topbar nav a.active{background:var(--nav-active-bg);color:var(--nav-active-fg)}
-.topbar a.host-tag{color:var(--host-fg);font-size:12.5px;text-decoration:none;
+  background:var(--bg);color:var(--text);font-weight:400;min-height:100vh}
+.appbar{position:sticky;top:0;z-index:30;height:var(--appbar-h);background:var(--appbar-bg);
+  color:var(--appbar-fg);display:flex;align-items:center;gap:12px;padding:0 16px;
+  box-shadow:var(--shadow-1)}
+.appbar .brand{display:flex;align-items:center;gap:10px;text-decoration:none;
+  color:var(--appbar-fg)}
+.appbar .brand .mark{width:26px;height:26px;color:var(--appbar-fg);display:block}
+.appbar .brand .name{font-family:var(--font-serif);font-weight:600;letter-spacing:.12em;
+  font-size:18px}
+.appbar-spacer{flex:1}
+.appbar a.host-tag{color:var(--host-fg);font-size:12.5px;text-decoration:none;
   font-family:var(--font-mono)}
-.topbar a.host-tag:hover{color:var(--appbar-fg);text-decoration:underline}
-.topbar .out{color:var(--host-fg);text-decoration:none;font-size:13px}
-.topbar .out:hover{color:var(--appbar-fg)}
-.theme-toggle{background:transparent;border:none;color:var(--nav-fg);cursor:pointer;width:auto;
-  padding:6px;border-radius:8px;display:inline-flex;align-items:center;line-height:0}
-.theme-toggle:hover{background:rgba(143,166,188,.16);color:var(--nav-fg-hover)}
+.appbar a.host-tag:hover{color:var(--appbar-fg);text-decoration:underline}
+.appbar .out{color:var(--host-fg);text-decoration:none;font-size:13px}
+.appbar .out:hover{color:var(--appbar-fg)}
+.hamburger,.theme-toggle{background:transparent;border:none;color:var(--nav-fg);
+  cursor:pointer;width:auto;padding:6px;border-radius:8px;display:inline-flex;
+  align-items:center;line-height:0}
+.hamburger:hover,.theme-toggle:hover{background:rgba(143,166,188,.16);
+  color:var(--nav-fg-hover)}
+.hamburger svg{width:20px;height:20px;display:block}
 .theme-toggle svg{width:18px;height:18px;display:block}
 .theme-toggle .icon-sun{display:none}
 [data-theme="dark"] .theme-toggle .icon-sun{display:block}
 [data-theme="dark"] .theme-toggle .icon-moon{display:none}
-.wrap{max-width:1000px;margin:0 auto;padding:30px 24px 64px;width:100%}
+.layout{display:flex;align-items:flex-start}
+.sidenav{flex:none;width:var(--nav-w);background:var(--appbar-bg);position:sticky;
+  top:var(--appbar-h);height:calc(100vh - var(--appbar-h));overflow-y:auto;
+  padding:14px 10px;display:flex;flex-direction:column;gap:2px;
+  transition:width var(--dur) ease}
+.navitem{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:9px;
+  color:var(--nav-fg);text-decoration:none;font-size:14px;position:relative;
+  white-space:nowrap}
+.navitem .ico{width:20px;height:20px;flex:none;display:inline-flex;align-items:center}
+.navitem .ico svg{width:20px;height:20px;display:block}
+.navitem:hover{background:rgba(143,166,188,.14);color:var(--nav-fg-hover)}
+.navitem.active{background:var(--nav-active-bg);color:var(--nav-active-fg)}
+.navitem.active::before{content:"";position:absolute;left:2px;top:8px;bottom:8px;width:3px;
+  border-radius:3px;background:var(--accent)}
+.content{flex:1;min-width:0}
+.scrim{display:none}
+[data-nav="collapsed"] .sidenav{width:var(--nav-w-collapsed)}
+[data-nav="collapsed"] .navitem{justify-content:center;padding:9px}
+[data-nav="collapsed"] .navitem .lbl{display:none}
+.wrap{max-width:1040px;margin:0 auto;padding:30px 28px 64px;width:100%}
+@media (max-width:960px){
+  .sidenav{position:fixed;top:var(--appbar-h);left:0;z-index:40;width:var(--nav-w);
+    transform:translateX(-100%)}
+  [data-drawer="open"] .sidenav{transform:none;box-shadow:var(--shadow-8)}
+  [data-nav="collapsed"] .navitem{justify-content:flex-start;padding:9px 12px}
+  [data-nav="collapsed"] .navitem .lbl{display:inline}
+  [data-drawer="open"] .scrim{display:block;position:fixed;inset:var(--appbar-h) 0 0 0;
+    z-index:35;background:rgba(0,0,0,.45)}
+  .wrap{padding:22px 16px 56px}
+  .panel{overflow-x:auto}
+}
+@media (max-width:560px){.appbar a.host-tag{display:none}}
 .flash{background:var(--success-bg);border:1px solid var(--success-bd);color:var(--success);
   padding:.7rem .9rem;border-radius:10px;margin-bottom:1.2rem;font-size:.93rem}
 h1.page{font-family:var(--font-serif);font-weight:600;color:var(--primary);font-size:1.5rem;
@@ -518,4 +597,20 @@ form.inline{display:inline;margin:0}
 .kv dt{color:var(--text-soft)}
 .kv dd{margin:0;color:var(--text);font-family:var(--font-mono)}
 .soon{font-size:.78rem;color:var(--text-soft);font-style:italic;margin-left:6px}
+/* --- list primitives (toolbar / sortable / bulk / pager / empty) --- */
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.toolbar .grow{flex:1}
+.tbl th.sortable a{color:inherit;text-decoration:none;display:inline-flex;
+  align-items:center;gap:5px}
+.tbl th.sortable a:hover{color:var(--text)}
+.tbl th .arrow{font-size:.7em;opacity:.75}
+.bulkbar{display:flex;align-items:center;gap:12px;background:var(--surface-sunken);
+  border:1px solid var(--border);border-radius:var(--radius-control);padding:8px 14px;
+  margin-bottom:14px;font-size:.9rem;color:var(--text)}
+.pager{display:flex;align-items:center;gap:14px;margin-top:16px;color:var(--text-muted);
+  font-size:.88rem}
+.pager a{color:var(--primary);text-decoration:none}
+.pager a:hover{text-decoration:underline}
+.empty{text-align:center;color:var(--text-muted);padding:40px 20px}
+.empty .big{font-size:1.05rem;color:var(--text);margin-bottom:6px}
 """
