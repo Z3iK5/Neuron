@@ -126,6 +126,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             app.state.server_keys.signing_key,
             notify=notifier.notify,
             federation_sender=app.state.federation_sender.send_event,
+            state_res_v2=settings.state_res_v2,
         )
         app.state.fed_membership = FederatedMembership(
             db,

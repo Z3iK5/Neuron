@@ -20,7 +20,7 @@ from neuron_server.crypto.event_hashing import add_hashes_and_signatures, comput
 from neuron_server.crypto.signing import SigningKey
 from neuron_server.errors import MatrixError
 from neuron_server.federation.validation import domain_of
-from neuron_server.rooms import authrules, versions
+from neuron_server.rooms import authrules, state_resolution, versions
 from neuron_server.rooms.authrules import AuthState
 from neuron_server.rooms.events import Event, generate_room_id
 from neuron_server.storage import accounts
@@ -71,12 +71,14 @@ class RoomService:
         signing_key: SigningKey,
         notify: Callable[[], None] | None = None,
         federation_sender: Callable[..., Awaitable[None]] | None = None,
+        state_res_v2: bool = False,
     ) -> None:
         self._db = db
         self._server_name = server_name
         self._signing_key = signing_key
         self._notify = notify
         self._federation_sender = federation_sender
+        self._state_res_v2 = state_res_v2
 
     async def _propagate(
         self, room_id: str, event: Event, *, extra_destinations: set[str] | None = None
@@ -139,6 +141,21 @@ class RoomService:
     async def _load_state(self, room_id: str) -> AuthState:
         events = await store.get_current_state(self._db, room_id)
         return {(e.type, e.state_key or ""): e for e in events}
+
+    def _resolved_auth_state(self, state: AuthState) -> AuthState:
+        """Route the authorization state through state resolution v2 (HS-7 6c).
+
+        The room has a single forward extremity today, so resolving one state map
+        is an exact no-op — but routing inbound-federation authorization through
+        :func:`state_resolution.resolve` keeps the algorithm on the live path
+        (not dead code) and marks the seam where multi-extremity resolution plugs
+        in once a ``forward_extremities`` table + multi-``prev_event`` appends
+        exist. Gated by the ``state_res_v2`` setting (default off).
+        """
+        state_map = {key: ev.event_id for key, ev in state.items()}
+        event_map = {ev.event_id: ev for ev in state.values()}
+        resolved = state_resolution.resolve([state_map], event_map)
+        return {key: event_map[eid] for key, eid in resolved.items()}
 
     async def _append(
         self,
@@ -892,6 +909,8 @@ class RoomService:
             return True
 
         state = await self._load_state(room_id)
+        if self._state_res_v2:
+            state = self._resolved_auth_state(state)
         probe = Event.from_pdu(pdu, event_id, 0)
         try:
             authrules.authorize(probe, state)

@@ -79,12 +79,16 @@ class _Net:
 
 
 @contextlib.asynccontextmanager
-async def _servers(tmp_path: Path) -> AsyncIterator[_Net]:
+async def _servers(tmp_path: Path, *, state_res_v2: bool = False) -> AsyncIterator[_Net]:
     app_a = create_app(
-        NeuronServerSettings(name="a.test", database_url=f"sqlite:///{tmp_path / 'a.db'}")
+        NeuronServerSettings(
+            name="a.test", database_url=f"sqlite:///{tmp_path / 'a.db'}", state_res_v2=state_res_v2
+        )
     )
     app_b = create_app(
-        NeuronServerSettings(name="b.test", database_url=f"sqlite:///{tmp_path / 'b.db'}")
+        NeuronServerSettings(
+            name="b.test", database_url=f"sqlite:///{tmp_path / 'b.db'}", state_res_v2=state_res_v2
+        )
     )
     async with app_b.router.lifespan_context(app_b), app_a.router.lifespan_context(app_a):
         app_a.state.federation_client.open_client = _opener(app_b)
@@ -508,3 +512,23 @@ async def test_delete_room_with_remote_creator_is_local_only(tmp_path: Path) -> 
         assert await store.get_room(net.db_a, room) is None
         assert "@bob:b.test" in await store.get_joined_members(net.db_b, room)
         assert not await outbox_store.get_pending(net.db_a, "b.test")
+
+
+async def test_apply_remote_event_with_state_res_v2_flag(tmp_path: Path) -> None:
+    """With state_res_v2 enabled, inbound federation is authorized through the
+    state-resolution path (a no-op for the linear single-extremity case today),
+    and a propagated kick still applies correctly on the receiving server."""
+    async with _servers(tmp_path, state_res_v2=True) as net:
+        bob = await _register(net.client_b, "bob")  # resident creator on B
+        room = await _public_room(net.client_b, bob)
+        alice = await _register(net.client_a, "alice")
+        await _join_remote(net.client_a, alice, room, "b.test")
+        assert "@alice:a.test" in await store.get_joined_members(net.db_a, room)
+
+        r = await net.client_b.post(
+            f"{_CS}/rooms/{room}/kick", headers=_auth(bob), json={"user_id": "@alice:a.test"}
+        )
+        assert r.status_code == 200, r.text
+        # A's apply_remote_event ran through state resolution and still applied the kick.
+        assert "@alice:a.test" not in await store.get_joined_members(net.db_a, room)
+        assert await _membership(net.db_a, room, "@alice:a.test") == "leave"
