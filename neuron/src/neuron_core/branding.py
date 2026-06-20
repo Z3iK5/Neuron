@@ -203,6 +203,22 @@ def _connect_html(server_name: str) -> str:
 </div>"""
 
 
+# Runs in <head> before paint: applies the saved theme (or the OS preference on
+# first visit) to <html data-theme> so the admin console renders light/dark with
+# no flash; ``neuronToggleTheme`` is the topbar toggle handler. No persisted theme
+# leaves landing/auth pages on their fixed brand colours (they don't read tokens).
+_THEME_SCRIPT = (
+    "<script>(function(){try{var t=localStorage.getItem('neuron-theme');"
+    "if(t!=='light'&&t!=='dark')t=window.matchMedia&&"
+    "window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';"
+    "document.documentElement.setAttribute('data-theme',t);}catch(e){}})();"
+    "function neuronToggleTheme(){var e=document.documentElement,"
+    "n=e.getAttribute('data-theme')==='dark'?'light':'dark';"
+    "e.setAttribute('data-theme',n);"
+    "try{localStorage.setItem('neuron-theme',n);}catch(_){}}</script>"
+)
+
+
 def _shell(title: str, inner: str, *, body_class: str = "") -> str:
     cls = f' class="{body_class}"' if body_class else ""
     return (
@@ -211,7 +227,8 @@ def _shell(title: str, inner: str, *, body_class: str = "") -> str:
         f"<title>{html.escape(title)}</title>"
         f'<meta name="description" content="{DESCRIPTION}">'
         f'<link rel="icon" href="{favicon_data_uri()}">{FONTS_LINK}'
-        f"<style>{_PAGE_CSS}</style></head><body{cls}>{inner}</body></html>"
+        f"<style>{_PAGE_CSS}</style>{_THEME_SCRIPT}</head>"
+        f"<body{cls}>{inner}</body></html>"
     )
 
 
@@ -221,6 +238,27 @@ def _shell(title: str, inner: str, *, body_class: str = "") -> str:
 # so no Jinja templates or static files are needed (which also keeps the frozen
 # desktop bundle simple).
 # ---------------------------------------------------------------------------
+
+# Theme-toggle icons (generic line icons; the active one is chosen by CSS from
+# the current [data-theme]). Moon shows in light mode, sun in dark mode.
+_MOON_SVG = (
+    '<svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+)
+_SUN_SVG = (
+    '<svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<circle cx="12" cy="12" r="4"/>'
+    '<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2'
+    'M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+)
+_THEME_TOGGLE = (
+    '<button type="button" class="theme-toggle" onclick="neuronToggleTheme()"'
+    ' aria-label="Toggle light or dark theme" title="Toggle theme">'
+    f"{_MOON_SVG}{_SUN_SVG}</button>"
+)
+
 
 # The console's navigation, as (href, label) pairs. ``active`` matches the href.
 _CONSOLE_NAV: tuple[tuple[str, str], ...] = (
@@ -295,6 +333,7 @@ def admin_shell(
         f'<header class="topbar"><div class="brand">'
         f'<div class="mark">{mark_svg(WHITE)}</div><div class="name">{NAME}</div></div>'
         f"<nav>{nav}</nav>"
+        f"{_THEME_TOGGLE}"
         f'<a class="host-tag" href="/console/settings" title="Server settings">'
         f"{html.escape(server_name)}</a>"
         f'<a class="out" href="/console/logout">Sign out</a></header>'
@@ -305,6 +344,38 @@ def admin_shell(
 
 _PAGE_CSS = """
 *{box-sizing:border-box}
+/* === design tokens (admin console) — light is default, dark swaps under
+   [data-theme="dark"]. Landing/auth pages keep their fixed brand colours. === */
+:root{
+  --font-serif:'Cinzel',Georgia,'Times New Roman',serif;
+  --font-sans:'Jost',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --radius-card:14px;--radius-control:9px;
+  --bg:#E4E2DC;--surface:#fff;--surface-sunken:#ECEAE4;
+  --appbar-bg:#0E2740;--appbar-fg:#fff;
+  --nav-fg:#B7C6D6;--nav-fg-hover:#fff;--nav-active-bg:#1C3D5F;--nav-active-fg:#fff;
+  --primary:#1C3D5F;--primary-hover:#0E2740;--primary-contrast:#fff;--accent:#7FA8CC;
+  --text:#16324F;--text-muted:#5A6B7C;--text-soft:#7C8896;--host-fg:#8FA6BC;
+  --divider:#EDEBE5;--border:#E2E0D9;--row-divider:#F0EEE8;--hover:#FAF9F6;
+  --success:#1a6b3a;--success-bg:#e8f3ec;--success-bd:#b9dcc6;
+  --warning:#946200;--warning-bg:#fdf3e2;--error:#b00020;--error-bg:#fdecef;
+  --danger:#b00020;  /* danger button bg — readable with white text in both themes */
+  --shadow-1:0 1px 3px rgba(20,48,77,.06);
+}
+[data-theme="dark"]{
+  --bg:#0E1A26;--surface:#15273A;--surface-sunken:#0B1620;
+  --appbar-bg:#0B1622;--appbar-fg:#EAF1F8;
+  --nav-fg:#8FA6BC;--nav-fg-hover:#fff;--nav-active-bg:#1C3D5F;--nav-active-fg:#fff;
+  --primary:#7FA8CC;--primary-hover:#9FBDD9;--primary-contrast:#0B1622;--accent:#9FBDD9;
+  --text:rgba(234,241,248,.92);--text-muted:rgba(234,241,248,.66);
+  --text-soft:rgba(234,241,248,.5);--host-fg:#8FA6BC;
+  --divider:rgba(143,166,188,.16);--border:rgba(143,166,188,.22);
+  --row-divider:rgba(143,166,188,.12);--hover:rgba(143,166,188,.08);
+  --success:#6FD79A;--success-bg:rgba(26,107,58,.22);--success-bd:rgba(111,215,154,.3);
+  --warning:#E6B96B;--warning-bg:rgba(148,98,0,.22);
+  --error:#F38A98;--error-bg:rgba(176,0,32,.26);--danger:#B23A48;
+  --shadow-1:0 1px 2px rgba(0,0,0,.5);
+}
 html,body{margin:0;min-height:100%}
 body{background:#0E2740;color:#fff;font-family:'Jost',system-ui,-apple-system,sans-serif;
   font-weight:300;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:40px}
@@ -367,69 +438,84 @@ button:hover{background:#0E2740}
 
 /* --- admin console (body.admin) --- */
 body.admin{display:block;align-items:stretch;justify-content:flex-start;padding:0;
-  background:#E4E2DC;color:#16324F;font-weight:400}
-.topbar{background:#0E2740;color:#fff;display:flex;align-items:center;gap:16px;padding:13px 24px;
-  flex-wrap:wrap}
+  background:var(--bg);color:var(--text);font-weight:400}
+.topbar{background:var(--appbar-bg);color:var(--appbar-fg);display:flex;align-items:center;
+  gap:16px;padding:13px 24px;flex-wrap:wrap}
 .topbar .brand{display:flex;align-items:center;gap:11px}
-.topbar .brand .mark{width:28px;height:28px;color:#fff}
-.topbar .brand .name{font-family:'Cinzel',Georgia,serif;font-weight:600;letter-spacing:.12em;
+.topbar .brand .mark{width:28px;height:28px;color:var(--appbar-fg)}
+.topbar .brand .name{font-family:var(--font-serif);font-weight:600;letter-spacing:.12em;
   font-size:19px}
 .topbar nav{display:flex;gap:4px;margin-left:14px;flex:1}
-.topbar nav a{color:#B7C6D6;text-decoration:none;padding:7px 13px;border-radius:9px;font-size:14px}
-.topbar nav a:hover{background:rgba(143,166,188,.16);color:#fff}
-.topbar nav a.active{background:#1C3D5F;color:#fff}
-.topbar a.host-tag{color:#8FA6BC;font-size:12.5px;text-decoration:none;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.topbar a.host-tag:hover{color:#fff;text-decoration:underline}
-.topbar .out{color:#8FA6BC;text-decoration:none;font-size:13px}
-.topbar .out:hover{color:#fff}
+.topbar nav a{color:var(--nav-fg);text-decoration:none;padding:7px 13px;border-radius:9px;
+  font-size:14px}
+.topbar nav a:hover{background:rgba(143,166,188,.16);color:var(--nav-fg-hover)}
+.topbar nav a.active{background:var(--nav-active-bg);color:var(--nav-active-fg)}
+.topbar a.host-tag{color:var(--host-fg);font-size:12.5px;text-decoration:none;
+  font-family:var(--font-mono)}
+.topbar a.host-tag:hover{color:var(--appbar-fg);text-decoration:underline}
+.topbar .out{color:var(--host-fg);text-decoration:none;font-size:13px}
+.topbar .out:hover{color:var(--appbar-fg)}
+.theme-toggle{background:transparent;border:none;color:var(--nav-fg);cursor:pointer;width:auto;
+  padding:6px;border-radius:8px;display:inline-flex;align-items:center;line-height:0}
+.theme-toggle:hover{background:rgba(143,166,188,.16);color:var(--nav-fg-hover)}
+.theme-toggle svg{width:18px;height:18px;display:block}
+.theme-toggle .icon-sun{display:none}
+[data-theme="dark"] .theme-toggle .icon-sun{display:block}
+[data-theme="dark"] .theme-toggle .icon-moon{display:none}
 .wrap{max-width:1000px;margin:0 auto;padding:30px 24px 64px;width:100%}
-.flash{background:#e8f3ec;border:1px solid #b9dcc6;color:#1a6b3a;padding:.7rem .9rem;
-  border-radius:10px;margin-bottom:1.2rem;font-size:.93rem}
-h1.page{font-family:'Cinzel',Georgia,serif;font-weight:600;color:#1C3D5F;font-size:1.5rem;
+.flash{background:var(--success-bg);border:1px solid var(--success-bd);color:var(--success);
+  padding:.7rem .9rem;border-radius:10px;margin-bottom:1.2rem;font-size:.93rem}
+h1.page{font-family:var(--font-serif);font-weight:600;color:var(--primary);font-size:1.5rem;
   margin:0 0 1.1rem}
-.panel{background:#fff;border:1px solid #E2E0D9;border-radius:14px;padding:20px 22px;
-  margin-bottom:20px;box-shadow:0 1px 3px rgba(20,48,77,.06)}
-.panel h2{font-family:'Cinzel',Georgia,serif;font-weight:600;color:#1C3D5F;font-size:1.05rem;
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);
+  padding:20px 22px;margin-bottom:20px;box-shadow:var(--shadow-1)}
+.panel h2{font-family:var(--font-serif);font-weight:600;color:var(--primary);font-size:1.05rem;
   margin:0 0 .9rem}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;
   margin-bottom:22px}
-.stat{background:#fff;border:1px solid #E2E0D9;border-radius:14px;padding:18px 20px}
-.stat .num{font-size:2rem;font-weight:600;color:#1C3D5F;font-family:'Cinzel',Georgia,serif;
+.stat{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-card);padding:18px 20px}
+.stat .num{font-size:2rem;font-weight:600;color:var(--primary);font-family:var(--font-serif);
   line-height:1}
-.stat .lbl{color:#5A6B7C;font-size:.78rem;letter-spacing:.05em;text-transform:uppercase;
-  margin-bottom:8px}
+.stat .lbl{color:var(--text-muted);font-size:.78rem;letter-spacing:.05em;
+  text-transform:uppercase;margin-bottom:8px}
 .tbl{width:100%;border-collapse:collapse;font-size:.93rem}
-.tbl th{text-align:left;color:#7C8896;font-weight:500;font-size:.76rem;letter-spacing:.05em;
-  text-transform:uppercase;padding:0 12px 9px;border-bottom:1px solid #EDEBE5}
-.tbl td{padding:10px 12px;border-bottom:1px solid #F0EEE8;color:#16324F}
-.tbl tr:hover td{background:#FAF9F6}
-.tbl a{color:#1C3D5F;text-decoration:none;font-weight:500}
+.tbl th{text-align:left;color:var(--text-soft);font-weight:500;font-size:.76rem;
+  letter-spacing:.05em;text-transform:uppercase;padding:0 12px 9px;
+  border-bottom:1px solid var(--divider)}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--row-divider);color:var(--text)}
+.tbl tr:hover td{background:var(--hover)}
+.tbl a{color:var(--primary);text-decoration:none;font-weight:500}
 .tbl a:hover{text-decoration:underline}
-.btn{display:inline-block;width:auto;background:#1C3D5F;color:#fff;border:none;border-radius:9px;
-  padding:.5rem 1rem;font-size:.9rem;font-weight:500;cursor:pointer;text-decoration:none;
-  font-family:inherit}
-.btn:hover{background:#0E2740}
+.btn{display:inline-block;width:auto;background:var(--primary);color:var(--primary-contrast);
+  border:none;border-radius:var(--radius-control);padding:.5rem 1rem;font-size:.9rem;
+  font-weight:500;cursor:pointer;text-decoration:none;font-family:inherit}
+.btn:hover{background:var(--primary-hover)}
 .btn.sm{padding:.34rem .68rem;font-size:.82rem}
-.btn.ghost{background:#ECEAE4;color:#1C3D5F}
-.btn.ghost:hover{background:#dedbd2}
-.btn.danger{background:#b00020}
-.btn.danger:hover{background:#8a0019}
+.btn.ghost{background:var(--surface-sunken);color:var(--primary)}
+.btn.ghost:hover{background:var(--border)}
+.btn.danger{background:var(--danger);color:#fff}
+.btn.danger:hover{filter:brightness(.93)}
 .btn[disabled],.btn.disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .spread{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.muted{color:#7C8896;font-size:.88rem}
+.muted{color:var(--text-soft);font-size:.88rem}
 .pill{display:inline-block;padding:.1em .6em;border-radius:999px;font-size:.76rem;font-weight:500}
-.pill.on{background:#e8f3ec;color:#1a6b3a}
-.pill.off{background:#f0eee8;color:#7C8896}
-.pill.warn{background:#fdecef;color:#b00020}
-.pill.amber{background:#fdf3e2;color:#946200}
+.pill.on{background:var(--success-bg);color:var(--success)}
+.pill.off{background:var(--surface-sunken);color:var(--text-soft)}
+.pill.warn{background:var(--error-bg);color:var(--error)}
+.pill.amber{background:var(--warning-bg);color:var(--warning)}
 form.inline{display:inline;margin:0}
 .admin input.q{width:auto;display:inline-block;margin:0;max-width:260px}
-.admin select{width:auto;display:inline-block;margin:0;padding:.5rem .6rem;border:1px solid #DEDCD6;
-  border-radius:9px;font-family:inherit;color:#16324F}
+.admin input,.admin textarea{background:var(--surface);color:var(--text);
+  border:1px solid var(--border);border-radius:var(--radius-control);font-family:inherit}
+.admin select{width:auto;display:inline-block;margin:0;padding:.5rem .6rem;
+  border:1px solid var(--border);border-radius:9px;font-family:inherit;color:var(--text);
+  background:var(--surface)}
+.admin code{background:var(--surface-sunken);color:var(--primary);padding:.12em .45em;
+  border-radius:5px;font-family:var(--font-mono);font-size:.9em}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:7px 18px;font-size:.93rem;margin:0}
-.kv dt{color:#7C8896}
-.kv dd{margin:0;color:#16324F;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.soon{font-size:.78rem;color:#9aa0a8;font-style:italic;margin-left:6px}
+.kv dt{color:var(--text-soft)}
+.kv dd{margin:0;color:var(--text);font-family:var(--font-mono)}
+.soon{font-size:.78rem;color:var(--text-soft);font-style:italic;margin-left:6px}
 """
