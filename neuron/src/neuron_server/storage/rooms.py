@@ -175,6 +175,24 @@ async def get_event_global(db: Database, event_id: str) -> Event | None:
     return _row_to_event(rows[0]) if rows else None
 
 
+async def get_redaction_for(
+    db: Database, room_id: str, target_event_id: str
+) -> Event | None:
+    """Return a stored redaction whose target is ``target_event_id``, if any.
+
+    Lets us reconcile a redaction that arrived over federation *before* the event
+    it redacts: once the target lands we look back for the pending redaction and
+    apply it, so the message is still scrubbed despite out-of-order delivery.
+    """
+    rows = await db.fetchall(
+        f"SELECT {_EVENT_COLUMNS} FROM events"
+        " WHERE room_id = ? AND type = 'm.room.redaction' AND redacts = ?"
+        " ORDER BY stream_ordering ASC LIMIT 1",
+        (room_id, target_event_id),
+    )
+    return _row_to_event(rows[0]) if rows else None
+
+
 async def get_auth_chain(db: Database, room_id: str, event_ids: list[str]) -> list[Event]:
     """The transitive closure of ``auth_events`` reachable from ``event_ids``."""
     seen: set[str] = set()

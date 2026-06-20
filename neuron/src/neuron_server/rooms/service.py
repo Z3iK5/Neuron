@@ -15,15 +15,19 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from neuron_core import get_logger
 from neuron_server.crypto.event_hashing import add_hashes_and_signatures, compute_event_id
 from neuron_server.crypto.signing import SigningKey
 from neuron_server.errors import MatrixError
+from neuron_server.federation.validation import domain_of
 from neuron_server.rooms import authrules, versions
 from neuron_server.rooms.authrules import AuthState
 from neuron_server.rooms.events import Event, generate_room_id
 from neuron_server.storage import accounts
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
+
+_logger = get_logger(__name__)
 
 _DEFAULT_HISTORY_VISIBILITY = "shared"
 
@@ -66,7 +70,7 @@ class RoomService:
         server_name: str,
         signing_key: SigningKey,
         notify: Callable[[], None] | None = None,
-        federation_sender: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+        federation_sender: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self._db = db
         self._server_name = server_name
@@ -74,9 +78,41 @@ class RoomService:
         self._notify = notify
         self._federation_sender = federation_sender
 
-    async def _propagate(self, room_id: str, event: Event) -> None:
-        if self._federation_sender is not None:
-            await self._federation_sender(room_id, event.pdu_dict())
+    async def _propagate(
+        self, room_id: str, event: Event, *, extra_destinations: set[str] | None = None
+    ) -> None:
+        """Send a locally-created event to the room's remote participants.
+
+        Best-effort: federation propagation must never break the local action, so a
+        failure here is logged and swallowed. We can only sign events as our own
+        server, so an event whose sender is on another server (e.g. a self-leave we
+        forced on a remote user) is kept local — a remote peer would reject its
+        signature anyway. ``extra_destinations`` lets a membership-removal caller
+        reach a server that has just dropped out of the room's joined members.
+        """
+        if self._federation_sender is None:
+            return
+        if domain_of(event.sender) != self._server_name:
+            return
+        try:
+            await self._federation_sender(
+                room_id, event.pdu_dict(), extra_destinations=extra_destinations
+            )
+        except Exception as exc:  # noqa: BLE001 - propagation is best-effort
+            _logger.warning("federation propagation failed for %s: %s", event.event_id, exc)
+
+    async def _remote_destinations(self, room_id: str) -> set[str]:
+        """Snapshot the other servers with a joined member in ``room_id``.
+
+        Captured *before* a membership change so a kicked/banned/departing remote
+        member's server is still notified after it leaves the joined-member set.
+        """
+        members = await store.get_joined_members(self._db, room_id)
+        return {
+            domain_of(user_id)
+            for user_id in members
+            if domain_of(user_id) != self._server_name
+        }
 
     def _wake_syncs(self) -> None:
         if self._notify is not None:
@@ -313,11 +349,22 @@ class RoomService:
             origin_server_ts=_now_ms(), depth=0, stream_ordering=0, state_key=target,
         )
         authrules.authorize(probe, state)
+
+        # Snapshot remote destinations before the change: a leave/ban/kick removes
+        # the target from the joined-member set, so afterwards the sender would no
+        # longer compute the target's server as a destination.
+        pre = await self._remote_destinations(room_id)
+        if membership in {"leave", "ban", "invite"}:
+            target_domain = domain_of(target)
+            if target_domain != self._server_name:
+                pre.add(target_domain)
+
         async with self._db.transaction():
             event = await self._append(
                 room_id, etype="m.room.member", sender=sender, content=content, state_key=target
             )
         self._wake_syncs()
+        await self._propagate(room_id, event, extra_destinations=pre)
         return event.event_id
 
     async def join(self, room_id: str, user_id: str) -> str:
@@ -380,6 +427,12 @@ class RoomService:
             await self._apply_redaction(target, redaction.event_id)
             await store.put_txn_event(self._db, sender, txn_id, redaction.event_id)
         self._wake_syncs()
+        # Make sure the redaction reaches the redacted author's server even if they
+        # are no longer a joined member (e.g. already kicked/banned).
+        pre = await self._remote_destinations(room_id)
+        if domain_of(target.sender) != self._server_name:
+            pre.add(domain_of(target.sender))
+        await self._propagate(room_id, redaction, extra_destinations=pre)
         return redaction.event_id
 
     async def _apply_redaction(self, target: Event, redaction_event_id: str) -> None:
@@ -389,6 +442,22 @@ class RoomService:
         await store.update_event_content(
             self._db, target.event_id, json.dumps(redacted_content), json.dumps(unsigned)
         )
+
+    def _may_apply_redaction(
+        self, state: AuthState, redactor: str, target: Event | None
+    ) -> bool:
+        """Whether ``redactor`` may scrub ``target`` (and it isn't already scrubbed).
+
+        Mirrors the local :meth:`redact` rule: you may always redact your own event,
+        otherwise you need the room's redact power level. Applied to events received
+        over federation so a remote server cannot scrub arbitrary content via a
+        low-power member.
+        """
+        if target is None or (target.unsigned or {}).get("redacted_because"):
+            return False
+        if redactor == target.sender:
+            return True
+        return authrules.power_level_for(state, redactor) >= _redact_level(state)
 
     # --- reads -------------------------------------------------------------
 
@@ -454,30 +523,43 @@ class RoomService:
         users[user_id] = 100
         content["users"] = users
         async with self._db.transaction():
-            await self._append(
+            event = await self._append(
                 room_id, etype="m.room.power_levels", sender=room.creator,
                 content=content, state_key="",
             )
         self._wake_syncs()
+        # sender is room.creator; _propagate keeps it local when the creator is on
+        # another server (we could not sign it as them).
+        await self._propagate(room_id, event)
 
     async def admin_force_join(self, room_id: str, user_id: str) -> None:
         """Force ``user_id`` to join the room (bypasses normal auth)."""
         await self._require_room(room_id)
         async with self._db.transaction():
-            await self._append(
+            event = await self._append(
                 room_id, etype="m.room.member", sender=user_id,
                 content={"membership": "join"}, state_key=user_id,
             )
         self._wake_syncs()
+        # A join is signed as the joining user, so this only propagates for a local
+        # user_id (a remote user's join can only be authored by their own server).
+        await self._propagate(room_id, event)
 
     async def admin_force_leave(self, room_id: str, user_id: str) -> None:
         """Force ``user_id`` out of the room (bypasses power-level checks)."""
+        pre = await self._remote_destinations(room_id)
+        target_domain = domain_of(user_id)
+        if target_domain != self._server_name:
+            pre.add(target_domain)
         async with self._db.transaction():
-            await self._append(
+            event = await self._append(
                 room_id, etype="m.room.member", sender=user_id,
                 content={"membership": "leave"}, state_key=user_id,
             )
         self._wake_syncs()
+        # A self-leave is signed as ``user_id``; _propagate keeps it local for a
+        # remote target (admin_delete_room emits a creator-signed kick for those).
+        await self._propagate(room_id, event, extra_destinations=pre)
 
     async def admin_delete_room(
         self, room_id: str, *, purge: bool = True, block: bool = False, by: str | None = None
@@ -487,10 +569,37 @@ class RoomService:
         Synchronous — correct at desktop scale. Returns the kicked users.
         """
         # Bypass the block guard in _require_room so a blocked room can still be deleted.
-        if await store.get_room(self._db, room_id) is None:
+        room = await store.get_room(self._db, room_id)
+        if room is None:
             raise MatrixError(404, "M_NOT_FOUND", "Unknown room")
         kicked = await store.get_joined_members(self._db, room_id)
-        for member in kicked:
+        # Snapshot every remote member's server once: each removal shrinks the
+        # joined-member set, so we must capture destinations before the loop.
+        pre = {domain_of(m) for m in kicked if domain_of(m) != self._server_name}
+        creator_is_local = domain_of(room.creator) == self._server_name
+        local_members = [m for m in kicked if domain_of(m) == self._server_name]
+        remote_members = [m for m in kicked if domain_of(m) != self._server_name]
+
+        # Remove remote members FIRST, via creator-signed kicks, so the kicker (the
+        # local room creator) is still joined on every remote copy when the kicks
+        # arrive — a kick from a user who has already left would be rejected there.
+        for member in remote_members:
+            if creator_is_local:
+                # A moderator-signed kick (sender = the local room creator) is
+                # federation-valid, unlike a self-leave we cannot sign for them.
+                async with self._db.transaction():
+                    event = await self._append(
+                        room_id, etype="m.room.member", sender=room.creator,
+                        content={"membership": "leave"}, state_key=member,
+                    )
+                self._wake_syncs()
+                await self._propagate(room_id, event, extra_destinations=pre)
+            else:
+                # No local authority to sign a kick for a remote member: tear the
+                # room down locally only (no valid PDU we could produce).
+                await self.admin_force_leave(room_id, member)
+        # Then the local members (their self-leaves are validly signed by us).
+        for member in local_members:
             await self.admin_force_leave(room_id, member)
         if purge:
             async with self._db.transaction():
@@ -528,6 +637,14 @@ class RoomService:
                 content={"redacts": event_id}, redacts=event_id,
             )
             await self._apply_redaction(target, redaction.event_id)
+        # sender is the room creator; _propagate keeps it local for remote-creator
+        # rooms (we could not sign as them). The snapshot + the author's own domain
+        # ensures the redaction still reaches a target whose server has already left
+        # (the common "ban a remote spammer then redact their backlog" sequence).
+        pre = await self._remote_destinations(room_id)
+        if domain_of(target.sender) != self._server_name:
+            pre.add(domain_of(target.sender))
+        await self._propagate(room_id, redaction, extra_destinations=pre)
 
     # --- federated membership (resident side: make_join / send_join) --------
 
@@ -766,6 +883,20 @@ class RoomService:
                         self._db, room_id, event.state_key,
                         str(event.content.get("membership")),
                     )
+            elif event.type == "m.room.redaction" and event.redacts:
+                # Apply a redaction received over federation to its target, so a
+                # remotely-moderated message is actually scrubbed in our copy too.
+                target = await store.get_event(self._db, room_id, event.redacts)
+                if self._may_apply_redaction(state, event.sender, target):
+                    await self._apply_redaction(target, event_id)  # type: ignore[arg-type]
+            if event.type != "m.room.redaction":
+                # The new event may itself be the target of a redaction that arrived
+                # before it (out-of-order federation delivery); reconcile it now.
+                pending = await store.get_redaction_for(self._db, room_id, event_id)
+                if pending is not None and self._may_apply_redaction(
+                    state, pending.sender, event
+                ):
+                    await self._apply_redaction(event, pending.event_id)
         self._wake_syncs()
         return True
 

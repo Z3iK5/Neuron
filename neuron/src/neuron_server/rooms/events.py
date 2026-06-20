@@ -52,6 +52,11 @@ class Event:
     def from_pdu(cls, pdu: dict[str, Any], event_id: str, stream_ordering: int) -> Event:
         """Build a stored event from a received federation PDU."""
         state_key = pdu.get("state_key")
+        # Room v11 (MSC2174) carries the redaction target in ``content.redacts``;
+        # older events used a top-level ``redacts`` field. Accept either.
+        redacts = pdu.get("redacts")
+        if redacts is None:
+            redacts = (pdu.get("content") or {}).get("redacts")
         return cls(
             event_id=event_id,
             room_id=str(pdu["room_id"]),
@@ -62,6 +67,7 @@ class Event:
             depth=int(pdu.get("depth", 0)),
             stream_ordering=stream_ordering,
             state_key=None if state_key is None else str(state_key),
+            redacts=None if redacts is None else str(redacts),
             auth_events=list(pdu.get("auth_events", [])),
             prev_events=list(pdu.get("prev_events", [])),
             hashes=pdu.get("hashes"),
