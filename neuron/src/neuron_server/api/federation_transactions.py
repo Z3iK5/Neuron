@@ -89,7 +89,7 @@ async def _process_edus(request: Request, edus: list[Any]) -> None:
             user_id = content.get("user_id")
             if isinstance(room_id, str) and isinstance(user_id, str):
                 if await store.get_room(db, room_id) is not None:
-                    request.app.state.typing.set_typing(
+                    await request.app.state.typing.set_typing(
                         room_id, user_id, bool(content.get("typing"))
                     )
             continue

@@ -61,7 +61,7 @@ from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
 from neuron_server.storage.database import Database, connect_database
 from neuron_server.storage.metadata import get_metadata, set_metadata
 from neuron_server.storage.migrations import run_migrations
-from neuron_server.sync.notifier import StreamNotifier
+from neuron_server.sync.notifier import build_notifier
 from neuron_server.sync.service import SyncService
 from neuron_server.typing_state import TypingHandler
 
@@ -101,10 +101,10 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         await db.ensure_stream_sequences()
         log.info("database ready", extra={"newly_applied_migrations": newly})
         await _ensure_server_identity(db, settings)
-        notifier = StreamNotifier()
+        notifier = build_notifier(settings, db)
         app.state.db = db
         app.state.notify = notifier.notify
-        app.state.typing = TypingHandler(notify=notifier.notify)
+        app.state.typing = TypingHandler(db, notify=notifier.notify)
         app.state.server_keys = await ServerKeyService.load_or_create(db, settings)
         app.state.federation_client = FederationClient(
             settings.name, app.state.server_keys.signing_key
@@ -151,11 +151,17 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             app.state.federation_sender.retry_all, settings.federation_retry_interval_s
         )
         app.state.retry_flusher = flusher
+        # Start the notifier transport (a no-op for the in-process backend) before
+        # serving, so cross-worker /sync wakes are received from the first request.
+        await notifier.start()
         flusher.start()
         try:
             yield
         finally:
             await flusher.stop()
+            # Tear down the notifier (closes the dedicated LISTEN connection)
+            # before the pool, so it never outlives the database.
+            await notifier.stop()
             await db.disconnect()
 
     app = FastAPI(title="Neuron Server", lifespan=lifespan, docs_url=None, redoc_url=None)
