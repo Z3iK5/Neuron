@@ -310,6 +310,22 @@ def test_restart_reloads_config_and_rebuilds_server(tmp_path: Path) -> None:
     assert made[1].is_running()  # a fresh server (from reloaded config) is running
 
 
+def test_apply_config_starts_server_with_new_config(tmp_path: Path) -> None:
+    # First-run wizard path: apply_config swaps in the chosen config and starts it.
+    made: list[tuple[DesktopConfig, _FakeServer]] = []
+
+    def factory(c: DesktopConfig) -> _FakeServer:
+        s = _FakeServer()
+        made.append((c, s))
+        return s
+
+    controller = TrayController(_config(tmp_path), server_factory=factory)  # type: ignore[arg-type]
+    chosen = DesktopConfig("chosen.example", str(tmp_path), "admin", bind_port=8123)
+    controller.apply_config(chosen)
+    assert made[-1][0] is chosen and made[-1][1].is_running()
+    assert controller.is_running()
+
+
 def test_open_settings_invokes_launcher(tmp_path: Path) -> None:
     calls: list[bool] = []
     controller = TrayController(

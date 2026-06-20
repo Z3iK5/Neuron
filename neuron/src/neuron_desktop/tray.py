@@ -95,6 +95,14 @@ class TrayController:
         self._server = self._server_factory(self._config)
         self._server.start()
 
+    def apply_config(self, config: DesktopConfig) -> None:
+        """Adopt ``config`` and (re)start the server with it (used by first-run)."""
+        if self._server.is_running():
+            self._server.stop()
+        self._config = config
+        self._server = self._server_factory(config)
+        self._server.start()
+
     def open_settings(self) -> None:
         """Open the native settings window (changes apply on the next restart)."""
         if self._settings_launcher is not None:
@@ -176,7 +184,32 @@ def _icon_image() -> object:
     return render_icon(64)
 
 
-def run_tray(config: DesktopConfig, *, autostart: bool = True) -> None:
+def _run_first_run_wizard(controller: TrayController, config: DesktopConfig) -> None:
+    """Show the first-run wizard (settings -> getting-started) and start the server.
+
+    The wizard's Continue button persists the chosen config and starts the server,
+    then offers buttons that open the browser to create an account / sign in. Falls
+    back to the non-interactive default (hostname) when there's no display.
+    """
+    from neuron_desktop import settings_window, setup
+
+    base = config.data_path
+
+    def on_save(updated: DesktopConfig) -> str:
+        setup.write_first_run_config(base, updated)
+        controller.apply_config(updated)
+        return updated.console_url()
+
+    try:
+        settings_window.run_first_run_window(config, on_save=on_save)
+    except Exception as exc:  # no display / tkinter unavailable
+        print(f"First-run window unavailable ({exc}); starting with defaults.")
+        if not controller.is_running():
+            setup.write_first_run_config(base, config)
+            controller.apply_config(config)
+
+
+def run_tray(config: DesktopConfig, *, autostart: bool = True, first_run: bool = False) -> None:
     """Launch the tray app (requires ``pystray`` and a desktop session)."""
     try:
         import pystray
@@ -186,7 +219,9 @@ def run_tray(config: DesktopConfig, *, autostart: bool = True) -> None:
         ) from exc
 
     controller = TrayController(config, settings_launcher=launch_settings_window)
-    if autostart:
+    if first_run:
+        _run_first_run_wizard(controller, config)  # starts the server itself
+    elif autostart:
         controller.start()
 
     def _quit() -> None:
@@ -203,9 +238,9 @@ def run_tray(config: DesktopConfig, *, autostart: bool = True) -> None:
         )
         icon.run()
     except BaseException:
-        # If the tray backend fails *after* we autostarted the homeserver child,
-        # stop it so any foreground fallback (see cli.py) can bind the port
-        # cleanly instead of two servers racing for it (which hangs the GUI).
-        if autostart:
+        # If the tray backend fails *after* the homeserver child was started, stop
+        # it so any foreground fallback (see cli.py) can bind the port cleanly
+        # instead of two servers racing for it (which hangs the GUI).
+        if controller.is_running():
             controller.stop()
         raise
