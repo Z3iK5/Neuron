@@ -98,6 +98,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         db = connect_database(settings.database_url, pool_size=settings.db_pool_size)
         await db.connect()
         newly = await run_migrations(db)
+        await db.ensure_stream_sequences()
         log.info("database ready", extra={"newly_applied_migrations": newly})
         await _ensure_server_identity(db, settings)
         notifier = StreamNotifier()

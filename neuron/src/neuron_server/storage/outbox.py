@@ -11,9 +11,7 @@ from neuron_server.storage.database import Database
 
 
 async def enqueue(db: Database, destination: str, pdu: dict[str, Any]) -> int:
-    stream_id = int(
-        await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) + 1 FROM federation_outbox")
-    )
+    stream_id = await db.next_stream_id("outbox")
     await db.execute(
         "INSERT INTO federation_outbox (stream_id, destination, pdu_json) VALUES (?, ?, ?)",
         (stream_id, destination, json.dumps(pdu)),
