@@ -56,6 +56,10 @@ async def _leave_any(request: Request, room_id: str, user_id: str) -> None:
 async def _invite_any(request: Request, room_id: str, sender: str, target: str) -> None:
     """Invite a user, pushing the invite over federation if they're remote."""
     rooms: RoomService = request.app.state.rooms
+    # Shadow-banned inviters: silently no-op (the endpoint still returns 200), so
+    # neither a local nor a federated invite is created.
+    if await rooms.is_shadow_banned(sender):
+        return
     if target.split(":", 1)[-1] == request.app.state.settings.name:
         await rooms.invite(room_id, sender, target)
         return
