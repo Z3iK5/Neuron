@@ -18,8 +18,8 @@ Concrete implementations live in :mod:`neuron_server.storage.sqlite` and
 from __future__ import annotations
 
 import abc
-from collections.abc import Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
 # Monotonic id streams: name -> (table, column). Each is a server-wide ascending
@@ -80,6 +80,18 @@ class Database(abc.ABC):
         Called once after migrations. No-op by default (SQLite needs nothing).
         """
         return None
+
+    @asynccontextmanager
+    async def startup_lock(self) -> AsyncIterator[None]:
+        """Serialize cross-process startup (migrations + sequence seeding).
+
+        Several startup steps are unsafe to run concurrently from two workers
+        against one database — non-idempotent ``ALTER TABLE`` DDL and the
+        ``schema_migrations`` bookkeeping insert (duplicate PK), plus the sequence
+        seed's check-then-set. Backends that support multiple processes hold a
+        cross-process lock here; the default (SQLite, single process) is a no-op.
+        """
+        yield
 
 
 def connect_database(url: str, *, pool_size: int = 1) -> Database:

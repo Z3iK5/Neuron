@@ -407,7 +407,7 @@ async def run_migrations(db: Database, migrations: tuple[Migration, ...] = MIGRA
                 await db.execute(statement)
             await db.execute(
                 "INSERT INTO schema_migrations (version, name, applied_at)"
-                " VALUES (?, ?, ?)",
+                " VALUES (?, ?, ?) ON CONFLICT (version) DO NOTHING",
                 (migration.version, migration.name, datetime.now(UTC).isoformat()),
             )
         newly_applied.append(migration.version)

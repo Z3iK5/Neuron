@@ -97,10 +97,13 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db = connect_database(settings.database_url, pool_size=settings.db_pool_size)
         await db.connect()
-        newly = await run_migrations(db)
-        await db.ensure_stream_sequences()
+        # Serialize startup across workers (no-op on SQLite): concurrent migrations
+        # / sequence-seeding against one shared database are not safe to run twice.
+        async with db.startup_lock():
+            newly = await run_migrations(db)
+            await db.ensure_stream_sequences()
+            await _ensure_server_identity(db, settings)
         log.info("database ready", extra={"newly_applied_migrations": newly})
-        await _ensure_server_identity(db, settings)
         notifier = build_notifier(settings, db)
         app.state.db = db
         app.state.notify = notifier.notify
