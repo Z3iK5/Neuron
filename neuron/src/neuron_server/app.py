@@ -95,7 +95,11 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        db = connect_database(settings.database_url, pool_size=settings.db_pool_size)
+        db = connect_database(
+            settings.database_url,
+            pool_size=settings.db_pool_size,
+            instance_name=settings.instance_name,
+        )
         await db.connect()
         # Serialize startup across workers (no-op on SQLite): concurrent migrations
         # / sequence-seeding against one shared database are not safe to run twice.

@@ -67,6 +67,13 @@ class SQLiteDatabase(Database):
             await self.fetchval(f"SELECT COALESCE(MAX({col}), 0) + 1 FROM {table}")
         )
 
+    async def get_stream_position(self, name: str) -> int:
+        # With one serialized connection, allocation order == commit order, so the
+        # contiguous floor is just MAX(col) — there are never uncommitted lower ids.
+        # The multi-writer stream_positions machinery is Postgres-only.
+        table, col = STREAMS[name]
+        return int(await self.fetchval(f"SELECT COALESCE(MAX({col}), 0) FROM {table}"))
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
         async with self._tx_lock:

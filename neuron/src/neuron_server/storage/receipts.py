@@ -24,15 +24,21 @@ class Receipt:
 async def upsert_receipt(
     db: Database, room_id: str, user_id: str, receipt_type: str, event_id: str, ts: int
 ) -> int:
-    """Record (or move forward) a user's receipt; returns the new stream id."""
-    stream_id = await db.next_stream_id("receipts")
-    await db.execute(
-        "INSERT INTO receipts (room_id, user_id, receipt_type, event_id, ts, stream_id)"
-        " VALUES (?, ?, ?, ?, ?, ?)"
-        " ON CONFLICT(room_id, user_id, receipt_type) DO UPDATE SET"
-        " event_id = excluded.event_id, ts = excluded.ts, stream_id = excluded.stream_id",
-        (room_id, user_id, receipt_type, event_id, ts, stream_id),
-    )
+    """Record (or move forward) a user's receipt; returns the new stream id.
+
+    The id allocation and insert run in one transaction so the multi-writer
+    position tracker counts the id as in-flight until the row commits (callers are
+    not already inside a transaction).
+    """
+    async with db.transaction():
+        stream_id = await db.next_stream_id("receipts")
+        await db.execute(
+            "INSERT INTO receipts (room_id, user_id, receipt_type, event_id, ts, stream_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(room_id, user_id, receipt_type) DO UPDATE SET"
+            " event_id = excluded.event_id, ts = excluded.ts, stream_id = excluded.stream_id",
+            (room_id, user_id, receipt_type, event_id, ts, stream_id),
+        )
     return stream_id
 
 

@@ -379,6 +379,24 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX IF NOT EXISTS idx_typing_room ON typing (room_id, expiry_ms)",
         ),
     ),
+    Migration(
+        version=16,
+        name="stream_positions",
+        # Per-writer contiguous "persisted upto" position for each id stream. A
+        # reader's safe floor is MIN(stream_id) across instances: a writer holding
+        # a low in-flight id keeps its row (and so the floor) back until it commits,
+        # so /sync never advances past an id that is allocated but not yet committed
+        # (the multi-writer lost-event gap). Postgres maintains it; SQLite ignores
+        # this table and reads MAX(col) directly (single connection => no gap).
+        statements=(
+            "CREATE TABLE IF NOT EXISTS stream_positions ("
+            " stream_name TEXT NOT NULL,"
+            " instance_name TEXT NOT NULL,"
+            " stream_id BIGINT NOT NULL,"
+            " PRIMARY KEY (stream_name, instance_name)"
+            ")",
+        ),
+    ),
 )
 
 

@@ -74,6 +74,18 @@ class Database(abc.ABC):
         Must be race-free across concurrent connections/transactions.
         """
 
+    @abc.abstractmethod
+    async def get_stream_position(self, name: str) -> int:
+        """The safe ``/sync`` floor for the ``name`` stream.
+
+        The highest id ``H`` such that **every** id ``<= H`` is committed — never an
+        id that has been allocated but not yet committed. On multi-writer backends
+        this is the minimum contiguous position across writer instances; on a
+        single serialized connection it is simply ``MAX(col)`` (allocation order ==
+        commit order). Replaces a raw ``MAX(col)`` watermark, which could expose an
+        id committed out of allocation order and skip a lower one forever.
+        """
+
     async def ensure_stream_sequences(self) -> None:
         """Create/seed any backend objects the stream allocator needs.
 
@@ -94,13 +106,16 @@ class Database(abc.ABC):
         yield
 
 
-def connect_database(url: str, *, pool_size: int = 1) -> Database:
+def connect_database(
+    url: str, *, pool_size: int = 1, instance_name: str = "master"
+) -> Database:
     """Build (but do not yet connect) a :class:`Database` for the given URL.
 
     Supports ``sqlite:///...`` and ``postgresql://...`` / ``postgres://...``.
     The driver is imported lazily by the concrete class, so only the backend you
-    actually use needs its driver installed. ``pool_size`` applies to PostgreSQL
-    only (SQLite is always single-connection).
+    actually use needs its driver installed. ``pool_size`` and ``instance_name``
+    apply to PostgreSQL only (SQLite is always a single serialized connection, so
+    it has one implicit instance and no in-flight id tracking).
     """
     if url.startswith("sqlite"):
         from neuron_server.storage.sqlite import SQLiteDatabase
@@ -109,7 +124,7 @@ def connect_database(url: str, *, pool_size: int = 1) -> Database:
     if url.startswith(("postgresql://", "postgres://")):
         from neuron_server.storage.postgres import PostgresDatabase
 
-        return PostgresDatabase(url, pool_size=pool_size)
+        return PostgresDatabase(url, pool_size=pool_size, instance_name=instance_name)
     raise ValueError(f"Unsupported database URL: {url!r}")
 
 
