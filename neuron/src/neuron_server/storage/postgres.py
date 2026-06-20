@@ -32,6 +32,10 @@ from typing import Any
 
 from neuron_server.storage.database import STREAMS, Database
 
+# Fixed key for the startup advisory lock (ascii "neuron"). pg_advisory_lock takes
+# a single bigint; we use exactly this one lock, so any constant is fine.
+_STARTUP_LOCK_KEY = 0x6E6575726F6E
+
 # The connection pinned to the current transaction (None when not in one). A
 # context variable rather than instance state, so concurrent tasks each see only
 # their own transaction's connection.
@@ -83,6 +87,27 @@ class PostgresDatabase(Database):
         import asyncpg
 
         return await asyncpg.connect(self._dsn)
+
+    @asynccontextmanager
+    async def startup_lock(self) -> AsyncIterator[None]:
+        """Hold a session-scoped advisory lock so only one worker runs startup.
+
+        Session-scoped (``pg_advisory_lock``), not transaction-scoped, because
+        :func:`run_migrations` opens its own per-migration transactions inside this
+        block — an ``xact`` lock could not span them. Held on a dedicated
+        connection (outside the pool) for the duration, released in ``finally``.
+        """
+        import asyncpg
+
+        conn = await asyncpg.connect(self._dsn)
+        try:
+            await conn.execute("SELECT pg_advisory_lock($1)", _STARTUP_LOCK_KEY)
+            try:
+                yield
+            finally:
+                await conn.execute("SELECT pg_advisory_unlock($1)", _STARTUP_LOCK_KEY)
+        finally:
+            await conn.close()
 
     @asynccontextmanager
     async def _conn(self) -> AsyncIterator[Any]:

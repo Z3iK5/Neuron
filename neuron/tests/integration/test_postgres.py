@@ -19,6 +19,8 @@ import pytest
 
 from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
+from neuron_server.storage.database import connect_database
+from neuron_server.storage.migrations import MIGRATIONS, run_migrations
 
 _PG = os.environ.get("NEURON_TEST_DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(
@@ -68,6 +70,37 @@ async def _register(c: httpx.AsyncClient, username: str) -> str:
             },
         )
     ).json()["access_token"]
+
+
+async def test_concurrent_worker_startup_is_safe() -> None:
+    """Two workers starting against one fresh DB must not crash on a duplicate
+    schema_migrations PK or a non-idempotent ALTER TABLE — the startup advisory
+    lock serializes them, and each migration is recorded exactly once."""
+    await _reset_schema()
+
+    async def start_worker() -> None:
+        db = connect_database(_PG, pool_size=4)
+        await db.connect()
+        try:
+            async with db.startup_lock():
+                await run_migrations(db)
+                await db.ensure_stream_sequences()
+        finally:
+            await db.disconnect()
+
+    # Run both startups concurrently; without the lock the racing ALTER TABLEs /
+    # duplicate-PK insert would raise.
+    await asyncio.gather(start_worker(), start_worker())
+
+    check = connect_database(_PG)
+    await check.connect()
+    try:
+        count = await check.fetchval("SELECT COUNT(*) FROM schema_migrations")
+        distinct = await check.fetchval("SELECT COUNT(DISTINCT version) FROM schema_migrations")
+    finally:
+        await check.disconnect()
+    assert count == len(MIGRATIONS)
+    assert distinct == len(MIGRATIONS)
 
 
 async def test_core_flow_on_postgres() -> None:
