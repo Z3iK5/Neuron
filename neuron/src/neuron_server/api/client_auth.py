@@ -127,6 +127,10 @@ async def login(request: Request, auth: AuthService = Depends(get_auth)) -> dict
     if not isinstance(password, str) or not password:
         raise MatrixError(400, "M_MISSING_PARAM", "Missing password")
 
+    # Throttle login attempts per account (brute-force defence) before doing the
+    # expensive password verification.
+    request.app.state.rate_limiters.check_login(user)
+
     result = await auth.login(
         user=user,
         password=password,

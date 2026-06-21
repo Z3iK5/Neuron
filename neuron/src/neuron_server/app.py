@@ -56,6 +56,7 @@ from neuron_server.keys.resolver import ServerKeyResolver
 from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
 from neuron_server.media.store import build_media_store
+from neuron_server.ratelimit import build_rate_limiters
 from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
 from neuron_server.storage.database import Database, connect_database
@@ -110,6 +111,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         log.info("database ready", extra={"newly_applied_migrations": newly})
         notifier = build_notifier(settings, db)
         app.state.db = db
+        app.state.rate_limiters = build_rate_limiters(settings)
         app.state.notify = notifier.notify
         app.state.typing = TypingHandler(db, notify=notifier.notify)
         app.state.server_keys = await ServerKeyService.load_or_create(db, settings)
