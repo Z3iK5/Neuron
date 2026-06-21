@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from neuron_desktop import paths
-from neuron_desktop.config import DesktopConfig
+from neuron_desktop.config import DesktopConfig, validate_database_url
 
 # Server-name rule (mirrors neuron_server.doctor._check_server_name): no spaces/slashes.
 _INVALID_NAME_CHARS = (" ", "/")
@@ -30,15 +30,37 @@ def updated_config(
     server_name: str,
     bind_host: str,
     bind_port: str | int,
+    database_url: str | None = None,
+    db_pool_size: str | int | None = None,
 ) -> DesktopConfig:
-    """Return ``config`` with the edited fields applied (empty/invalid inputs ignored)."""
+    """Return ``config`` with the edited fields applied (empty/invalid inputs ignored).
+
+    ``database_url``/``db_pool_size`` left as ``None`` keep the existing values (so
+    callers that don't edit them are unaffected). A blank ``database_url`` selects
+    the built-in SQLite backend.
+    """
     name = (server_name or "").strip() or config.server_name
     host = (bind_host or "").strip() or config.bind_host
     try:
         port = int(str(bind_port).strip())
     except (TypeError, ValueError):
         port = config.bind_port
-    return replace(config, server_name=name, bind_host=host, bind_port=port)
+    db_url = config.database_url if database_url is None else (database_url or "").strip()
+    if db_pool_size is None:
+        pool = config.db_pool_size
+    else:
+        try:
+            pool = max(1, int(str(db_pool_size).strip()))
+        except (TypeError, ValueError):
+            pool = config.db_pool_size
+    return replace(
+        config,
+        server_name=name,
+        bind_host=host,
+        bind_port=port,
+        database_url=db_url,
+        db_pool_size=pool,
+    )
 
 
 def validate_server_name(name: str) -> str | None:
@@ -108,6 +130,21 @@ def run_first_run_window(
     port_var = tk.StringVar(value=str(config.bind_port))
     ttk.Entry(settings, textvariable=port_var, width=32).grid(column=1, row=4, sticky="ew", pady=3)
 
+    ttk.Label(settings, text="Database").grid(column=0, row=5, sticky="w")
+    db_var = tk.StringVar(value=config.database_url)
+    ttk.Entry(settings, textvariable=db_var, width=32).grid(column=1, row=5, sticky="ew", pady=3)
+    ttk.Label(settings, text="Pool size").grid(column=0, row=6, sticky="w")
+    pool_var = tk.StringVar(value=str(config.db_pool_size))
+    ttk.Entry(settings, textvariable=pool_var, width=32).grid(column=1, row=6, sticky="ew", pady=3)
+    ttk.Label(
+        settings,
+        text="Leave Database blank for the built-in SQLite (personal / small servers). For a "
+        "medium / large deployment enter a PostgreSQL URL "
+        "(postgresql://user:pass@host:5432/neuron) and optionally raise the pool size.",
+        wraplength=380,
+        foreground="#7C8896",
+    ).grid(column=0, row=7, columnspan=2, sticky="w", pady=(0, 10))
+
     def _show_started(base_url: str) -> None:
         settings.grid_remove()
         for child in started.winfo_children():
@@ -137,15 +174,17 @@ def run_first_run_window(
         )
 
     def _continue() -> None:
-        err = validate_server_name(name_var.get())
+        err = validate_server_name(name_var.get()) or validate_database_url(db_var.get())
         if err:
-            messagebox.showerror("Invalid server name", err)
+            messagebox.showerror("Invalid setting", err)
             return
         updated = updated_config(
             config,
             server_name=name_var.get(),
             bind_host=host_var.get(),
             bind_port=port_var.get(),
+            database_url=db_var.get(),
+            db_pool_size=pool_var.get(),
         )
         try:
             base_url = on_save(updated)
@@ -155,7 +194,7 @@ def run_first_run_window(
         _show_started(base_url)
 
     buttons = ttk.Frame(settings)
-    buttons.grid(column=0, row=5, columnspan=2, pady=(14, 0), sticky="e")
+    buttons.grid(column=0, row=8, columnspan=2, pady=(14, 0), sticky="e")
     ttk.Button(buttons, text="Continue", command=_continue).grid(column=0, row=0)
 
     root.protocol("WM_DELETE_WINDOW", root.destroy)
@@ -214,22 +253,47 @@ def open_settings_window(
     port_var = tk.StringVar(value=str(config.bind_port))
     ttk.Entry(frame, textvariable=port_var, width=32).grid(column=1, row=4, sticky="ew", pady=3)
 
-    ttk.Label(frame, text="Data folder").grid(column=0, row=5, sticky="w")
+    # Database backend — locked once the server has started under a backend (its data
+    # lives there), just like the server name.
+    ttk.Label(frame, text="Database").grid(column=0, row=5, sticky="w")
+    db_var = tk.StringVar(value=config.database_url)
+    db_entry = ttk.Entry(frame, textvariable=db_var, width=32)
+    db_entry.grid(column=1, row=5, sticky="ew", pady=3)
+    ttk.Label(frame, text="Pool size").grid(column=0, row=6, sticky="w")
+    pool_var = tk.StringVar(value=str(config.db_pool_size))
+    pool_entry = ttk.Entry(frame, textvariable=pool_var, width=32)
+    pool_entry.grid(column=1, row=6, sticky="ew", pady=3)
+    if name_locked:
+        db_entry.state(["disabled"])
+        pool_entry.state(["disabled"])
+    db_note = (
+        "Locked — the server has already started under this backend."
+        if name_locked
+        else "Blank = built-in SQLite (personal / small). PostgreSQL URL "
+        "(postgresql://user:pass@host:5432/neuron) = medium / large."
+    )
+    ttk.Label(frame, text=db_note, wraplength=380, foreground="#7C8896").grid(
+        column=0, row=7, columnspan=2, sticky="w", pady=(0, 6)
+    )
+
+    ttk.Label(frame, text="Data folder").grid(column=0, row=8, sticky="w")
     ttk.Label(frame, text=str(config.data_path), foreground="#7C8896", wraplength=300).grid(
-        column=1, row=5, sticky="w", pady=3
+        column=1, row=8, sticky="w", pady=3
     )
 
     def _save() -> None:
         if not name_locked:
-            err = validate_server_name(name_var.get())
+            err = validate_server_name(name_var.get()) or validate_database_url(db_var.get())
             if err:
-                messagebox.showerror("Invalid server name", err)
+                messagebox.showerror("Invalid setting", err)
                 return
         result["value"] = updated_config(
             config,
             server_name=config.server_name if name_locked else name_var.get(),
             bind_host=host_var.get(),
             bind_port=port_var.get(),
+            database_url=config.database_url if name_locked else db_var.get(),
+            db_pool_size=config.db_pool_size if name_locked else pool_var.get(),
         )
         root.destroy()
 
@@ -238,7 +302,7 @@ def open_settings_window(
         root.destroy()
 
     buttons = ttk.Frame(frame)
-    buttons.grid(column=0, row=6, columnspan=2, pady=(14, 0), sticky="e")
+    buttons.grid(column=0, row=9, columnspan=2, pady=(14, 0), sticky="e")
     ttk.Button(buttons, text="Cancel", command=_cancel).grid(column=0, row=0, padx=6)
     ttk.Button(buttons, text="Save", command=_save).grid(column=1, row=0)
 

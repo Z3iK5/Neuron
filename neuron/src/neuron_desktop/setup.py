@@ -71,6 +71,24 @@ def run_interactive_setup(
     server_name = input_fn(f"Server name [{default_name}]: ").strip() or default_name
     admin_username = input_fn("Admin username [admin]: ").strip() or "admin"
 
+    print_fn(
+        "Database — leave blank for the built-in SQLite (personal / small servers);"
+        " for a medium/large deployment enter a PostgreSQL URL."
+    )
+    while True:
+        database_url = input_fn("PostgreSQL URL [blank = SQLite]: ").strip()
+        err = config_module.validate_database_url(database_url)
+        if err is None:
+            break
+        print_fn(err)
+    db_pool_size = 1
+    if database_url:
+        raw = input_fn("PostgreSQL connection pool size [1]: ").strip()
+        try:
+            db_pool_size = max(1, int(raw)) if raw else 1
+        except ValueError:
+            db_pool_size = 1
+
     while True:
         password = getpass_fn("Admin password: ")
         confirm = getpass_fn("Confirm password: ")
@@ -79,7 +97,11 @@ def run_interactive_setup(
         print_fn("Passwords were empty or did not match — please try again.")
 
     config = DesktopConfig(
-        server_name=server_name, data_dir=str(base), admin_username=admin_username
+        server_name=server_name,
+        data_dir=str(base),
+        admin_username=admin_username,
+        database_url=database_url,
+        db_pool_size=db_pool_size,
     )
     return config, password
 

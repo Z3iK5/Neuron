@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from neuron_desktop import config as config_module
-from neuron_desktop import paths, setup, supervisor
+from neuron_desktop import paths, process, setup, supervisor
 from neuron_desktop.config import DesktopConfig
 from neuron_server.app import create_app
 from neuron_server.storage import accounts
@@ -56,13 +56,63 @@ def test_to_server_settings_points_at_data_dir(tmp_path: Path) -> None:
 
 
 def test_config_save_load_roundtrip(tmp_path: Path) -> None:
-    config = DesktopConfig("hs.test", str(tmp_path), "root", bind_port=9999)
+    config = DesktopConfig(
+        "hs.test", str(tmp_path), "root", bind_port=9999,
+        database_url="postgresql://u:p@db/neuron", db_pool_size=8,
+    )
     config_module.save(config, paths.config_path(tmp_path))
     assert config_module.load(paths.config_path(tmp_path)) == config
 
 
+def test_config_loads_without_database_fields(tmp_path: Path) -> None:
+    """Backward compat: a config.json written before the DB fields existed loads,
+    defaulting to the built-in SQLite backend."""
+    import json
+
+    cfg_file = paths.config_path(tmp_path)
+    cfg_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg_file.write_text(
+        json.dumps({"server_name": "old", "data_dir": str(tmp_path), "admin_username": "admin"}),
+        encoding="utf-8",
+    )
+    cfg = config_module.load(cfg_file)
+    assert cfg.database_url == "" and cfg.db_pool_size == 1
+    assert cfg.uses_postgres is False
+
+
+def test_to_server_settings_postgres_backend(tmp_path: Path) -> None:
+    config = DesktopConfig(
+        "pg.server", str(tmp_path), "admin",
+        database_url="postgresql://u:p@db:5432/neuron", db_pool_size=8,
+    )
+    settings = config.to_server_settings()
+    assert settings.database_url == "postgresql://u:p@db:5432/neuron"
+    assert settings.db_pool_size == 8
+    assert config.uses_postgres is True
+
+
+def test_validate_database_url() -> None:
+    assert config_module.validate_database_url("") is None  # blank => SQLite
+    assert config_module.validate_database_url("   ") is None
+    assert config_module.validate_database_url("postgresql://u:p@h:5432/db") is None
+    assert config_module.validate_database_url("postgres://u@h/db") is None
+    assert config_module.validate_database_url("mysql://x") is not None
+    assert config_module.validate_database_url("/var/lib/pg") is not None
+
+
+def test_config_to_env_includes_database_and_pool_size(tmp_path: Path) -> None:
+    config = DesktopConfig(
+        "s", str(tmp_path), "admin",
+        database_url="postgresql://u:p@db/neuron", db_pool_size=8,
+    )
+    env = process.config_to_env(config)
+    assert env["NEURON_SERVER_DATABASE_URL"] == "postgresql://u:p@db/neuron"
+    assert env["NEURON_SERVER_DB_POOL_SIZE"] == "8"
+
+
 def test_interactive_setup_uses_defaults_and_retries_password() -> None:
-    inputs = iter(["", ""])  # accept default server name and admin username
+    # Default server name + admin username, then blank database (built-in SQLite).
+    inputs = iter(["", "", ""])
     passwords = iter(["", "x", "secret-123", "secret-123"])  # empty, mismatch, then match
     messages: list[str] = []
     config, password = setup.run_interactive_setup(
@@ -73,8 +123,35 @@ def test_interactive_setup_uses_defaults_and_retries_password() -> None:
     )
     assert config.admin_username == "admin"
     assert config.server_name == setup.default_server_name()
+    assert config.database_url == ""  # blank => built-in SQLite
+    assert config.db_pool_size == 1
     assert password == "secret-123"
     assert any("did not match" in m for m in messages)
+
+
+def test_interactive_setup_postgres_backend() -> None:
+    answers = [
+        ("Server name", "pg.server"),
+        ("Admin username", "root"),
+        ("PostgreSQL URL", "postgresql://u:p@db:5432/neuron"),
+        ("pool size", "8"),
+    ]
+
+    def _input(prompt: str) -> str:
+        for key, val in answers:
+            if key in prompt:
+                return val
+        return ""
+
+    config, password = setup.run_interactive_setup(
+        Path("/tmp/x"),
+        input_fn=_input,
+        getpass_fn=lambda _prompt: "secret-123",
+        print_fn=lambda _m: None,
+    )
+    assert config.database_url == "postgresql://u:p@db:5432/neuron"
+    assert config.db_pool_size == 8
+    assert config.to_server_settings().database_url == "postgresql://u:p@db:5432/neuron"
 
 
 def test_ensure_admin_account_is_idempotent_and_admin(tmp_path: Path) -> None:
@@ -165,9 +242,16 @@ def test_load_or_create_is_noninteractive_without_a_tty(tmp_path: Path) -> None:
 
 def test_first_run_then_admin_can_sign_in(tmp_path: Path) -> None:
     """The headline flow: empty dir → setup → admin signs in and administers."""
+    def _input(prompt: str) -> str:
+        if "Server name" in prompt:
+            return "localhost"
+        if "PostgreSQL" in prompt:  # blank => built-in SQLite
+            return ""
+        return "admin"
+
     config = setup.perform_first_run(
         tmp_path,
-        input_fn=lambda prompt: "localhost" if "Server name" in prompt else "admin",
+        input_fn=_input,
         getpass_fn=lambda _prompt: "first-run-pw",
         print_fn=lambda _m: None,
     )

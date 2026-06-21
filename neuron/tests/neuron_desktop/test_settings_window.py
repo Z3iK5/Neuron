@@ -39,6 +39,36 @@ def test_updated_config_ignores_blank_or_invalid(tmp_path: Path) -> None:
     assert updated.bind_port == 8008
 
 
+def test_updated_config_applies_database(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    updated = sw.updated_config(
+        cfg,
+        server_name="x",
+        bind_host="",
+        bind_port="8008",
+        database_url="  postgresql://u:p@h:5432/db  ",
+        db_pool_size="8",
+    )
+    assert updated.database_url == "postgresql://u:p@h:5432/db"
+    assert updated.db_pool_size == 8
+
+
+def test_updated_config_blank_database_selects_sqlite(tmp_path: Path) -> None:
+    cfg = DesktopConfig("n", str(tmp_path), "a", database_url="postgresql://x/y", db_pool_size=4)
+    updated = sw.updated_config(
+        cfg, server_name="n", bind_host="", bind_port="8008", database_url="", db_pool_size="1"
+    )
+    assert updated.database_url == ""  # blank => built-in SQLite
+    assert updated.db_pool_size == 1
+
+
+def test_updated_config_none_database_preserved(tmp_path: Path) -> None:
+    cfg = DesktopConfig("n", str(tmp_path), "a", database_url="postgresql://x/y", db_pool_size=4)
+    updated = sw.updated_config(cfg, server_name="n", bind_host="", bind_port="8008")
+    assert updated.database_url == "postgresql://x/y"  # unchanged when not edited
+    assert updated.db_pool_size == 4
+
+
 def test_validate_server_name() -> None:
     assert sw.validate_server_name("chat.example.org") is None
     assert sw.validate_server_name("") is not None
