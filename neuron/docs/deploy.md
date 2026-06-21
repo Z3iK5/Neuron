@@ -66,7 +66,9 @@ Neuron and:
    e.g. `NEURON_SERVER_TRUSTED_PROXIES=172.18.0.2`; use `*` only when Neuron is
    reachable *solely* through the proxy (e.g. bound to localhost or a private
    Docker network). **Leave it empty for a directly-exposed server** — otherwise a
-   client could spoof its IP via a forged header.
+   client could spoof its IP via a forged header. Setting this is also what makes
+   the per-IP rate limits (login spray + sign-up spam) effective behind a proxy —
+   without it every request shares the proxy's single bucket.
 
    Neuron resolves the client as the right-most `X-Forwarded-For` entry that isn't
    one of your trusted proxies, so addresses an attacker prepends are ignored. Make

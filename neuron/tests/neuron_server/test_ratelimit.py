@@ -92,3 +92,89 @@ def test_login_endpoint_is_rate_limited(tmp_path: Path) -> None:
         assert body["errcode"] == "M_LIMIT_EXCEEDED"
         assert isinstance(body["retry_after_ms"], int)
         assert last.headers.get("Retry-After")
+
+
+def test_ip_keyed_limiters_raise_and_respect_disabled() -> None:
+    limiters = build_rate_limiters(
+        NeuronServerSettings(
+            rate_limit_registration_burst=1,
+            rate_limit_registration_hz=0.001,
+            rate_limit_login_ip_burst=1,
+            rate_limit_login_ip_hz=0.001,
+        )
+    )
+    limiters.check_registration("1.2.3.4")  # single token
+    with pytest.raises(MatrixError) as exc:
+        limiters.check_registration("1.2.3.4")
+    assert exc.value.status_code == 429
+    limiters.check_registration("5.6.7.8")  # a different IP has its own bucket
+
+    limiters.check_login_ip("1.2.3.4")
+    with pytest.raises(MatrixError):
+        limiters.check_login_ip("1.2.3.4")
+
+    disabled = build_rate_limiters(
+        NeuronServerSettings(
+            rate_limit_enabled=False,
+            rate_limit_registration_burst=1,
+            rate_limit_login_ip_burst=1,
+        )
+    )
+    for _ in range(5):
+        disabled.check_registration("1.2.3.4")  # never raises
+        disabled.check_login_ip("1.2.3.4")
+
+
+def _register(client: TestClient, username: str):  # type: ignore[no-untyped-def]
+    session = client.post(_REG, json={"username": username, "password": "pw-123456"}).json()[
+        "session"
+    ]
+    return client.post(
+        _REG,
+        json={
+            "username": username,
+            "password": "pw-123456",
+            "auth": {"type": "m.login.dummy", "session": session},
+        },
+    )
+
+
+def test_registration_is_rate_limited_by_ip(tmp_path: Path) -> None:
+    settings = NeuronServerSettings(
+        name="neuron.local",
+        database_url=f"sqlite:///{tmp_path / 'hs.db'}",
+        rate_limit_registration_burst=2,
+        rate_limit_registration_hz=0.001,  # no refill during the test
+    )
+    with TestClient(create_app(settings)) as client:
+        # The limit is charged on the completing request, so one sign-up = one token.
+        assert _register(client, "alice").status_code == 200
+        assert _register(client, "bob").status_code == 200
+        denied = _register(client, "carol")
+        assert denied.status_code == 429
+        assert denied.json()["errcode"] == "M_LIMIT_EXCEEDED"
+
+
+def test_login_is_rate_limited_by_ip_across_accounts(tmp_path: Path) -> None:
+    settings = NeuronServerSettings(
+        name="neuron.local",
+        database_url=f"sqlite:///{tmp_path / 'hs.db'}",
+        rate_limit_login_ip_burst=2,
+        rate_limit_login_ip_hz=0.001,
+    )
+    with TestClient(create_app(settings)) as client:
+        def _try(user: str):  # type: ignore[no-untyped-def]
+            return client.post(
+                _LOGIN,
+                json={
+                    "type": "m.login.password",
+                    "identifier": {"type": "m.id.user", "user": user},
+                    "password": "x",
+                },
+            )
+
+        # Distinct accounts each time, so the per-account bucket never trips — but
+        # the shared per-IP bucket (burst 2) does on the third attempt.
+        assert _try("a").status_code != 429  # 401 (unknown user), not rate-limited
+        assert _try("b").status_code != 429
+        assert _try("c").status_code == 429

@@ -57,7 +57,7 @@ from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
 from neuron_server.media.store import build_media_store
 from neuron_server.metrics import install_metrics
-from neuron_server.proxy import ProxyHeadersMiddleware
+from neuron_server.proxy import ProxyHeadersMiddleware, client_ip
 from neuron_server.ratelimit import build_rate_limiters
 from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
@@ -282,6 +282,9 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
                 branding.get_started_html(settings.name, can_register=False),
                 status_code=403,
             )
+
+        # Same sign-up throttle as the Matrix /register endpoint (per client IP).
+        app.state.rate_limiters.check_registration(client_ip(request))
 
         try:
             result = await auth.register(

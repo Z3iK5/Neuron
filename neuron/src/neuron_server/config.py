@@ -82,9 +82,12 @@ class NeuronServerSettings(BaseSettings):
     )
 
     # --- Rate limiting ------------------------------------------------------
-    # In-process token-bucket limits on abuse-prone endpoints, keyed by account
-    # identity (not client IP, so they work behind a proxy). Enabled by default
-    # with generous bursts so normal use is unaffected; tune per deployment.
+    # In-process token-bucket limits on abuse-prone endpoints. Account-keyed limits
+    # (login-by-account, message) work behind a proxy with no extra config; the
+    # IP-keyed limits (login-by-IP, registration) need the real client address, so
+    # set NEURON_SERVER_TRUSTED_PROXIES when behind a reverse proxy (else every
+    # request appears to come from the proxy and shares one bucket). Enabled by
+    # default with generous bursts so normal use is unaffected; tune per deployment.
     rate_limit_enabled: bool = Field(
         default=True, description="Enable request rate limiting."
     )
@@ -94,6 +97,21 @@ class NeuronServerSettings(BaseSettings):
     )
     rate_limit_login_burst: int = Field(
         default=5, gt=0, description="Burst of login attempts allowed per account."
+    )
+    # Password login, keyed by client IP — catches one host spraying many accounts
+    # (which the per-account limit above misses). Looser than per-account.
+    rate_limit_login_ip_hz: float = Field(
+        default=0.5, gt=0, description="Sustained login attempts/sec per client IP."
+    )
+    rate_limit_login_ip_burst: int = Field(
+        default=15, gt=0, description="Burst of login attempts allowed per client IP."
+    )
+    # Account registration, keyed by client IP (sign-up spam / mass-account defence).
+    rate_limit_registration_hz: float = Field(
+        default=0.03, gt=0, description="Sustained registrations/sec per client IP."
+    )
+    rate_limit_registration_burst: int = Field(
+        default=5, gt=0, description="Burst of registrations allowed per client IP."
     )
     # Message sending, keyed by the sender (spam defence).
     rate_limit_message_hz: float = Field(
