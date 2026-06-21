@@ -45,6 +45,13 @@ class DesktopConfig:
     # initialized (the data lives in the chosen database).
     database_url: str = ""
     db_pool_size: int = 1
+    # Tunable runtime settings, editable from the console Settings page (applied on
+    # the next server restart). Defaults mirror NeuronServerSettings.
+    rate_limit_enabled: bool = True
+    metrics_enabled: bool = False
+    state_res_v2: bool = False
+    max_upload_bytes: int = 50 * 1024 * 1024
+    log_level: str = "INFO"
 
     @property
     def data_path(self) -> Path:
@@ -79,6 +86,11 @@ class DesktopConfig:
             admin_users=self.admin_username,
             first_user_admin=self.first_user_admin,
             registration_enabled=self.registration_enabled,
+            rate_limit_enabled=self.rate_limit_enabled,
+            metrics_enabled=self.metrics_enabled,
+            state_res_v2=self.state_res_v2,
+            max_upload_bytes=self.max_upload_bytes,
+            log_level=self.log_level,
             bind_host=self.bind_host,
             bind_port=self.bind_port,
         )

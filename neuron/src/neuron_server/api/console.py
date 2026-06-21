@@ -986,28 +986,63 @@ async def settings_page(
         "before first run, or create a new server.</p></div>"
     )
 
-    # Registration (editable when run by the desktop app).
-    checked = " checked" if settings.registration_enabled else ""
+    # Runtime settings (editable when run by the desktop app; restart-applied).
     if editable:
+        def _check(name: str, label: str, on: bool) -> str:
+            mark = " checked" if on else ""
+            return (
+                '<label class="row" style="font-weight:400;margin:.2rem 0 .8rem">'
+                f'<input type="checkbox" name="{name}" value="true"{mark} '
+                f'style="width:auto;margin:0 .5rem 0 0"> {label}</label>'
+            )
+
+        log_opts = "".join(
+            f'<option value="{lv}"{" selected" if settings.log_level == lv else ""}>{lv}</option>'
+            for lv in ("DEBUG", "INFO", "WARNING", "ERROR")
+        )
         registration = (
-            '<div class="panel"><h2>Registration</h2>'
+            '<div class="panel"><h2>Settings</h2>'
             '<form method="post" action="/console/settings">'
             f"{_csrf_field(request)}"
-            '<label class="row" style="font-weight:400;margin:.2rem 0 1rem">'
-            f'<input type="checkbox" name="registration_enabled" value="true"{checked} '
-            'style="width:auto;margin:0 .5rem 0 0"> Allow open registration '
-            "(anyone can create an account)</label>"
-            '<button class="btn" type="submit">Save</button></form>'
+            + _check(
+                "registration_enabled",
+                "Allow open registration (anyone can create an account)",
+                settings.registration_enabled,
+            )
+            + _check(
+                "first_user_admin",
+                "Make the first account that registers a server admin",
+                settings.first_user_admin,
+            )
+            + _check(
+                "rate_limit_enabled",
+                "Rate-limit login attempts and message sending",
+                settings.rate_limit_enabled,
+            )
+            + _check(
+                "metrics_enabled",
+                "Expose a Prometheus /metrics endpoint",
+                settings.metrics_enabled,
+            )
+            + _check(
+                "state_res_v2",
+                "Use state resolution v2 for inbound federation",
+                settings.state_res_v2,
+            )
+            + '<label for="mu">Max upload size (MiB)</label>'
+            f'<input id="mu" name="max_upload_mib" '
+            f'value="{settings.max_upload_bytes // (1024 * 1024)}">'
+            + '<label for="ll">Log level</label>'
+            f'<select id="ll" name="log_level">{log_opts}</select>'
+            + '<button class="btn" type="submit" style="margin-top:.9rem">Save</button></form>'
             '<p class="note" style="margin-top:.6rem">Changes take effect after a server '
             "restart (Neuron tray menu &rarr; <em>Restart server</em>).</p></div>"
         )
     else:
-        state = "open" if settings.registration_enabled else "closed (invite-only)"
         registration = (
-            f'<div class="panel"><h2>Registration</h2><p class="note">Registration is '
-            f"<strong>{state}</strong>. Editing settings here needs the desktop app; set "
-            "<code>NEURON_SERVER_REGISTRATION_ENABLED</code> in the environment "
-            "otherwise.</p></div>"
+            '<div class="panel"><h2>Settings</h2><p class="note">Editing settings here needs '
+            "the desktop app. On a standalone server, set the <code>NEURON_SERVER_*</code> "
+            "environment variables instead.</p></div>"
         )
 
     # Doctor — structured health checks rendered inline.
@@ -1046,19 +1081,45 @@ async def settings_save(
     _: str = Depends(require_console_admin),
     __: None = Depends(csrf_protect),
     registration_enabled: bool = Form(False),
+    first_user_admin: bool = Form(False),
+    rate_limit_enabled: bool = Form(False),
+    metrics_enabled: bool = Form(False),
+    state_res_v2: bool = Form(False),
+    max_upload_mib: str = Form(""),
+    log_level: str = Form("INFO"),
 ) -> Response:
     settings = _settings(request)
-    if settings.desktop_config_path:
-        _save_desktop_config_key(
-            settings.desktop_config_path, "registration_enabled", registration_enabled
-        )
-        _flash(
-            request,
-            "Settings saved. Restart the server to apply "
-            "(Neuron tray menu → Restart server).",
-        )
-    else:
+    if not settings.desktop_config_path:
         _flash(request, "This server is not managed by the desktop app; settings were not saved.")
+        return RedirectResponse("/console/settings", status_code=303)
+
+    # Validate before writing: a bad value would only surface (and fail) at the
+    # next server startup, since pydantic validates config at boot, not on save.
+    try:
+        mib = int(max_upload_mib)
+    except ValueError:
+        mib = 0
+    if mib < 1:
+        _flash(request, "Max upload size must be a whole number of MiB (at least 1).")
+        return RedirectResponse("/console/settings", status_code=303)
+    if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+        log_level = "INFO"
+
+    updates = {
+        "registration_enabled": registration_enabled,
+        "first_user_admin": first_user_admin,
+        "rate_limit_enabled": rate_limit_enabled,
+        "metrics_enabled": metrics_enabled,
+        "state_res_v2": state_res_v2,
+        "max_upload_bytes": mib * 1024 * 1024,
+        "log_level": log_level,
+    }
+    for key, value in updates.items():
+        _save_desktop_config_key(settings.desktop_config_path, key, value)
+    _flash(
+        request,
+        "Settings saved. Restart the server to apply (Neuron tray menu → Restart server).",
+    )
     return RedirectResponse("/console/settings", status_code=303)
 
 
