@@ -93,6 +93,15 @@ class Database(abc.ABC):
         """
         return None
 
+    async def heartbeat_positions(self) -> None:
+        """Periodically advance idle streams' stored positions across instances.
+
+        Multi-writer backends call this on an interval so an idle (or crashed)
+        instance's stale position row stops holding the shared ``/sync`` floor back.
+        No-op by default — SQLite is a single instance with no shared floor.
+        """
+        return None
+
     @asynccontextmanager
     async def startup_lock(self) -> AsyncIterator[None]:
         """Serialize cross-process startup (migrations + sequence seeding).

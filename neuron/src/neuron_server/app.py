@@ -158,14 +158,28 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             app.state.federation_sender.retry_all, settings.federation_retry_interval_s
         )
         app.state.retry_flusher = flusher
+        # Multi-writer stream-position heartbeat (Postgres only): advances an idle
+        # worker's stored positions to the committed max so it stops holding the
+        # shared /sync floor back. No-op/pointless for SQLite's single instance.
+        position_heartbeat: RetryFlusher | None = None
+        if settings.database_url.startswith(("postgresql://", "postgres://")):
+            position_heartbeat = RetryFlusher(
+                db.heartbeat_positions,
+                settings.position_heartbeat_interval_s,
+                name="position heartbeat",
+            )
         # Start the notifier transport (a no-op for the in-process backend) before
         # serving, so cross-worker /sync wakes are received from the first request.
         await notifier.start()
         flusher.start()
+        if position_heartbeat is not None:
+            position_heartbeat.start()
         try:
             yield
         finally:
             await flusher.stop()
+            if position_heartbeat is not None:
+                await position_heartbeat.stop()
             # Tear down the notifier (closes the dedicated LISTEN connection)
             # before the pool, so it never outlives the database.
             await notifier.stop()

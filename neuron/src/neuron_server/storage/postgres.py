@@ -64,11 +64,22 @@ class _StreamTracker:
     advancing past a not-yet-committed row.
     """
 
-    __slots__ = ("_in_flight", "_max_seen")
+    __slots__ = ("_in_flight", "_max_seen", "_pending")
 
     def __init__(self, initial: int) -> None:
         self._in_flight: set[int] = set()
         self._max_seen = initial
+        # Allocations whose nextval is in flight (id consumed at the DB but not yet
+        # in _in_flight). Counted so has_in_flight() covers the nextval->allocate
+        # window — the heartbeat must treat that window as busy or it could publish
+        # a position above a consumed-but-uncommitted id (a lost-event TOCTOU).
+        self._pending = 0
+
+    def begin_alloc(self) -> None:
+        self._pending += 1
+
+    def end_alloc(self) -> None:
+        self._pending -= 1
 
     def allocate(self, stream_id: int) -> None:
         self._in_flight.add(stream_id)
@@ -84,6 +95,9 @@ class _StreamTracker:
         if self._in_flight:
             return min(self._in_flight) - 1
         return self._max_seen
+
+    def has_in_flight(self) -> bool:
+        return bool(self._in_flight) or self._pending > 0
 
 
 def _to_pg(sql: str) -> str:
@@ -223,18 +237,29 @@ class PostgresDatabase(Database):
     async def next_stream_id(self, name: str) -> int:
         # nextval is non-transactional: concurrent connections get distinct ids
         # with no lock held for the duration of the caller's transaction.
-        stream_id = int(await self.fetchval(f"SELECT nextval('{self._seq(name)}')"))
+        nextval = f"SELECT nextval('{self._seq(name)}')"
         tracker = self._trackers.get(name)
         pending = _tx_pending.get()
-        if tracker is not None and pending is not None:
-            # Only ids allocated INSIDE a transaction move the floor: they insert a
-            # tracked row, so the tracker holds the position back until they commit
-            # and advances it on finish. A bare nextval outside a transaction (typing,
-            # or a read-only stream-position cutoff like federation backfill /
-            # backward pagination) inserts no row for this id — tracking it would
-            # bump the floor to a phantom id — so it only burns a sequence value.
-            tracker.allocate(stream_id)
-            pending.append((name, stream_id))
+        # Only ids allocated INSIDE a transaction move the floor: they insert a
+        # tracked row, so the tracker holds the position back until they commit and
+        # advances it on finish. A bare nextval outside a transaction (typing, or a
+        # read-only stream-position cutoff like federation backfill / backward
+        # pagination) inserts no row for this id — tracking it would bump the floor
+        # to a phantom id — so it only burns a sequence value.
+        if tracker is None or pending is None:
+            return int(await self.fetchval(nextval))
+        # Mark the allocation in flight BEFORE the nextval await: the id is consumed
+        # at the DB during the await but not yet in _in_flight, and the heartbeat
+        # must treat that window as busy or it could publish a position above it.
+        tracker.begin_alloc()
+        try:
+            stream_id = int(await self.fetchval(nextval))
+        except BaseException:
+            tracker.end_alloc()
+            raise
+        tracker.allocate(stream_id)
+        tracker.end_alloc()
+        pending.append((name, stream_id))
         return stream_id
 
     async def get_stream_position(self, name: str) -> int:
@@ -250,9 +275,8 @@ class PostgresDatabase(Database):
             )
         )
 
-    async def _flush_position(self, conn: Any, name: str) -> None:
-        """Upsert this instance's current position for ``name`` (never regressing)."""
-        position = self._trackers[name].position()
+    async def _flush_position(self, conn: Any, name: str, position: int) -> None:
+        """Upsert this instance's position for ``name`` (GREATEST so it never regresses)."""
         await conn.execute(
             "INSERT INTO stream_positions (stream_name, instance_name, stream_id)"
             " VALUES ($1, $2, $3)"
@@ -262,6 +286,55 @@ class PostgresDatabase(Database):
             self._instance_name,
             position,
         )
+
+    async def heartbeat_positions(self) -> None:
+        """Advance idle streams' stored positions to the committed MAX.
+
+        A stream with no in-flight ids on this instance imposes no constraint, so
+        its position can rise to ``MAX(col)`` — releasing the global ``MIN`` floor
+        that an idle (or crashed-then-restarted) instance would otherwise pin low.
+        A stream that still has in-flight ids is left to its commit flush (advancing
+        it past an uncommitted id would expose that id). ``MAX(col)`` excludes
+        uncommitted rows, and any genuine gap is held by whichever instance owns the
+        in-flight id, so this never exposes a not-yet-committed row.
+        """
+        if self._pool is None:
+            return
+        # Single-instance short-circuit: with only this writer there is no shared
+        # MIN floor to release, so the whole sweep is redundant. One cheap query
+        # keeps the common single-process case from holding the (size-1) pool every
+        # interval. A second worker's startup seeds its rows, activating the sweep.
+        async with self._pool.acquire() as conn:
+            others = await conn.fetchval(
+                "SELECT 1 FROM stream_positions WHERE instance_name <> $1 LIMIT 1",
+                self._instance_name,
+            )
+        if others is None:
+            return
+        for name, (table, col) in STREAMS.items():
+            tracker = self._trackers.get(name)
+            if tracker is None or tracker.has_in_flight():
+                continue  # busy streams advance via their commit flush
+            try:
+                # Acquire per stream (not for the whole sweep) so other consumers can
+                # interleave on a size-1 pool; the MAX read is inside the try so a
+                # transient error skips just this stream and records it for retry.
+                async with self._pool.acquire() as conn:
+                    max_id = int(
+                        await conn.fetchval(f"SELECT COALESCE(MAX({col}), 0) FROM {table}")
+                    )
+                    # Re-check after the read: an allocation may have begun during it.
+                    # MAX excludes uncommitted rows, so a value committed out of order
+                    # above a now-in-flight id would otherwise be published as the floor.
+                    if tracker.has_in_flight():
+                        continue
+                    await self._flush_position(conn, name, max_id)
+                    self._needs_reflush.discard(name)
+            except Exception:
+                self._needs_reflush.add(name)
+                _logger.warning(
+                    "heartbeat position flush failed for %s; will retry", name, exc_info=True
+                )
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
@@ -300,7 +373,7 @@ class PostgresDatabase(Database):
                 # stream. A failure only ever leaves the floor behind, never ahead.
                 for name in affected | self._needs_reflush:
                     try:
-                        await self._flush_position(conn, name)
+                        await self._flush_position(conn, name, self._trackers[name].position())
                         self._needs_reflush.discard(name)
                     except Exception:
                         self._needs_reflush.add(name)

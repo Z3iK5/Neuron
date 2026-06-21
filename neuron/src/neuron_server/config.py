@@ -152,6 +152,14 @@ class NeuronServerSettings(BaseSettings):
         gt=0,
         description="Interval for retrying queued outbound federation transactions.",
     )
+    # How often (seconds) each Postgres worker re-publishes its stream positions so
+    # an idle instance advances to the committed max and stops holding the shared
+    # /sync floor back. Only runs on Postgres with multiple worker processes.
+    position_heartbeat_interval_s: float = Field(
+        default=30.0,
+        gt=0,
+        description="Interval for the multi-writer stream-position heartbeat (Postgres).",
+    )
     # Route inbound-federation authorization through state resolution v2. Off by
     # default: the linear single-extremity model makes it a no-op today, but it
     # keeps the (already-tested) algorithm on the live path and is the seam for
