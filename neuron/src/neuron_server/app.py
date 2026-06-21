@@ -128,6 +128,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             settings.name,
             settings.registration_enabled,
             first_user_admin=settings.first_user_admin,
+            uia_session_ttl_s=settings.uia_session_ttl_s,
         )
         app.state.federation_sender = FederationSender(
             db, settings.name, app.state.federation_client
@@ -174,16 +175,26 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
                 settings.position_heartbeat_interval_s,
                 name="position heartbeat",
             )
+        # Periodically drop expired UIA sessions so the (now persisted) table can't
+        # grow without bound from abandoned registrations. Runs on every backend;
+        # cadence is the TTL capped to 10 min so rows clear soon after expiry.
+        uia_sweeper = RetryFlusher(
+            app.state.auth.sweep_uia,
+            max(60.0, min(settings.uia_session_ttl_s, 600.0)),
+            name="uia session sweep",
+        )
         # Start the notifier transport (a no-op for the in-process backend) before
         # serving, so cross-worker /sync wakes are received from the first request.
         await notifier.start()
         flusher.start()
+        uia_sweeper.start()
         if position_heartbeat is not None:
             position_heartbeat.start()
         try:
             yield
         finally:
             await flusher.stop()
+            await uia_sweeper.stop()
             if position_heartbeat is not None:
                 await position_heartbeat.stop()
             # Tear down the notifier (closes the dedicated LISTEN connection)

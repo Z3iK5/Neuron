@@ -6,32 +6,47 @@ multi-stage flow: the server replies ``401`` with a list of acceptable flows and
 a ``session`` id; the client repeats the request, supplying ``auth`` that
 references that session. We track the open sessions here.
 
-For HS-1 the only flow we need is ``m.login.dummy`` (registration). Sessions are
-held in memory — they are short-lived and it is fine for them not to survive a
-restart (the client simply starts the flow again).
+The only flow we need today is ``m.login.dummy`` (registration). Sessions live in
+the database so the challenge and the retry can be served by different workers
+(no sticky load balancer required). A background sweep removes sessions older than
+the configured TTL, since an abandoned challenge would otherwise leave a row
+behind forever.
 """
 
 from __future__ import annotations
 
 import secrets
+import time
+
+from neuron_server.storage import uia as uia_store
+from neuron_server.storage.database import Database
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 class UiaSessionStore:
-    """An in-memory set of open UIA session ids."""
+    """A database-backed set of open UIA session ids (shared across workers)."""
 
-    def __init__(self) -> None:
-        self._sessions: set[str] = set()
+    def __init__(self, db: Database, *, ttl_ms: int) -> None:
+        self._db = db
+        self._ttl_ms = ttl_ms
 
-    def create(self) -> str:
+    async def create(self) -> str:
         """Open a new session and return its id."""
         session_id = secrets.token_urlsafe(16)
-        self._sessions.add(session_id)
+        await uia_store.create_session(self._db, session_id, _now_ms())
         return session_id
 
-    def exists(self, session_id: str) -> bool:
+    async def exists(self, session_id: str) -> bool:
         """Return True if ``session_id`` is a known open session."""
-        return session_id in self._sessions
+        return await uia_store.session_exists(self._db, session_id)
 
-    def complete(self, session_id: str) -> None:
+    async def complete(self, session_id: str) -> None:
         """Close a session once its flow has been satisfied."""
-        self._sessions.discard(session_id)
+        await uia_store.delete_session(self._db, session_id)
+
+    async def sweep_expired(self) -> None:
+        """Delete sessions older than the TTL (called periodically by a sweeper)."""
+        await uia_store.delete_expired(self._db, _now_ms() - self._ttl_ms)

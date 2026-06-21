@@ -59,9 +59,9 @@ async def register(request: Request, auth: AuthService = Depends(get_auth)) -> A
 
     body = await _json_body(request)
     auth_data = body.get("auth")
-    if not auth.uia_satisfied(auth_data):
+    if not await auth.uia_satisfied(auth_data):
         # Challenge: ask the client to complete the dummy stage and retry.
-        session = auth.begin_uia()
+        session = await auth.begin_uia()
         return JSONResponse(
             status_code=401,
             content={
@@ -79,7 +79,7 @@ async def register(request: Request, auth: AuthService = Depends(get_auth)) -> A
         initial_device_display_name=body.get("initial_device_display_name"),
         inhibit_login=bool(body.get("inhibit_login", False)),
     )
-    auth.complete_uia(auth_data)
+    await auth.complete_uia(auth_data)
 
     if isinstance(result, LoginResult):
         return _login_payload(result)

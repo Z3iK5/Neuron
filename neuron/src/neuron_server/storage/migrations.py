@@ -424,6 +424,20 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE federation_outbox ADD COLUMN owner TEXT",
         ),
     ),
+    Migration(
+        version=19,
+        name="uia_sessions",
+        # Shared User-Interactive-Auth sessions: registration is a 401-challenge then
+        # retry. With >1 worker (and no sticky load balancer) the retry can land on a
+        # different worker, so the open session must live in the database, not in one
+        # worker's memory. A background sweep removes expired rows (created_ts).
+        statements=(
+            "CREATE TABLE IF NOT EXISTS uia_sessions ("
+            " session_id TEXT PRIMARY KEY,"
+            " created_ts BIGINT NOT NULL"
+            ")",
+        ),
+    ),
 )
 
 
