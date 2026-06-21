@@ -39,6 +39,9 @@ def config_to_env(config: DesktopConfig) -> dict[str, str]:
         "NEURON_SERVER_NAME": settings.name,
         "NEURON_SERVER_PUBLIC_BASE_URL": settings.public_base_url,
         "NEURON_SERVER_DATABASE_URL": settings.database_url,
+        # PostgreSQL connection-pool size (ignored by SQLite); raised for medium/large
+        # deployments. Without this the child server defaults to 1.
+        "NEURON_SERVER_DB_POOL_SIZE": str(settings.db_pool_size),
         "NEURON_SERVER_MEDIA_STORE_PATH": settings.media_store_path,
         "NEURON_SERVER_SIGNING_KEY_PATH": settings.signing_key_path,
         "NEURON_SERVER_ADMIN_USERS": settings.admin_users,
