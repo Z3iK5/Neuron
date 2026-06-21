@@ -18,11 +18,22 @@ _logger = get_logger(__name__)
 
 
 class RetryFlusher:
-    """Runs ``flush`` on a fixed interval until stopped."""
+    """Runs an async callable on a fixed interval until stopped.
 
-    def __init__(self, flush: Callable[[], Awaitable[None]], interval_s: float = 30.0) -> None:
+    A small generic interval runner — used for the federation send-outbox retry and
+    the multi-writer stream-position heartbeat. ``name`` only labels error logs.
+    """
+
+    def __init__(
+        self,
+        flush: Callable[[], Awaitable[None]],
+        interval_s: float = 30.0,
+        *,
+        name: str = "federation retry flush",
+    ) -> None:
         self._flush = flush
         self._interval = interval_s
+        self._name = name
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -43,6 +54,6 @@ class RetryFlusher:
         while True:
             try:
                 await self._flush()
-            except Exception:  # a failed flush must not kill the loop
-                _logger.exception("federation retry flush failed")
+            except Exception:  # a failed run must not kill the loop
+                _logger.exception("%s failed", self._name)
             await asyncio.sleep(self._interval)

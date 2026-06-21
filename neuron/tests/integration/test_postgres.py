@@ -213,6 +213,105 @@ async def test_floor_held_across_instances() -> None:
         await db_b.disconnect()
 
 
+_DL_INSERT = "INSERT INTO device_list_changes (stream_id, user_id) VALUES (?, ?)"
+
+
+async def test_heartbeat_advances_idle_instance_floor() -> None:
+    """An idle instance pins the MIN-across-instances floor at its last position.
+    The heartbeat advances an idle stream to the committed MAX, releasing the floor
+    so another instance's higher committed id becomes visible to /sync. (device_lists
+    is used for a minimal insertable row; the mechanism is identical for events.)"""
+    await _reset_schema()
+    db_a = connect_database(_PG, pool_size=2, instance_name="a")
+    db_b = connect_database(_PG, pool_size=2, instance_name="b")
+    await db_a.connect()
+    await db_b.connect()
+    try:
+        await _migrate(db_a)
+        await db_b.ensure_stream_sequences()
+        async with db_a.transaction():
+            a1 = await db_a.next_stream_id("device_lists")
+            await db_a.execute(_DL_INSERT, (a1, "@a:pg.test"))
+        async with db_b.transaction():
+            b1 = await db_b.next_stream_id("device_lists")
+            await db_b.execute(_DL_INSERT, (b1, "@b:pg.test"))
+        assert b1 > a1
+        # A is idle at a1; the floor is held there by A's row.
+        assert await db_b.get_stream_position("device_lists") == a1
+        # A's heartbeat advances its idle position to the committed MAX.
+        await db_a.heartbeat_positions()
+        assert await db_b.get_stream_position("device_lists") == b1
+    finally:
+        await db_a.disconnect()
+        await db_b.disconnect()
+
+
+async def test_heartbeat_does_not_advance_past_in_flight() -> None:
+    """The heartbeat must never expose a not-yet-committed id: MAX(col) excludes it
+    and the owning (busy) instance is skipped, so the floor stays below it."""
+    await _reset_schema()
+    db_a = connect_database(_PG, pool_size=2, instance_name="a")
+    db_b = connect_database(_PG, pool_size=2, instance_name="b")
+    await db_a.connect()
+    await db_b.connect()
+    try:
+        await _migrate(db_a)
+        await db_b.ensure_stream_sequences()
+        allocated = asyncio.Event()
+        release = asyncio.Event()
+        a_id: dict[str, int] = {}
+
+        async def hold_a() -> None:
+            async with db_a.transaction():
+                a_id["v"] = await db_a.next_stream_id("device_lists")
+                await db_a.execute(_DL_INSERT, (a_id["v"], "@a:pg.test"))
+                allocated.set()
+                await release.wait()  # hold the row uncommitted
+
+        task = asyncio.create_task(hold_a())
+        await allocated.wait()
+        # Heartbeat both instances while A's row is in flight (uncommitted).
+        await db_b.heartbeat_positions()  # B idle -> MAX(col) excludes A's row
+        await db_a.heartbeat_positions()  # A is busy for device_lists -> skipped
+        assert await db_b.get_stream_position("device_lists") < a_id["v"]
+        release.set()
+        await task
+    finally:
+        await db_a.disconnect()
+        await db_b.disconnect()
+
+
+async def test_heartbeat_skips_stream_with_pending_allocation() -> None:
+    """Guards the nextval->allocate TOCTOU: while an allocation is in flight (id
+    consumed at the DB but not yet tracked), the heartbeat must NOT advance the
+    stream to MAX(col) — a higher id committed out of order would otherwise be
+    published as the floor above the in-flight id (a lost event)."""
+    await _reset_schema()
+    db_a = connect_database(_PG, pool_size=2, instance_name="a")
+    db_b = connect_database(_PG, pool_size=2, instance_name="b")
+    await db_a.connect()
+    await db_b.connect()
+    try:
+        await _migrate(db_a)
+        await db_b.ensure_stream_sequences()
+        # B commits a higher row so MAX(col) exceeds A's stored position.
+        async with db_b.transaction():
+            sid = await db_b.next_stream_id("device_lists")
+            await db_b.execute(_DL_INSERT, (sid, "@b:pg.test"))
+        # Simulate A's nextval->allocate limbo: consumed-but-untracked allocation.
+        db_a._trackers["device_lists"].begin_alloc()  # noqa: SLF001 - white-box test
+        before = await db_a.get_stream_position("device_lists")
+        await db_a.heartbeat_positions()  # must skip device_lists (busy via pending)
+        assert await db_a.get_stream_position("device_lists") == before
+        # Once the allocation resolves and the stream is idle, the heartbeat advances.
+        db_a._trackers["device_lists"].end_alloc()  # noqa: SLF001 - white-box test
+        await db_a.heartbeat_positions()
+        assert await db_a.get_stream_position("device_lists") == sid
+    finally:
+        await db_a.disconnect()
+        await db_b.disconnect()
+
+
 async def test_readonly_cutoff_allocation_does_not_pollute_floor() -> None:
     """A read-only cutoff (a bare nextval outside a transaction, as federation
     backfill / backward pagination do) inserts no row, so it must not advance the
