@@ -57,6 +57,7 @@ from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
 from neuron_server.media.store import build_media_store
 from neuron_server.metrics import install_metrics
+from neuron_server.proxy import ProxyHeadersMiddleware
 from neuron_server.ratelimit import build_rate_limiters
 from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
@@ -197,8 +198,18 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         secret_key=settings.effective_session_secret(),
         session_cookie=settings.session_cookie_name,
         same_site="lax",
-        https_only=False,  # local/dev over HTTP; set True behind HTTPS in production
+        # HTTP for local/desktop; set NEURON_SERVER_SESSION_HTTPS_ONLY=true in any
+        # production deployment served over HTTPS (the cookie carries the login).
+        https_only=settings.session_https_only,
     )
+
+    # Trusted reverse-proxy support: rewrite the client IP/scheme from X-Forwarded-*
+    # when behind a proxy. Added last so it runs OUTERMOST — every later middleware
+    # and route then sees the real client address. Skipped (raw TCP peer used) when
+    # no proxies are trusted, the correct default for a direct/desktop server.
+    trusted = settings.trusted_proxy_set()
+    if trusted:
+        app.add_middleware(ProxyHeadersMiddleware, trusted=trusted)
 
     @app.exception_handler(MatrixError)
     async def _on_matrix_error(request: Request, exc: MatrixError) -> JSONResponse:

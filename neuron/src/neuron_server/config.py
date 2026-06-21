@@ -224,6 +224,24 @@ class NeuronServerSettings(BaseSettings):
     bind_host: str = Field(default="127.0.0.1", description="ASGI bind host.")
     bind_port: int = Field(default=8008, gt=0, description="ASGI bind port.")
 
+    # --- Reverse proxy ------------------------------------------------------
+    # When Neuron runs behind a reverse proxy / load balancer, the TCP peer is the
+    # proxy, so the real client address arrives in X-Forwarded-For and the original
+    # scheme in X-Forwarded-Proto. Honouring those headers blindly lets clients
+    # spoof their IP, so we only trust them from the proxy IP(s) listed here.
+    # Comma-separated IPs of your proxy hop(s), e.g. "10.0.0.1,10.0.0.2"; "*" trusts
+    # any immediate peer (only safe when the server is reachable solely through the
+    # proxy, e.g. bound to localhost). Empty (the default) trusts no proxy headers —
+    # correct for a directly-exposed or desktop server.
+    trusted_proxies: str = Field(
+        default="",
+        description="Comma-separated proxy IPs to trust for X-Forwarded-* (or '*').",
+    )
+
+    def trusted_proxy_set(self) -> frozenset[str]:
+        """Parse ``trusted_proxies`` into a set of peer IPs (or ``{'*'}``)."""
+        return frozenset(p.strip() for p in self.trusted_proxies.split(",") if p.strip())
+
     # --- Logging ------------------------------------------------------------
     log_level: str = Field(default="INFO", description="Python log level name.")
     log_format: str = Field(
@@ -244,6 +262,13 @@ class NeuronServerSettings(BaseSettings):
     session_cookie_name: str = Field(
         default="neuron_session",
         description="Cookie name for the admin-console session.",
+    )
+    # Mark the session cookie Secure so browsers only send it over HTTPS. Off by
+    # default for local/desktop use over plain HTTP; turn ON in any production
+    # deployment served over HTTPS (the cookie carries the admin login session).
+    session_https_only: bool = Field(
+        default=False,
+        description="Set the admin-console session cookie Secure (HTTPS-only).",
     )
     # Path to the desktop app's config.json, when run by neuron_desktop. If set, the
     # console settings page can edit the persisted runtime settings (applied on the
