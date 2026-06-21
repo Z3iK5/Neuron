@@ -119,6 +119,14 @@ class NeuronServerSettings(BaseSettings):
         description="Make the first account that registers a server admin.",
     )
 
+    # How long (seconds) an open User-Interactive-Auth session (e.g. an in-progress
+    # registration) stays valid before a background sweep removes it. Sessions are
+    # stored in the database so the challenge and retry can hit different workers;
+    # this only bounds how long an abandoned challenge lingers. Default 1 hour.
+    uia_session_ttl_s: float = Field(
+        default=3600.0, gt=0, description="TTL (seconds) for User-Interactive-Auth sessions."
+    )
+
     # Bootstrap server admins: a comma-separated list of localparts or full user
     # IDs that are always treated as server admins (in addition to any user whose
     # stored admin flag is set). This is how you get the first admin so the Neuron

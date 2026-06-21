@@ -56,12 +56,13 @@ class AuthService:
         registration_enabled: bool,
         *,
         first_user_admin: bool = False,
+        uia_session_ttl_s: float = 3600.0,
     ) -> None:
         self._db = db
         self._server_name = server_name
         self._registration_enabled = registration_enabled
         self._first_user_admin = first_user_admin
-        self._uia = UiaSessionStore()
+        self._uia = UiaSessionStore(db, ttl_ms=int(uia_session_ttl_s * 1000))
 
     @property
     def registration_enabled(self) -> bool:
@@ -72,23 +73,27 @@ class AuthService:
 
     # --- UIA (registration uses the m.login.dummy stage) -------------------
 
-    def begin_uia(self) -> str:
+    async def begin_uia(self) -> str:
         """Open a UIA session and return its id (for the 401 challenge body)."""
-        return self._uia.create()
+        return await self._uia.create()
 
-    def uia_satisfied(self, auth: Any) -> bool:
+    async def uia_satisfied(self, auth: Any) -> bool:
         """Return True if ``auth`` completes the dummy stage for a known session."""
         return (
             isinstance(auth, dict)
             and auth.get("type") == "m.login.dummy"
             and isinstance(auth.get("session"), str)
-            and self._uia.exists(auth["session"])
+            and await self._uia.exists(auth["session"])
         )
 
-    def complete_uia(self, auth: Any) -> None:
+    async def complete_uia(self, auth: Any) -> None:
         session = auth.get("session") if isinstance(auth, dict) else None
         if isinstance(session, str):
-            self._uia.complete(session)
+            await self._uia.complete(session)
+
+    async def sweep_uia(self) -> None:
+        """Remove expired UIA sessions (driven by a periodic sweeper)."""
+        await self._uia.sweep_expired()
 
     # --- registration ------------------------------------------------------
 
