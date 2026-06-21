@@ -212,6 +212,14 @@ class AdminService:
         state = await rooms_store.get_current_state(self._db, room_id)
         return {"state": [e.client_dict() for e in state]}
 
+    async def force_leave_room(self, room_id: str, user_id: str) -> None:
+        """Server-authoritatively remove a user from a room (no operator PL needed)."""
+        await self._require_rooms().admin_force_leave(room_id, user_id)
+
+    async def make_room_admin(self, room_id: str, user_id: str) -> None:
+        """Grant a user power level 100 in a room (acts as the room creator)."""
+        await self._require_rooms().admin_make_room_admin(room_id, user_id)
+
     # --- registration tokens ----------------------------------------------
 
     async def list_registration_tokens(self) -> dict[str, Any]:

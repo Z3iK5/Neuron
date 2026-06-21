@@ -42,6 +42,19 @@ def _signup(client: TestClient, username: str, password: str) -> None:
     assert resp.status_code == 200, resp.text
 
 
+def _matrix_login(client: TestClient, username: str, password: str) -> str:
+    resp = client.post(
+        "/_matrix/client/v3/login",
+        json={
+            "type": "m.login.password",
+            "identifier": {"type": "m.id.user", "user": username},
+            "password": password,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["access_token"]
+
+
 def _console_login(client: TestClient, username: str, password: str):
     page = client.get(_LOGIN)
     token = _csrf(page.text)
@@ -292,6 +305,44 @@ def test_user_devices_panel_and_force_logout(tmp_path: Path) -> None:
         assert client.post(
             f"/console/users/{uid}/logout", data={"csrf_token": csrf}, follow_redirects=False
         ).status_code == 303
+
+
+def test_room_member_actions(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "jack", "pw-123456")
+        admin_tok = _matrix_login(client, "admin", "s3cret-password")
+        room = client.post(
+            "/_matrix/client/v3/createRoom",
+            json={"preset": "public_chat"},
+            headers={"Authorization": f"Bearer {admin_tok}"},
+        ).json()["room_id"]
+        jack_tok = _matrix_login(client, "jack", "pw-123456")
+        client.post(
+            f"/_matrix/client/v3/rooms/{room}/join",
+            headers={"Authorization": f"Bearer {jack_tok}"},
+        )
+        _console_login(client, "admin", "s3cret-password")
+
+        detail = client.get(f"/console/rooms/{room}")
+        assert detail.status_code == 200
+        assert "@jack:neuron.local" in detail.text  # members table
+        assert "Room state" in detail.text  # state viewer
+
+        csrf = _csrf(detail.text)
+        assert client.post(
+            f"/console/rooms/{room}/members/@jack:neuron.local/make-admin",
+            data={"csrf_token": csrf},
+            follow_redirects=False,
+        ).status_code == 303
+        csrf = _csrf(client.get(f"/console/rooms/{room}").text)
+        assert client.post(
+            f"/console/rooms/{room}/members/@jack:neuron.local/force-leave",
+            data={"csrf_token": csrf},
+            follow_redirects=False,
+        ).status_code == 303
+        # jack is no longer a joined member (only the admin creator remains).
+        assert "Members (1)" in client.get(f"/console/rooms/{room}").text
 
 
 # --- invites ----------------------------------------------------------------
