@@ -56,6 +56,7 @@ from neuron_server.keys.resolver import ServerKeyResolver
 from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
 from neuron_server.media.store import build_media_store
+from neuron_server.metrics import install_metrics
 from neuron_server.ratelimit import build_rate_limiters
 from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
@@ -317,5 +318,9 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     )
     async def matrix_unrecognized(_path: str) -> JSONResponse:
         raise unrecognized()
+
+    # Optional Prometheus /metrics endpoint + request-metrics middleware (no-op
+    # unless enabled; prometheus_client is imported lazily).
+    install_metrics(app, settings)
 
     return app

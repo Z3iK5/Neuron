@@ -50,6 +50,15 @@ Put the server behind a TLS-terminating reverse proxy (Caddy/nginx/Traefik) and 
   docker compose run --rm neuron doctor --offline  # skip network checks
   ```
 
+## Metrics (Prometheus)
+
+Set `NEURON_SERVER_METRICS_ENABLED=true` to expose a Prometheus `/metrics` endpoint
+(HTTP request counts + latency by method/route/status, plus process metrics). It
+needs the `metrics` extra (`prometheus-client`), which the base image doesn't
+include — build with it (`pip install ".[server,metrics]"`) or add it in a derived
+image. **Restrict `/metrics` at the proxy/network level** — it's meant for your
+Prometheus scraper, not the public internet.
+
 ## Backups
 
 - **Database** (includes the signing key + all state):
