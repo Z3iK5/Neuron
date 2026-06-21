@@ -1,0 +1,79 @@
+# Neuron behind Caddy with automatic HTTPS (Let's Encrypt).
+#
+# A production-ready alternative to docker-compose.yml: Caddy terminates TLS on
+# 443 and reverse-proxies to the neuron container over the private compose
+# network. neuron is NOT published to the host — it's reachable only through
+# Caddy — so it safely trusts Caddy's X-Forwarded-* headers and serves a Secure
+# session cookie.
+#
+# Setup:
+#   1. Point your domain's DNS A/AAAA record at this host (ports 80 + 443 open).
+#   2. cp .env.example .env  and set NEURON_SERVER_NAME + NEURON_SERVER_PUBLIC_BASE_URL
+#      to your https:// domain, plus a strong POSTGRES_PASSWORD and
+#      NEURON_SERVER_CONSOLE_SESSION_SECRET (openssl rand -hex 32).
+#   3. Edit Caddyfile: replace matrix.example.org with your domain.
+#   4. docker compose -f docker-compose.caddy.yml up -d
+#
+# By default this pulls the published image; to build from source instead, comment
+# out `image:` on the neuron service and uncomment `build: .`.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: neuron
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-neuron}
+      POSTGRES_DB: neuron
+    volumes:
+      - neuron-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neuron -d neuron"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  neuron:
+    image: ghcr.io/z3ik5/neuron-server:latest
+    # build: .   # uncomment (and comment `image:` above) to build from source
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Your real domain + https URL (no host port is published; Caddy fronts it).
+      NEURON_SERVER_NAME: ${NEURON_SERVER_NAME:?set your domain in .env}
+      NEURON_SERVER_PUBLIC_BASE_URL: ${NEURON_SERVER_PUBLIC_BASE_URL:?set your https URL in .env}
+      NEURON_SERVER_DATABASE_URL: postgresql://neuron:${POSTGRES_PASSWORD:-neuron}@db:5432/neuron
+      NEURON_SERVER_DB_POOL_SIZE: ${NEURON_SERVER_DB_POOL_SIZE:-8}
+      # The first account created at /get-started becomes the server admin.
+      NEURON_SERVER_FIRST_USER_ADMIN: "true"
+      NEURON_SERVER_CONSOLE_SESSION_SECRET: ${NEURON_SERVER_CONSOLE_SESSION_SECRET:-}
+      # Safe to trust any peer here: neuron is only reachable via Caddy on the
+      # private network, so X-Forwarded-* always comes from the proxy.
+      NEURON_SERVER_TRUSTED_PROXIES: "*"
+      NEURON_SERVER_SESSION_HTTPS_ONLY: "true"
+    expose:
+      - "8008" # internal only — not published to the host
+    volumes:
+      - neuron-data:/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - neuron
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data # persists the issued TLS certificates
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  neuron-pgdata:
+  neuron-data:
+  caddy-data:
+  caddy-config:

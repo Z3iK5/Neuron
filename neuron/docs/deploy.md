@@ -22,6 +22,18 @@ Finish setup in the browser at **`/get-started`** — the first account you crea
 becomes the server admin (`NEURON_SERVER_FIRST_USER_ADMIN=true`). Manage the server
 at **`/console`**.
 
+### Prebuilt image
+
+Tagged releases publish a multi-arch (amd64 + arm64) image to GHCR, so you don't
+have to build from source:
+
+```bash
+docker pull ghcr.io/z3ik5/neuron-server:latest   # or pin a version, e.g. :0.0.16
+```
+
+The bundled `docker-compose.yml` builds from source; the TLS stack below
+(`docker-compose.caddy.yml`) pulls this image by default.
+
 ## Configuration
 
 All settings are `NEURON_SERVER_*` environment variables (see `.env.example`). The
@@ -71,6 +83,23 @@ matrix.example.org {
 Caddy sets `X-Forwarded-For` and `X-Forwarded-Proto` automatically; with the
 container on the same Docker network, set `NEURON_SERVER_TRUSTED_PROXIES` to the
 proxy container's IP (or `*` if Neuron isn't otherwise reachable).
+
+### Ready-made TLS stack (Caddy)
+
+`docker-compose.caddy.yml` runs the whole thing with automatic HTTPS — Caddy on
+443 in front of Neuron (not published to the host) and Postgres:
+
+```bash
+cd neuron
+cp .env.example .env                 # set your domain + secrets (https:// URL)
+$EDITOR Caddyfile                    # replace matrix.example.org with your domain
+docker compose -f docker-compose.caddy.yml up -d
+```
+
+Caddy obtains a Let's Encrypt certificate on first request (DNS must already point
+at the host, ports 80 + 443 open). Because Neuron is reachable only through Caddy,
+the compose file sets `NEURON_SERVER_TRUSTED_PROXIES=*` and
+`NEURON_SERVER_SESSION_HTTPS_ONLY=true` for you.
 
 ## Health & diagnostics
 
