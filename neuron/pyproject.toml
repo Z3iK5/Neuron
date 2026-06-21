@@ -64,6 +64,12 @@ s3 = [
     "boto3>=1.34",               # S3-compatible object storage client
 ]
 
+# Prometheus /metrics for the homeserver. Lazy-imported, so it's only needed when
+# NEURON_SERVER_METRICS_ENABLED=true.  Install with:  pip install -e ".[server,metrics]"
+metrics = [
+    "prometheus-client>=0.20",   # Prometheus metrics exposition
+]
+
 # End-to-end-encryption support (Megolm decryption). Requires the system libolm
 # library to be installed (e.g. `apt-get install libolm-dev`).
 # Install with:  pip install -e ".[e2e]"
@@ -109,6 +115,7 @@ dev = [
     "neuron[auditor]",           # boto3 for the S3 sink
     "neuron[e2e]",               # python-olm for E2EE decryption
     "neuron[server]",            # fastapi/uvicorn + DB drivers for neuron_server
+    "neuron[metrics]",           # prometheus-client, so the /metrics tests run in CI
     "neuron[desktop]",           # platformdirs for the desktop supervisor
     "pytest>=8.0",
     "pytest-asyncio>=0.23",      # lets us write async test functions

@@ -211,6 +211,15 @@ class NeuronServerSettings(BaseSettings):
         description="Use state resolution v2 for inbound federation authorization.",
     )
 
+    # --- Observability ------------------------------------------------------
+    # Expose a Prometheus /metrics endpoint (HTTP request counts + latency, process
+    # metrics). Off by default; needs the `metrics` extra (prometheus-client), which
+    # is imported lazily so the default/desktop build pulls in nothing. Restrict
+    # access to /metrics at the proxy/network level.
+    metrics_enabled: bool = Field(
+        default=False, description="Expose a Prometheus /metrics endpoint."
+    )
+
     # Where the ASGI server binds when run via `python -m neuron_server`.
     bind_host: str = Field(default="127.0.0.1", description="ASGI bind host.")
     bind_port: int = Field(default=8008, gt=0, description="ASGI bind port.")
