@@ -9,11 +9,17 @@ spoof its IP, so :class:`ProxyHeadersMiddleware`:
 
 - only trusts the headers when the immediate peer is one of the configured
   ``trusted_proxies`` (or when ``"*"`` trusts any peer); and
-- resolves the client as the **right-most** ``X-Forwarded-For`` entry that is not
-  itself a trusted proxy. ``X-Forwarded-For`` reads left-to-right as
-  ``original-client, proxy1, proxy2`` with each hop appending the address it saw,
-  so walking from the right past our own trusted hops lands on the true client.
-  Entries an attacker injects sit to the *left* of the real client and are ignored.
+- with an explicit ``trusted_proxies`` list, resolves the client as the **right-most**
+  ``X-Forwarded-For`` entry that is not itself a trusted proxy. ``X-Forwarded-For``
+  reads left-to-right as ``original-client, proxy1, proxy2`` with each hop appending
+  the address it saw, so walking from the right past our own trusted hops lands on
+  the true client. Entries an attacker injects sit to the *left* of the real client
+  and are ignored.
+- with ``"*"`` (trust any peer, no proxy list to walk), takes the **right-most**
+  entry — the one our immediate trusted proxy appended. This is correct for a single
+  trusted hop (the common case, e.g. the bundled Caddy stack); for a multi-hop chain
+  it resolves to the inner proxy's address, so enumerate the proxies in
+  ``trusted_proxies`` instead of ``"*"`` when chaining.
 
 When no proxies are trusted the middleware isn't installed and the raw TCP peer is
 used unchanged — correct for a directly-exposed or desktop server. Route code
@@ -75,8 +81,11 @@ def resolve_forwarded(scope: Scope, trusted: frozenset[str]) -> tuple[str | None
     hops = [_clean_hop(h) for h in _join_header(scope, b"x-forwarded-for").split(",") if h.strip()]
     if hops:
         if trust_any:
-            # No proxy list to walk; trust the chain and take the original client.
-            resolved = hops[0]
+            # No proxy list to walk, so trust only what our immediate (trusted) peer
+            # appended: the RIGHT-most entry. The left-most is whatever the client
+            # sent and is fully spoofable when the proxy appends (nginx
+            # $proxy_add_x_forwarded_for, ALB, Caddy) rather than replaces.
+            resolved = hops[-1]
         else:
             # Right-most hop that isn't one of our proxies is the real client.
             resolved = next((h for h in reversed(hops) if h not in trusted), hops[0])

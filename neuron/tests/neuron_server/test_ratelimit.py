@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
 from neuron_server.errors import MatrixError
-from neuron_server.ratelimit import RateLimiter, build_rate_limiters
+from neuron_server.ratelimit import _MAX_KEYS, RateLimiter, build_rate_limiters
 
 _REG = "/_matrix/client/v3/register"
 _LOGIN = "/_matrix/client/v3/login"
@@ -94,6 +94,16 @@ def test_login_endpoint_is_rate_limited(tmp_path: Path) -> None:
         assert last.headers.get("Retry-After")
 
 
+def test_bucket_dict_is_hard_capped_under_key_rotation() -> None:
+    now = [1000.0]
+    # No refill during the test, so every bucket stays partially drained — the
+    # idle-only prune would free nothing; the LRU hard-cap must bound the dict.
+    limiter = RateLimiter(rate_hz=0.001, burst=5, clock=lambda: now[0])
+    for i in range(_MAX_KEYS + 2000):
+        limiter.consume(f"ip-{i}")
+    assert len(limiter._buckets) <= _MAX_KEYS + 1
+
+
 def test_ip_keyed_limiters_raise_and_respect_disabled() -> None:
     limiters = build_rate_limiters(
         NeuronServerSettings(
@@ -125,21 +135,7 @@ def test_ip_keyed_limiters_raise_and_respect_disabled() -> None:
         disabled.check_login_ip("1.2.3.4")
 
 
-def _register(client: TestClient, username: str):  # type: ignore[no-untyped-def]
-    session = client.post(_REG, json={"username": username, "password": "pw-123456"}).json()[
-        "session"
-    ]
-    return client.post(
-        _REG,
-        json={
-            "username": username,
-            "password": "pw-123456",
-            "auth": {"type": "m.login.dummy", "session": session},
-        },
-    )
-
-
-def test_registration_is_rate_limited_by_ip(tmp_path: Path) -> None:
+def test_registration_is_rate_limited_at_the_challenge(tmp_path: Path) -> None:
     settings = NeuronServerSettings(
         name="neuron.local",
         database_url=f"sqlite:///{tmp_path / 'hs.db'}",
@@ -147,12 +143,41 @@ def test_registration_is_rate_limited_by_ip(tmp_path: Path) -> None:
         rate_limit_registration_hz=0.001,  # no refill during the test
     )
     with TestClient(create_app(settings)) as client:
-        # The limit is charged on the completing request, so one sign-up = one token.
-        assert _register(client, "alice").status_code == 200
-        assert _register(client, "bob").status_code == 200
-        denied = _register(client, "carol")
+        def _challenge(user: str):  # type: ignore[no-untyped-def]
+            return client.post(_REG, json={"username": user, "password": "pw-123456"})
+
+        # The IP limit is charged at the UIA challenge — the unauthenticated step
+        # that persists a uia_sessions row — so a flood can't bloat that table.
+        assert _challenge("alice").status_code == 401  # challenge issued
+        assert _challenge("bob").status_code == 401
+        denied = _challenge("carol")
         assert denied.status_code == 429
         assert denied.json()["errcode"] == "M_LIMIT_EXCEEDED"
+
+
+def test_get_started_rate_limit_renders_branded_html(tmp_path: Path) -> None:
+    settings = NeuronServerSettings(
+        name="neuron.local",
+        database_url=f"sqlite:///{tmp_path / 'hs.db'}",
+        registration_enabled=True,
+        rate_limit_registration_burst=1,
+        rate_limit_registration_hz=0.001,
+    )
+    with TestClient(create_app(settings)) as client:
+        first = client.post(
+            "/get-started", data={"username": "alice", "password": "s3cret-password"}
+        )
+        assert first.status_code == 200  # the only token is consumed
+        # The next sign-up is rate-limited; the HTML form must render the branded
+        # page, not the raw JSON Matrix error from the global handler.
+        denied = client.post(
+            "/get-started",
+            data={"username": "bob", "password": "s3cret-password"},
+            follow_redirects=False,
+        )
+        assert denied.status_code == 429
+        assert "text/html" in denied.headers["content-type"]
+        assert '"errcode"' not in denied.text
 
 
 def test_login_is_rate_limited_by_ip_across_accounts(tmp_path: Path) -> None:

@@ -13,9 +13,15 @@ async def create_session(db: Database, session_id: str, created_ts: int) -> None
     )
 
 
-async def session_exists(db: Database, session_id: str) -> bool:
+async def session_exists(db: Database, session_id: str, min_created_ts: int = 0) -> bool:
+    """True if the session exists and was created at/after ``min_created_ts``.
+
+    The TTL is enforced here (not only by the background sweep) so an expired but
+    not-yet-swept session is rejected on the read path.
+    """
     row = await db.fetchval(
-        "SELECT 1 FROM uia_sessions WHERE session_id = ?", (session_id,)
+        "SELECT 1 FROM uia_sessions WHERE session_id = ? AND created_ts >= ?",
+        (session_id, min_created_ts),
     )
     return row is not None
 

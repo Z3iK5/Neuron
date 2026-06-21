@@ -9,7 +9,7 @@ import secrets
 from typing import Any
 
 from neuron_server.storage.accounts import UserRow
-from neuron_server.storage.database import Database
+from neuron_server.storage.database import Database, escape_like
 
 
 async def count_users(db: Database, *, deactivated: bool | None) -> int:
@@ -28,8 +28,8 @@ async def list_users(
     where = []
     params: list[Any] = []
     if name:
-        where.append("u.name LIKE ?")
-        params.append(f"%{name}%")
+        where.append("u.name LIKE ? ESCAPE '\\'")
+        params.append(f"%{escape_like(name)}%")
     if deactivated is not None:
         where.append("u.deactivated = ?")
         params.append(1 if deactivated else 0)

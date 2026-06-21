@@ -217,12 +217,23 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     )
 
     # Trusted reverse-proxy support: rewrite the client IP/scheme from X-Forwarded-*
-    # when behind a proxy. Added last so it runs OUTERMOST — every later middleware
-    # and route then sees the real client address. Skipped (raw TCP peer used) when
-    # no proxies are trusted, the correct default for a direct/desktop server.
+    # when behind a proxy, so routes (and the IP-keyed rate limits) see the real
+    # client. Skipped (raw TCP peer used) when no proxies are trusted — the correct
+    # default for a direct/desktop server. (Any middleware registered after this one,
+    # e.g. the optional metrics layer, wraps it; nothing downstream reads the client
+    # IP today, but don't assume this is the absolute outermost layer.)
     trusted = settings.trusted_proxy_set()
     if trusted:
         app.add_middleware(ProxyHeadersMiddleware, trusted=trusted)
+    elif settings.rate_limit_enabled:
+        # No trusted proxies -> client_ip() is the raw TCP peer. Correct for a
+        # directly-exposed server, but behind a reverse proxy every request would
+        # share the proxy's address (one bucket -> a self-inflicted lockout). The
+        # topology can't be detected here, so state the assumption loudly at boot.
+        log.info(
+            "IP-keyed rate limits assume a directly-exposed server; set "
+            "NEURON_SERVER_TRUSTED_PROXIES if Neuron runs behind a reverse proxy"
+        )
 
     @app.exception_handler(MatrixError)
     async def _on_matrix_error(request: Request, exc: MatrixError) -> JSONResponse:
@@ -283,10 +294,10 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
                 status_code=403,
             )
 
-        # Same sign-up throttle as the Matrix /register endpoint (per client IP).
-        app.state.rate_limiters.check_registration(client_ip(request))
-
         try:
+            # Same sign-up throttle as the Matrix /register endpoint (per client IP).
+            # Inside the try so a 429 renders the branded page, not a raw JSON error.
+            app.state.rate_limiters.check_registration(client_ip(request))
             result = await auth.register(
                 localpart=username or None,
                 password=password or None,

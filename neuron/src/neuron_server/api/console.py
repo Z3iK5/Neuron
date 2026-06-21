@@ -32,7 +32,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Form, Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from neuron_core import branding
+from neuron_core import branding, get_logger
 from neuron_server.admin.service import AdminService
 from neuron_server.auth.passwords import verify_password
 from neuron_server.config import NeuronServerSettings
@@ -41,6 +41,7 @@ from neuron_server.storage import accounts, metadata
 from neuron_server.storage import admin as admin_store
 
 router = APIRouter()
+log = get_logger(__name__)
 
 _PAGE_SIZE = 25
 _e = html.escape
@@ -1021,14 +1022,21 @@ async def media_bulk(
 ) -> Response:
     admin = _admin(request)
     done = 0
+    failed = 0
     if action == "delete":
         for mid in media_ids:
             try:
                 if await admin.delete_media(mid):
                     done += 1
-            except Exception:  # noqa: BLE001 - best-effort bulk; skip per-item failures
-                continue
-    _flash(request, f"Deleted {done} media item(s).")
+            except Exception:  # noqa: BLE001 - keep going, but surface the failure
+                failed += 1
+                log.exception("media delete failed", extra={"media_id": mid})
+    msg = f"Deleted {done} media item(s)."
+    if failed:
+        # Don't let a store/DB outage look like a no-op: tell the operator some
+        # deletions errored (details in the logs) so they investigate.
+        msg += f" {failed} failed — see server logs."
+    _flash(request, msg)
     return RedirectResponse("/console/media", status_code=303)
 
 

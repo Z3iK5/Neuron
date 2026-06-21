@@ -22,6 +22,15 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
+
+def escape_like(term: str) -> str:
+    """Escape LIKE metacharacters so ``%`` and ``_`` in user input match literally.
+
+    Use with ``LIKE ? ESCAPE '\\'`` (backslash is the escape char). Both SQLite and
+    PostgreSQL honour an explicit ESCAPE clause.
+    """
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 # Monotonic id streams: name -> (table, column). Each is a server-wide ascending
 # counter. SQLite allocates with MAX(col)+1 (race-free under its single serialized
 # connection); PostgreSQL uses a dedicated SEQUENCE so concurrent connections never

@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from neuron_server.storage.database import Database
+from neuron_server.storage.database import Database, escape_like
 
 
 @dataclass
@@ -56,10 +56,14 @@ async def get_media(db: Database, media_id: str) -> MediaRow | None:
 
 
 def _uploader_filter(uploader: str | None) -> tuple[str, tuple[Any, ...]]:
-    """A ``WHERE`` clause + params filtering by uploader substring (or no filter)."""
+    """A ``WHERE`` clause + params filtering by uploader substring (or no filter).
+
+    LIKE metacharacters in the term are escaped so a user ID containing ``_`` or
+    ``%`` (both legal) matches literally instead of acting as a wildcard.
+    """
     if not uploader:
         return "", ()
-    return " WHERE uploader LIKE ?", (f"%{uploader}%",)
+    return " WHERE uploader LIKE ? ESCAPE '\\'", (f"%{escape_like(uploader)}%",)
 
 
 async def count_media(db: Database, *, uploader: str | None = None) -> int:

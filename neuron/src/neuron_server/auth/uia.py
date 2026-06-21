@@ -40,8 +40,10 @@ class UiaSessionStore:
         return session_id
 
     async def exists(self, session_id: str) -> bool:
-        """Return True if ``session_id`` is a known open session."""
-        return await uia_store.session_exists(self._db, session_id)
+        """Return True if ``session_id`` is a known, unexpired open session."""
+        return await uia_store.session_exists(
+            self._db, session_id, min_created_ts=_now_ms() - self._ttl_ms
+        )
 
     async def complete(self, session_id: str) -> None:
         """Close a session once its flow has been satisfied."""

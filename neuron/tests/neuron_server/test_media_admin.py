@@ -48,6 +48,18 @@ async def test_count_list_and_bytes_with_uploader_filter(db: Database, tmp_path:
     assert [m.uploader for m in bob] == ["@bob:neuron.local"]
 
 
+async def test_uploader_filter_escapes_like_wildcards(db: Database, tmp_path: Path) -> None:
+    media = _service(db, tmp_path)
+    await media.upload("@a_b:neuron.local", b"x", "text/plain", None)
+    await media.upload("@axb:neuron.local", b"y", "text/plain", None)
+    # '_' is a LIKE wildcard if unescaped; it must match literally here.
+    assert await media_store.count_media(db, uploader="a_b") == 1
+    rows = await media_store.list_media(db, offset=0, limit=10, uploader="a_b")
+    assert [m.uploader for m in rows] == ["@a_b:neuron.local"]
+    # '%' must not match every row.
+    assert await media_store.count_media(db, uploader="%") == 0
+
+
 async def test_list_media_paginates(db: Database, tmp_path: Path) -> None:
     media = _service(db, tmp_path)
     ids = set()

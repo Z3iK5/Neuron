@@ -56,8 +56,12 @@ def test_spoofed_xff_cannot_impersonate_when_single_proxy() -> None:
     assert ip == "203.0.113.50"
 
 
-def test_wildcard_trusts_chain_and_takes_original_client() -> None:
-    scope = _scope("172.16.0.5", {"x-forwarded-for": "203.0.113.7, 172.16.0.9"})
+def test_wildcard_takes_rightmost_not_spoofable_leftmost() -> None:
+    # With "*" we trust the immediate peer but have no proxy list to walk, so the
+    # real client is the RIGHT-most entry (appended by our trusted proxy). A
+    # client-forged left-most entry must be ignored — otherwise the IP is spoofable
+    # behind any appending proxy (nginx/ALB/Caddy).
+    scope = _scope("172.16.0.5", {"x-forwarded-for": "6.6.6.6, 203.0.113.7"})
     ip, _ = resolve_forwarded(scope, frozenset({"*"}))
     assert ip == "203.0.113.7"
 
