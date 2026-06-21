@@ -1,0 +1,65 @@
+# Build the Neuron homeserver container image and publish it to the GitHub
+# Container Registry (GHCR) on a version tag.
+#
+# - On a `v*` tag push: build linux/amd64 + linux/arm64 and push to
+#   ghcr.io/<owner>/neuron-server with the semver tags (e.g. 0.0.16, 0.0, latest).
+# - On manual dispatch: build only (no push) — a smoke test that the image builds.
+#
+# Pull the published image:  docker pull ghcr.io/z3ik5/neuron-server:latest
+# (see neuron/docker-compose.caddy.yml for a ready-to-run TLS stack.)
+
+name: Docker image
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Only needed when we actually push (tag builds).
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/neuron-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=ci,enable=${{ github.ref_type != 'tag' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # The Dockerfile and its build context live under neuron/.
+          context: ./neuron
+          file: ./neuron/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

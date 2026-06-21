@@ -1,0 +1,10 @@
+# Caddy config for the docker-compose.caddy.yml stack.
+#
+# Replace matrix.example.org with your domain (it must resolve to this host).
+# Caddy obtains and auto-renews a Let's Encrypt certificate on first request and
+# sets X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host automatically, which
+# neuron honours via NEURON_SERVER_TRUSTED_PROXIES.
+matrix.example.org {
+	encode zstd gzip
+	reverse_proxy neuron:8008
+}
