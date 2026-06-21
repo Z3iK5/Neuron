@@ -46,7 +46,11 @@ async def _pg_app(pool_size: int = 8) -> AsyncIterator[httpx.AsyncClient]:
     await _reset_schema()  # fresh schema so each test seeds sequences from scratch
     app = create_app(
         NeuronServerSettings(
-            name="pg.test", database_url=_PG, db_pool_size=pool_size, first_user_admin=True
+            name="pg.test",
+            database_url=_PG,
+            db_pool_size=pool_size,
+            first_user_admin=True,
+            rate_limit_enabled=False,  # these exercise storage concurrency, not limits
         )
     )
     async with app.router.lifespan_context(app):
@@ -377,7 +381,11 @@ async def _two_workers(
     def _mk() -> object:
         return create_app(
             NeuronServerSettings(
-                name="pg.test", database_url=_PG, db_pool_size=pool_size, first_user_admin=True
+                name="pg.test",
+                database_url=_PG,
+                db_pool_size=pool_size,
+                first_user_admin=True,
+                rate_limit_enabled=False,
             )
         )
 

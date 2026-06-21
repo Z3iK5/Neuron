@@ -110,6 +110,7 @@ async def send_message(
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
     content = await _json_body(request)
+    request.app.state.rate_limiters.check_message(who.user_id)
     event_id = await rooms.send_message(room_id, who.user_id, event_type, content, txn_id)
     return {"event_id": event_id}
 

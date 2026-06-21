@@ -81,6 +81,28 @@ class NeuronServerSettings(BaseSettings):
         description="Stable worker identity for multi-writer stream positions.",
     )
 
+    # --- Rate limiting ------------------------------------------------------
+    # In-process token-bucket limits on abuse-prone endpoints, keyed by account
+    # identity (not client IP, so they work behind a proxy). Enabled by default
+    # with generous bursts so normal use is unaffected; tune per deployment.
+    rate_limit_enabled: bool = Field(
+        default=True, description="Enable request rate limiting."
+    )
+    # Password login, keyed by the account being logged into (brute-force defence).
+    rate_limit_login_hz: float = Field(
+        default=0.17, gt=0, description="Sustained login attempts/sec per account."
+    )
+    rate_limit_login_burst: int = Field(
+        default=5, gt=0, description="Burst of login attempts allowed per account."
+    )
+    # Message sending, keyed by the sender (spam defence).
+    rate_limit_message_hz: float = Field(
+        default=0.5, gt=0, description="Sustained messages/sec per user."
+    )
+    rate_limit_message_burst: int = Field(
+        default=20, gt=0, description="Burst of messages allowed per user."
+    )
+
     # Whether open registration (POST /register) is allowed. Convenient for a
     # fresh MVP server so you can create the first account; gate this in
     # production (or front it with the admin API once HS-6 lands).
