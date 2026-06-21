@@ -128,6 +128,26 @@ class NeuronServerSettings(BaseSettings):
         gt=0,
         description="Maximum media upload size in bytes.",
     )
+    # Media blob backend: 'filesystem' (the default — a local directory, right for
+    # the desktop / a single host) or 's3' (an S3-compatible bucket, so multiple
+    # workers/hosts share media — required for multi-host scale-out). For 's3',
+    # credentials come from the standard AWS chain (AWS_ACCESS_KEY_ID/... env or an
+    # instance role), never from here.
+    media_backend: str = Field(
+        default="filesystem",
+        description="Media blob backend: filesystem | s3.",
+    )
+    s3_media_bucket: str = Field(
+        default="", description="S3 bucket for media (required when media_backend=s3)."
+    )
+    # Optional: set for S3-compatible stores (MinIO, Cloudflare R2, ...); empty = AWS S3.
+    s3_media_endpoint_url: str = Field(
+        default="", description="Custom S3 endpoint URL (for S3-compatible stores)."
+    )
+    s3_media_region: str = Field(default="", description="S3 region (optional).")
+    s3_media_prefix: str = Field(
+        default="", description="Optional key prefix for media objects in the bucket."
+    )
 
     # --- Federation identity (HS-7) ----------------------------------------
     # Optional path to the server's Ed25519 signing key (Synapse-compatible
