@@ -397,6 +397,33 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=17,
+        name="received_transactions",
+        # Dedup inbound federation transactions: a remote server retries a txn it
+        # didn't get an ack for, possibly to a different worker. Recording (origin,
+        # txn_id) lets a replay short-circuit instead of re-validating/re-applying.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS received_transactions ("
+            " origin TEXT NOT NULL,"
+            " txn_id TEXT NOT NULL,"
+            " received_ts BIGINT NOT NULL,"
+            " PRIMARY KEY (origin, txn_id)"
+            ")",
+        ),
+    ),
+    Migration(
+        version=18,
+        name="federation_outbox_lease",
+        # Single-owner outbox draining: with >1 worker each flusher would otherwise
+        # drain the same queue and double-send. A worker leases a destination's rows
+        # (owner + leased_until) before sending; others skip leased rows, and a
+        # crashed worker's lease expires so the backlog is retried.
+        statements=(
+            "ALTER TABLE federation_outbox ADD COLUMN leased_until BIGINT NOT NULL DEFAULT 0",
+            "ALTER TABLE federation_outbox ADD COLUMN owner TEXT",
+        ),
+    ),
 )
 
 

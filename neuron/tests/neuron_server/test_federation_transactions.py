@@ -19,6 +19,7 @@ from neuron_server.federation.auth import sign_request
 from neuron_server.storage import rooms as store
 
 _SEND = "/_matrix/federation/v1/send/txn1"
+_SEND2 = "/_matrix/federation/v1/send/txn2"  # a distinct txn id (ids are never reused)
 
 
 def _opener(app_b: object):  # noqa: ANN202 - test helper
@@ -71,10 +72,10 @@ def _transaction(pdu: dict) -> dict:
     return {"origin": "b.test", "origin_server_ts": int(time.time() * 1000), "pdus": [pdu]}
 
 
-def _sign_put(app_b: object, body: dict) -> str:
+def _sign_put(app_b: object, body: dict, uri: str = _SEND) -> str:
     return sign_request(
         method="PUT",
-        uri=_SEND,
+        uri=uri,
         origin="b.test",
         destination="a.test",
         signing_key=app_b.state.server_keys.signing_key,  # type: ignore[attr-defined]
@@ -112,7 +113,7 @@ async def test_transaction_validates_real_pdu_and_rejects_tampering(tmp_path: Pa
             tampered_pdu["content"] = {"msgtype": "m.text", "body": "evil"}
             tbody = _transaction(tampered_pdu)
             tresp = await client_a.put(
-                _SEND, json=tbody, headers={"Authorization": _sign_put(app_b, tbody)}
+                _SEND2, json=tbody, headers={"Authorization": _sign_put(app_b, tbody, _SEND2)}
             )
             assert tresp.status_code == 200
             (result,) = tresp.json()["pdus"].values()

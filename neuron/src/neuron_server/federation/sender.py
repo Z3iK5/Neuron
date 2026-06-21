@@ -22,6 +22,11 @@ from neuron_server.storage.database import Database
 
 _logger = get_logger(__name__)
 
+# How long a worker's claim on a destination's outbox rows lasts. The send is quick
+# (rows are deleted on success or released on failure right after); this only bounds
+# how long a crashed worker's in-flight batch waits before another worker retries it.
+_LEASE_MS = 5 * 60 * 1000
+
 
 class FederationSender:
     """Sends locally-created events to the rooms' remote participants."""
@@ -57,23 +62,16 @@ class FederationSender:
         for server in destinations:
             await self._deliver(server, new_pdus=pdus, edus=edus)
 
-    async def _deliver(
-        self,
-        server: str,
-        *,
-        new_pdus: list[dict[str, Any]],
-        edus: list[dict[str, Any]],
-    ) -> None:
-        """Send any queued PDUs for ``server`` plus the new ones; on failure, the
-        new PDUs are queued for a later retry (EDUs are best-effort, not queued)."""
-        pending = await outbox_store.get_pending(self._db, server)
-        all_pdus = [pdu for _, pdu in pending] + new_pdus
-        if not all_pdus and not edus:
-            return
+    async def _send_now(
+        self, server: str, *, pdus: list[dict[str, Any]], edus: list[dict[str, Any]]
+    ) -> bool:
+        """Send one transaction to ``server``; return whether it succeeded."""
+        if not pdus and not edus:
+            return True
         transaction = {
             "origin": self._server_name,
             "origin_server_ts": int(time.time() * 1000),
-            "pdus": all_pdus,
+            "pdus": pdus,
             "edus": edus,
         }
         txn_id = secrets.token_urlsafe(8)
@@ -83,11 +81,43 @@ class FederationSender:
             )
         except Exception as exc:  # best effort; never block the local action
             _logger.warning("failed to send transaction to %s: %s", server, exc)
-            for pdu in new_pdus:
-                await outbox_store.enqueue(self._db, server, pdu)
+            return False
+        return True
+
+    async def _deliver(
+        self,
+        server: str,
+        *,
+        new_pdus: list[dict[str, Any]],
+        edus: list[dict[str, Any]],
+    ) -> None:
+        """Send ``server``'s queued PDUs (claimed under a lease so no other worker
+        double-sends them) plus the new ones, in order. On success the claimed rows
+        are deleted; on failure they're released (immediate retry) and the new PDUs
+        queued. EDUs are best-effort and never queued."""
+        owner = secrets.token_hex(8)
+        now = int(time.time() * 1000)
+        claimed = await outbox_store.claim_pending(
+            self._db, server, owner, now_ms=now, lease_until_ms=now + _LEASE_MS
+        )
+        claimed_ids = [stream_id for stream_id, _ in claimed]
+        all_pdus = [pdu for _, pdu in claimed] + new_pdus
+        if not all_pdus and not edus:
             return
-        if pending:
-            await outbox_store.delete(self._db, [stream_id for stream_id, _ in pending])
+        try:
+            sent = await self._send_now(server, pdus=all_pdus, edus=edus)
+        except BaseException:
+            # Cancellation (e.g. shutdown) or any error mid-send: hand the lease back
+            # immediately so the backlog isn't stuck until the lease expires.
+            await outbox_store.release(self._db, claimed_ids, owner)
+            raise
+        if sent:
+            await outbox_store.delete(self._db, claimed_ids, owner)
+            return
+        # Failure: hand the claimed backlog back for immediate retry, queue the new.
+        await outbox_store.release(self._db, claimed_ids, owner)
+        for pdu in new_pdus:
+            await outbox_store.enqueue(self._db, server, pdu)
 
     async def retry(self, server: str) -> None:
         """Attempt to flush any queued events for one destination server."""
@@ -95,7 +125,8 @@ class FederationSender:
 
     async def retry_all(self) -> None:
         """Attempt to flush queued events for every destination with a backlog."""
-        for server in await outbox_store.destinations_with_pending(self._db):
+        now = int(time.time() * 1000)
+        for server in await outbox_store.destinations_with_pending(self._db, now):
             await self.retry(server)
 
     async def send_event(
