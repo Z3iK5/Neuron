@@ -132,6 +132,29 @@ class AdminService:
         await admin_store.set_user_password(self._db, user_id, hash_password(new_password))
         return {}
 
+    async def list_user_devices(self, user_id: str) -> list[dict[str, Any]]:
+        """A user's devices/sessions (most recent first by creation)."""
+        return [
+            {"device_id": d.device_id, "display_name": d.display_name, "created_ts": d.created_ts}
+            for d in await accounts.list_devices(self._db, user_id)
+        ]
+
+    async def delete_user_device(self, user_id: str, device_id: str) -> None:
+        """Revoke one device and its access tokens (logs that session out)."""
+        async with self._db.transaction():
+            await accounts.delete_tokens_for_device(self._db, user_id, device_id)
+            await accounts.delete_device(self._db, user_id, device_id)
+
+    async def logout_user(self, user_id: str) -> None:
+        """Revoke all the user's access tokens and delete all their devices."""
+        async with self._db.transaction():
+            await accounts.delete_tokens_for_user(self._db, user_id)
+            await accounts.delete_all_devices(self._db, user_id)
+
+    async def get_user_rooms(self, user_id: str) -> list[tuple[str, str]]:
+        """The rooms the user is in, as (room_id, membership) pairs."""
+        return await rooms_store.get_user_memberships(self._db, user_id)
+
     # --- rooms -------------------------------------------------------------
 
     async def list_rooms(self, *, offset: int, limit: int) -> dict[str, Any]:

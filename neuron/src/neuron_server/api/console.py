@@ -391,6 +391,8 @@ async def user_detail(
 ) -> Response:
     admin = _admin(request)
     user = await admin.get_user(user_id)
+    devices = await admin.list_user_devices(user_id)
+    memberships = await admin.get_user_rooms(user_id)
     is_admin = bool(user.get("admin"))
     deactivated = bool(user.get("deactivated"))
     csrf = _csrf_field(request)
@@ -461,6 +463,47 @@ async def user_detail(
         '<input name="message" placeholder="A message delivered to this user" required>'
         '<button class="btn" type="submit">Send notice</button></form></div>'
     )
+
+    if devices:
+        device_rows = "".join(
+            f'<tr><td>{_e(d["device_id"])}</td><td>{_e(d.get("display_name") or "—")}</td>'
+            f'<td class="muted">'
+            f'{_fmt_ts(int(d["created_ts"])) if d.get("created_ts") else "—"}</td>'
+            f'<td><form class="inline" method="post" action="/console/users/{quoted}'
+            f'/devices/{_quote(str(d["device_id"]))}/delete">{csrf}'
+            '<button class="btn sm danger" type="submit">Delete</button></form></td></tr>'
+            for d in devices
+        )
+    else:
+        device_rows = '<tr><td colspan="4" class="muted">No active devices.</td></tr>'
+    actions += (
+        '<div class="panel"><h2>Devices &amp; sessions</h2>'
+        '<table class="tbl"><thead><tr><th>Device</th><th>Name</th><th>Created</th>'
+        '<th></th></tr></thead>'
+        f"<tbody>{device_rows}</tbody></table>"
+        f'<form method="post" action="/console/users/{quoted}/logout" style="margin-top:.8rem" '
+        "onsubmit=\"return confirm('Log out all of this user&#39;s sessions?')\">"
+        f'{csrf}<button class="btn danger" type="submit">Log out all sessions</button>'
+        "</form></div>"
+    )
+
+    if memberships:
+        room_items = "".join(
+            f'<li><a href="/console/rooms/{_quote(rid)}">{_e(rid)}</a> '
+            f'<span class="muted">({_e(membership)})</span></li>'
+            for rid, membership in memberships
+        )
+        rooms_panel = (
+            '<div class="panel"><h2>Rooms</h2>'
+            f'<ul style="columns:2 260px;margin:0;padding-left:1.1rem">{room_items}</ul></div>'
+        )
+    else:
+        rooms_panel = (
+            '<div class="panel"><h2>Rooms</h2>'
+            '<p class="muted">Not in any rooms.</p></div>'
+        )
+    actions += rooms_panel
+
     body = (
         f'<h1 class="page">{_e(user_id)}</h1>'
         f'<div class="panel">{info}</div>{actions}'
@@ -570,6 +613,31 @@ async def user_set_profile(
 ) -> Response:
     await _admin(request).upsert_user(user_id, {"displayname": displayname})
     _flash(request, "Display name updated.")
+    return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
+
+
+@router.post("/console/users/{user_id}/devices/{device_id}/delete", include_in_schema=False)
+async def user_delete_device(
+    request: Request,
+    user_id: str,
+    device_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    await _admin(request).delete_user_device(user_id, device_id)
+    _flash(request, "Device removed.")
+    return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
+
+
+@router.post("/console/users/{user_id}/logout", include_in_schema=False)
+async def user_logout_all(
+    request: Request,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    await _admin(request).logout_user(user_id)
+    _flash(request, "Logged out all sessions.")
     return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
 
 
