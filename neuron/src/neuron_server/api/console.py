@@ -232,36 +232,51 @@ async def users_list(
     request: Request,
     _: str = Depends(require_console_admin),
     q: str = "",
+    status: str = "",
     offset: int = 0,
 ) -> Response:
     admin = _admin(request)
     offset = max(0, offset)
+    # "" = all, "active" = not deactivated, "deactivated" = deactivated only.
+    deactivated = {"active": False, "deactivated": True}.get(status)
     page = await admin.list_users(
-        offset=offset, limit=_PAGE_SIZE, name=q or None, deactivated=None
+        offset=offset, limit=_PAGE_SIZE, name=q or None, deactivated=deactivated
     )
     rows = ""
     for u in page.get("users", []):
         uid = str(u.get("name", ""))
         link = f'/console/users/{_quote(uid)}'
         display = _e(u.get("displayname") or "")
+        created = _fmt_ts(int(u.get("creation_ts") or 0)) if u.get("creation_ts") else "—"
         rows += (
             f'<tr><td class="check"><input type="checkbox" class="rowcheck"'
             f' name="user_ids" value="{_e(uid)}"{_BULK_ONCHANGE}></td>'
             f'<td><a href="{link}">{_e(uid)}</a></td>'
             f"<td>{display}</td>"
             f'<td>{_pill(bool(u.get("admin")), "admin", "user")}</td>'
-            f'<td>{_pill(not u.get("deactivated"), "active", "deactivated")}</td></tr>'
+            f'<td>{_pill(not u.get("deactivated"), "active", "deactivated")}</td>'
+            f'<td class="muted">{created}</td></tr>'
         )
     if not rows:
-        rows = '<tr><td colspan="5" class="muted">No users found.</td></tr>'
+        rows = '<tr><td colspan="6" class="muted">No users found.</td></tr>'
     total = page.get("total", 0)
+
+    def _opt(value: str, label: str) -> str:
+        sel = " selected" if status == value else ""
+        return f'<option value="{value}"{sel}>{label}</option>'
+
     search = (
         '<form class="row searchbar" method="get" action="/console/users">'
         f'<input class="q" name="q" value="{_e(q)}" placeholder="Search username">'
+        f'<select name="status">{_opt("", "All")}{_opt("active", "Active")}'
+        f'{_opt("deactivated", "Deactivated")}</select>'
         '<button class="btn sm" type="submit">Search</button>'
         '<a class="btn sm ghost" href="/console/users/new">New user</a></form>'
     )
-    nav = _pager("/console/users", offset, _PAGE_SIZE, total, q)
+    nav = _pager(
+        "/console/users", offset, _PAGE_SIZE, total, q,
+        extra=f"&status={status}" if status else "",
+    )
     body = (
         f'<div class="spread"><h1 class="page">Users <span class="muted">({total})</span></h1>'
         f"{search}</div>"
@@ -274,7 +289,8 @@ async def users_list(
         '<div class="panel"><table class="tbl"><thead><tr>'
         '<th class="check"><input type="checkbox" class="checkall"'
         ' onchange="neuronCheckAll(this)"></th>'
-        '<th>User</th><th>Display name</th><th>Role</th><th>Status</th></tr></thead>'
+        '<th>User</th><th>Display name</th><th>Role</th><th>Status</th>'
+        '<th>Created</th></tr></thead>'
         f"<tbody>{rows}</tbody></table>{nav}</div></form>"
     )
     return _page(request, "Users", "/console/users", body)
@@ -380,17 +396,25 @@ async def user_detail(
     csrf = _csrf_field(request)
     quoted = _quote(user_id)
 
+    created = _fmt_ts(int(user.get("creation_ts") or 0)) if user.get("creation_ts") else "—"
     info = (
         '<dl class="kv">'
         f"<dt>User ID</dt><dd>{_e(user_id)}</dd>"
         f'<dt>Display name</dt><dd>{_e(user.get("displayname") or "—")}</dd>'
         f"<dt>Role</dt><dd>{_pill(is_admin, 'admin', 'user')}</dd>"
-        f"<dt>Status</dt><dd>{_pill(not deactivated, 'active', 'deactivated')}</dd></dl>"
+        f"<dt>Status</dt><dd>{_pill(not deactivated, 'active', 'deactivated')}</dd>"
+        f"<dt>Created</dt><dd>{created}</dd></dl>"
     )
 
     admin_btn = "Revoke admin" if is_admin else "Grant admin"
     admin_value = "false" if is_admin else "true"
     actions = (
+        '<div class="panel"><h2>Profile</h2>'
+        f'<form method="post" action="/console/users/{quoted}/profile">{csrf}'
+        '<label for="dn">Display name</label>'
+        f'<input id="dn" name="displayname" value="{_e(user.get("displayname") or "")}"'
+        ' placeholder="(none)">'
+        '<button class="btn" type="submit">Save display name</button></form></div>'
         '<div class="panel"><h2>Role</h2>'
         f'<form method="post" action="/console/users/{quoted}/admin">{csrf}'
         f'<input type="hidden" name="admin" value="{admin_value}">'
@@ -407,6 +431,14 @@ async def user_detail(
             "its access tokens.</p>"
             f'<form method="post" action="/console/users/{quoted}/deactivate">{csrf}'
             '<button class="btn danger" type="submit">Deactivate account</button></form></div>'
+        )
+    else:
+        actions += (
+            '<div class="panel"><h2>Reactivate</h2>'
+            '<p class="muted" style="margin-bottom:.7rem">Re-enables this account. The user '
+            "can sign in again (they keep their password).</p>"
+            f'<form method="post" action="/console/users/{quoted}/reactivate">{csrf}'
+            '<button class="btn" type="submit">Reactivate account</button></form></div>'
         )
     shadow_banned = bool(user.get("shadow_banned"))
     sb_label = "Remove shadow-ban" if shadow_banned else "Shadow-ban"
@@ -513,6 +545,31 @@ async def user_deactivate(
 ) -> Response:
     await _admin(request).deactivate_user(user_id)
     _flash(request, f"Deactivated {user_id}.")
+    return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
+
+
+@router.post("/console/users/{user_id}/reactivate", include_in_schema=False)
+async def user_reactivate(
+    request: Request,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    await _admin(request).upsert_user(user_id, {"deactivated": False})
+    _flash(request, f"Reactivated {user_id}.")
+    return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
+
+
+@router.post("/console/users/{user_id}/profile", include_in_schema=False)
+async def user_set_profile(
+    request: Request,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    displayname: str = Form(""),
+) -> Response:
+    await _admin(request).upsert_user(user_id, {"displayname": displayname})
+    _flash(request, "Display name updated.")
     return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
 
 
@@ -1194,10 +1251,10 @@ async def report_dismiss(
 
 
 # --- pagination helper ------------------------------------------------------
-def _pager(path: str, offset: int, limit: int, total: int, q: str) -> str:
+def _pager(path: str, offset: int, limit: int, total: int, q: str, extra: str = "") -> str:
     if total <= limit:
         return ""
-    qs = f"&q={_quote(q)}" if q else ""
+    qs = (f"&q={_quote(q)}" if q else "") + extra
     parts: list[str] = []
     if offset > 0:
         prev = max(0, offset - limit)

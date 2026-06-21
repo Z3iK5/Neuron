@@ -186,6 +186,73 @@ def test_reset_password_and_deactivate(tmp_path: Path) -> None:
         assert "deactivated" in detail.text
 
 
+def test_settings_is_in_the_nav(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _console_login(client, "admin", "s3cret-password")
+        assert 'href="/console/settings"' in client.get("/console").text
+
+
+def test_reactivate_user(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "frank", "pw-123456")
+        _console_login(client, "admin", "s3cret-password")
+        uid = "@frank:neuron.local"
+
+        token = _csrf(client.get(f"/console/users/{uid}").text)
+        client.post(f"/console/users/{uid}/deactivate", data={"csrf_token": token})
+        detail = client.get(f"/console/users/{uid}").text
+        assert "Reactivate account" in detail  # the control appears when deactivated
+
+        token = _csrf(client.get(f"/console/users/{uid}").text)
+        assert client.post(
+            f"/console/users/{uid}/reactivate",
+            data={"csrf_token": token},
+            follow_redirects=False,
+        ).status_code == 303
+        # Back to active: the Deactivate control returns, Reactivate is gone.
+        detail = client.get(f"/console/users/{uid}").text
+        assert "Deactivate account" in detail and "Reactivate account" not in detail
+        # And the reactivated account can authenticate over the Matrix API again.
+        login = client.post(
+            "/_matrix/client/v3/login",
+            json={
+                "type": "m.login.password",
+                "identifier": {"type": "m.id.user", "user": "frank"},
+                "password": "pw-123456",
+            },
+        )
+        assert login.status_code == 200
+
+
+def test_edit_displayname(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "grace", "pw-123456")
+        _console_login(client, "admin", "s3cret-password")
+        uid = "@grace:neuron.local"
+        token = _csrf(client.get(f"/console/users/{uid}").text)
+        client.post(
+            f"/console/users/{uid}/profile",
+            data={"displayname": "Grace H", "csrf_token": token},
+        )
+        assert "Grace H" in client.get(f"/console/users/{uid}").text
+
+
+def test_users_status_filter(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "heidi", "pw-123456")
+        _console_login(client, "admin", "s3cret-password")
+        uid = "@heidi:neuron.local"
+        token = _csrf(client.get(f"/console/users/{uid}").text)
+        client.post(f"/console/users/{uid}/deactivate", data={"csrf_token": token})
+
+        assert "heidi" in client.get("/console/users?status=deactivated").text
+        assert "heidi" not in client.get("/console/users?status=active").text
+
+
 # --- invites ----------------------------------------------------------------
 def test_invites_create_qr_and_delete(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
