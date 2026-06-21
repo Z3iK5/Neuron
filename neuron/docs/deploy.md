@@ -1,0 +1,77 @@
+# Deploying Neuron with Docker + PostgreSQL
+
+For personal / small use, the [desktop app](desktop.md) (bundled SQLite) is the
+easiest path. For a medium/large deployment, run the homeserver on PostgreSQL with
+the Docker stack here.
+
+## Quick start
+
+```bash
+cd neuron
+cp .env.example .env          # then edit NEURON_SERVER_NAME and the secrets
+docker compose up -d --build
+```
+
+This brings up two services:
+
+- **`db`** — `postgres:16` (data in the `neuron-pgdata` volume).
+- **`neuron`** — the homeserver, on `http://localhost:8008` (one process, a sized
+  connection pool). It waits for Postgres to be healthy, runs migrations, then serves.
+
+Finish setup in the browser at **`/get-started`** — the first account you create
+becomes the server admin (`NEURON_SERVER_FIRST_USER_ADMIN=true`). Manage the server
+at **`/console`**.
+
+## Configuration
+
+All settings are `NEURON_SERVER_*` environment variables (see `.env.example`). The
+load-bearing ones:
+
+| Variable | Purpose |
+|---|---|
+| `NEURON_SERVER_NAME` | Permanent server identity (the domain in every Matrix ID). **Set before first start — it cannot change.** |
+| `NEURON_SERVER_PUBLIC_BASE_URL` | Public URL clients use (advertised via `.well-known`). Use your real `https://` URL. |
+| `POSTGRES_PASSWORD` | Postgres password (used by both services). Change it. |
+| `NEURON_SERVER_DB_POOL_SIZE` | App connection-pool size — safe to raise above 1. |
+| `NEURON_SERVER_CONSOLE_SESSION_SECRET` | Stable secret so console sessions survive restarts (`openssl rand -hex 32`). |
+
+The federation **signing key** persists in the database (no key file to manage);
+back up Postgres and you've backed up the server's identity.
+
+Put the server behind a TLS-terminating reverse proxy (Caddy/nginx/Traefik) and set
+`NEURON_SERVER_PUBLIC_BASE_URL` to the `https://` URL for production.
+
+## Health & diagnostics
+
+- The container's healthcheck polls `/health`.
+- Run the built-in preflight any time:
+  ```bash
+  docker compose run --rm neuron doctor          # config + DB + key + media + network
+  docker compose run --rm neuron doctor --offline  # skip network checks
+  ```
+
+## Backups
+
+- **Database** (includes the signing key + all state):
+  ```bash
+  docker compose exec db pg_dump -U neuron neuron > neuron-backup.sql
+  ```
+- **Media**: the `neuron-data` volume (`/data/media`).
+
+## Scaling beyond one process
+
+The default stack is **one app process** with a connection pool — the right shape
+for most medium deployments and fully safe (the multi-writer position tracker keeps
+`/sync` correct under pool concurrency).
+
+Running **multiple app processes** is also correctness-safe (cross-worker `/sync`
+wakeups via Postgres `LISTEN/NOTIFY`, contiguous stream positions with a per-instance
+heartbeat). Before scaling out, note:
+
+- Give each process a **distinct** `NEURON_SERVER_INSTANCE_NAME` (stable across
+  restarts) and put them behind a load balancer.
+- **Media is filesystem-backed today**, so multiple processes must share the same
+  `/data` volume — i.e. they must run on the **same host**. Cross-host scale-out
+  awaits object-storage (S3) media.
+- A single shared Postgres serves them all; size `NEURON_SERVER_DB_POOL_SIZE` per
+  process for your connection budget.
