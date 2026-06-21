@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from neuron_server.storage.database import Database
 
@@ -34,15 +35,7 @@ async def create_media(
     )
 
 
-async def get_media(db: Database, media_id: str) -> MediaRow | None:
-    rows = await db.fetchall(
-        "SELECT media_id, content_type, upload_name, size, uploader, created_ts"
-        " FROM media WHERE media_id = ?",
-        (media_id,),
-    )
-    if not rows:
-        return None
-    row = rows[0]
+def _row_to_media(row: tuple[Any, ...]) -> MediaRow:
     return MediaRow(
         media_id=str(row[0]),
         content_type=str(row[1]),
@@ -51,3 +44,45 @@ async def get_media(db: Database, media_id: str) -> MediaRow | None:
         uploader=str(row[4]),
         created_ts=int(row[5]),
     )
+
+
+async def get_media(db: Database, media_id: str) -> MediaRow | None:
+    rows = await db.fetchall(
+        "SELECT media_id, content_type, upload_name, size, uploader, created_ts"
+        " FROM media WHERE media_id = ?",
+        (media_id,),
+    )
+    return _row_to_media(rows[0]) if rows else None
+
+
+def _uploader_filter(uploader: str | None) -> tuple[str, tuple[Any, ...]]:
+    """A ``WHERE`` clause + params filtering by uploader substring (or no filter)."""
+    if not uploader:
+        return "", ()
+    return " WHERE uploader LIKE ?", (f"%{uploader}%",)
+
+
+async def count_media(db: Database, *, uploader: str | None = None) -> int:
+    where, params = _uploader_filter(uploader)
+    return int(await db.fetchval(f"SELECT COUNT(*) FROM media{where}", params) or 0)
+
+
+async def total_media_bytes(db: Database, *, uploader: str | None = None) -> int:
+    where, params = _uploader_filter(uploader)
+    return int(await db.fetchval(f"SELECT COALESCE(SUM(size), 0) FROM media{where}", params) or 0)
+
+
+async def list_media(
+    db: Database, *, offset: int, limit: int, uploader: str | None = None
+) -> list[MediaRow]:
+    where, params = _uploader_filter(uploader)
+    rows = await db.fetchall(
+        "SELECT media_id, content_type, upload_name, size, uploader, created_ts"
+        f" FROM media{where} ORDER BY created_ts DESC, media_id LIMIT ? OFFSET ?",
+        (*params, limit, offset),
+    )
+    return [_row_to_media(r) for r in rows]
+
+
+async def delete_media(db: Database, media_id: str) -> None:
+    await db.execute("DELETE FROM media WHERE media_id = ?", (media_id,))

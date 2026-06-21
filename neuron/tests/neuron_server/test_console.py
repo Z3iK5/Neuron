@@ -501,3 +501,55 @@ def test_bulk_action_requires_csrf(tmp_path: Path) -> None:
 def _client_reuse(existing: TestClient) -> TestClient:
     """A second TestClient over the SAME app (fresh cookies) — for multi-user tests."""
     return TestClient(existing.app)
+
+
+# --- media ------------------------------------------------------------------
+def _upload_media(
+    client: TestClient, token: str, data: bytes = b"hello-media", content_type: str = "text/plain"
+) -> str:
+    resp = client.post(
+        "/_matrix/media/v3/upload",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": content_type},
+        params={"filename": "note.txt"},
+        content=data,
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["content_uri"].rsplit("/", 1)[1]
+
+
+def test_media_is_in_the_nav(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "founder", "s3cret-password")
+        _console_login(client, "founder", "s3cret-password")
+        assert 'href="/console/media"' in client.get("/console").text
+
+
+def test_media_page_lists_and_bulk_deletes(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "founder", "s3cret-password")
+        mtoken = _matrix_login(client, "founder", "s3cret-password")
+        media_id = _upload_media(client, mtoken)
+        _console_login(client, "founder", "s3cret-password")
+
+        page = client.get("/console/media")
+        assert page.status_code == 200
+        assert media_id in page.text
+        assert "@founder:neuron.local" in page.text  # uploader column
+
+        token = _csrf(page.text)
+        resp = client.post(
+            "/console/media/bulk",
+            data={"csrf_token": token, "action": "delete", "media_ids": media_id},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        after = client.get("/console/media").text
+        assert media_id not in after
+        assert "No media uploaded yet" in after
+
+        # The blob is gone too: downloading it now 404s.
+        dl = client.get(
+            f"/_matrix/client/v1/media/download/neuron.local/{media_id}",
+            headers={"Authorization": f"Bearer {mtoken}"},
+        )
+        assert dl.status_code == 404

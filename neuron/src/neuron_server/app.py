@@ -157,7 +157,9 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             settings.max_upload_bytes,
         )
         app.state.e2ee = E2EEService(db, notify=notifier.notify)
-        app.state.admin = AdminService(db, settings.name, rooms=app.state.rooms)
+        app.state.admin = AdminService(
+            db, settings.name, rooms=app.state.rooms, media=app.state.media
+        )
         flusher = RetryFlusher(
             app.state.federation_sender.retry_all, settings.federation_retry_interval_s
         )

@@ -28,6 +28,10 @@ class MediaStore(abc.ABC):
     @abc.abstractmethod
     async def get(self, media_id: str) -> bytes | None: ...
 
+    @abc.abstractmethod
+    async def delete(self, media_id: str) -> None:
+        """Remove a blob. Idempotent — deleting missing content is not an error."""
+
 
 class FilesystemMediaStore(MediaStore):
     """Stores blobs as files under a base directory."""
@@ -54,6 +58,10 @@ class FilesystemMediaStore(MediaStore):
             return path.read_bytes() if path.is_file() else None
 
         return await asyncio.to_thread(_read)
+
+    async def delete(self, media_id: str) -> None:
+        path = self._path(media_id)
+        await asyncio.to_thread(lambda: path.unlink(missing_ok=True))
 
 
 class S3MediaStore(MediaStore):
@@ -117,6 +125,13 @@ class S3MediaStore(MediaStore):
             return body
 
         return await asyncio.to_thread(_read)
+
+    async def delete(self, media_id: str) -> None:
+        client = self._get_client()
+        # S3 delete_object is idempotent: removing a missing key returns success.
+        await asyncio.to_thread(
+            client.delete_object, Bucket=self._bucket, Key=self._key(media_id)
+        )
 
 
 def build_media_store(settings: NeuronServerSettings) -> MediaStore:

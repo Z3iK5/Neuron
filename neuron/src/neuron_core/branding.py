@@ -309,6 +309,9 @@ _CONSOLE_NAV: tuple[tuple[str, str, str], ...] = (
         '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>')),
     ("/console/invites", "Invites", _icon(
         '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>')),
+    ("/console/media", "Media", _icon(
+        '<rect x="3" y="3" width="18" height="18" rx="2"/>'
+        '<circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>')),
     ("/console/reports", "Reports", _icon(
         '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>'
         '<line x1="4" y1="22" x2="4" y2="15"/>')),
