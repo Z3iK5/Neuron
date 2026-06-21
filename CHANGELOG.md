@@ -5,6 +5,38 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.17] — 2026-06-21
+
+Hardening follow-up to 0.0.16, from a code review of the new proxy / rate-limit /
+media / UIA code.
+
+### Fixed
+- **Client-IP spoofing behind a wildcard-trusted proxy.** With
+  `NEURON_SERVER_TRUSTED_PROXIES=*` the real client is now taken from the right-most
+  `X-Forwarded-For` entry (the one the trusted proxy appended) instead of the
+  left-most, which a client could forge — so per-IP rate limits and logging can't be
+  spoofed. Enumerate proxies explicitly for multi-hop chains.
+- **Unbounded rate-limiter memory under IP rotation.** The per-key bucket table is
+  now hard-capped (LRU eviction), so rotated/spoofed client IPs can't grow it
+  without bound or amplify CPU.
+- **Registration-challenge flooding.** The per-IP sign-up limit is enforced at the
+  interactive-auth challenge (which persists a session row), bounding abuse of the
+  `uia_sessions` table; one completed sign-up still costs one token.
+- **UIA sessions now honour their TTL on read**, not only via the background sweep.
+- **Console media bulk-delete reports failures** (count + logs) instead of silently
+  reporting "Deleted 0" when the blob/object store is unavailable.
+- **Console search treats `%` and `_` literally** (media-by-uploader and
+  users-by-name), instead of as SQL `LIKE` wildcards.
+- **The `/get-started` rate-limit response renders the normal page** instead of a
+  raw JSON error.
+
+### Changed
+- The Caddy compose stack now **requires** `NEURON_SERVER_CONSOLE_SESSION_SECRET`
+  (fails fast if unset) rather than silently using a per-restart random secret that
+  would log admins out on every restart.
+- The server logs a startup note when request rate limiting is on but no trusted
+  proxies are configured (per-IP limits assume a directly-exposed server).
+
 ## [0.0.16] — 2026-06-21
 
 The multi-worker scaling and deployment release.
