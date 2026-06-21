@@ -103,6 +103,148 @@ async def test_concurrent_worker_startup_is_safe() -> None:
     assert distinct == len(MIGRATIONS)
 
 
+async def _migrate(db: object) -> None:
+    async with db.startup_lock():  # type: ignore[attr-defined]
+        await run_migrations(db)  # type: ignore[arg-type]
+        await db.ensure_stream_sequences()  # type: ignore[attr-defined]
+
+
+async def test_pool_concurrent_writes_never_skip_a_position() -> None:
+    """The core multi-writer fix: with >1 connection an id committed out of
+    allocation order must NOT advance the /sync floor past a lower, still-in-flight
+    id (the old MAX(col) watermark did, losing that event). Single instance,
+    pool_size>1 — exactly the case this PR makes safe."""
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=4)
+    await db.connect()
+    try:
+        await _migrate(db)
+        assert await db.get_stream_position("events") == 0  # fresh DB
+
+        a_allocated = asyncio.Event()
+        release_a = asyncio.Event()
+        a_id: dict[str, int] = {}
+
+        async def writer_a() -> None:
+            async with db.transaction():
+                a_id["v"] = await db.next_stream_id("events")
+                a_allocated.set()
+                await release_a.wait()  # hold the transaction open (id in-flight)
+
+        task_a = asyncio.create_task(writer_a())
+        await a_allocated.wait()
+
+        # B allocates a higher id and commits while A is still open.
+        async with db.transaction():
+            b_id = await db.next_stream_id("events")
+        assert b_id > a_id["v"]
+
+        # Floor stays at A's id - 1 — b_id is committed but NOT exposed while the
+        # lower id is in-flight. (MAX(col) would already report b_id here.)
+        assert await db.get_stream_position("events") == a_id["v"] - 1
+
+        # Once A commits, the floor jumps to the now-contiguous maximum.
+        release_a.set()
+        await task_a
+        assert await db.get_stream_position("events") == b_id
+    finally:
+        await db.disconnect()
+
+
+async def test_rolled_back_id_does_not_stall_the_floor() -> None:
+    """A burned (rolled-back) sequence id is a permanent hole; it must be marked
+    done so it never stalls the contiguous position forever."""
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=4)
+    await db.connect()
+    try:
+        await _migrate(db)
+        with contextlib.suppress(RuntimeError):
+            async with db.transaction():
+                await db.next_stream_id("events")  # allocated...
+                raise RuntimeError("boom")  # ...then rolled back (burned)
+        async with db.transaction():
+            sid = await db.next_stream_id("events")
+        # The floor advances to the committed id, not stuck behind the burned one.
+        assert await db.get_stream_position("events") == sid
+    finally:
+        await db.disconnect()
+
+
+async def test_floor_held_across_instances() -> None:
+    """Across two worker instances the floor is the MIN of their positions: an
+    instance holding a low in-flight id keeps the floor back, so the other
+    instance's higher committed id is not exposed prematurely (no lost event)."""
+    await _reset_schema()
+    db_a = connect_database(_PG, pool_size=2, instance_name="a")
+    db_b = connect_database(_PG, pool_size=2, instance_name="b")
+    await db_a.connect()
+    await db_b.connect()
+    try:
+        await _migrate(db_a)
+        await db_b.ensure_stream_sequences()  # instance b seeds its own position row
+
+        a_allocated = asyncio.Event()
+        release_a = asyncio.Event()
+        a_id: dict[str, int] = {}
+
+        async def writer_a() -> None:
+            async with db_a.transaction():
+                a_id["v"] = await db_a.next_stream_id("events")
+                a_allocated.set()
+                await release_a.wait()
+
+        task_a = asyncio.create_task(writer_a())
+        await a_allocated.wait()
+
+        async with db_b.transaction():
+            b_id = await db_b.next_stream_id("events")
+        assert b_id > a_id["v"]
+
+        # Read from B: the MIN-across-instances floor is held below b_id by A's
+        # not-yet-committed lower id.
+        assert await db_b.get_stream_position("events") < b_id
+        assert await db_b.get_stream_position("events") == a_id["v"] - 1
+
+        release_a.set()
+        await task_a
+    finally:
+        await db_a.disconnect()
+        await db_b.disconnect()
+
+
+async def test_readonly_cutoff_allocation_does_not_pollute_floor() -> None:
+    """A read-only cutoff (a bare nextval outside a transaction, as federation
+    backfill / backward pagination do) inserts no row, so it must not advance the
+    /sync floor to a phantom id — even when a concurrent real write later flushes."""
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=4)
+    await db.connect()
+    try:
+        await _migrate(db)
+        allocated = asyncio.Event()
+        release = asyncio.Event()
+        real: dict[str, int] = {}
+
+        async def real_send() -> None:
+            async with db.transaction():
+                real["id"] = await db.next_stream_id("events")
+                allocated.set()
+                await release.wait()
+
+        task = asyncio.create_task(real_send())
+        await allocated.wait()
+        # Read-only cutoff burns a HIGHER id while the real write is still open.
+        phantom = await db.next_stream_id("events")
+        assert phantom > real["id"]
+        release.set()
+        await task
+        # The floor is the real committed id, not the phantom read-only allocation.
+        assert await db.get_stream_position("events") == real["id"]
+    finally:
+        await db.disconnect()
+
+
 async def test_core_flow_on_postgres() -> None:
     async with _pg_app() as c:
         h = {"Authorization": f"Bearer {await _register(c, 'admin')}"}

@@ -104,7 +104,10 @@ class SyncService:
         self, user_id: str, device_id: str, token: _Token
     ) -> tuple[dict[str, Any], bool]:
         initial = token.events is None
-        current_events = await store.get_max_stream_ordering(self._db)
+        # The events token is the contiguous "persisted upto" floor, not MAX: under
+        # multiple writers an id committed out of allocation order must not advance
+        # the token past a lower, not-yet-committed id (which would skip it forever).
+        current_events = await self._db.get_stream_position("events")
         memberships = await store.get_user_memberships(self._db, user_id)
 
         join: dict[str, Any] = {}
@@ -112,7 +115,7 @@ class SyncService:
         leave: dict[str, Any] = {}
         changed = False
 
-        new_receipts = await receipts_store.max_receipt_stream(self._db)
+        new_receipts = await self._db.get_stream_position("receipts")
         new_typing = await self._typing.serial() if self._typing is not None else 0
         typing_changed = new_typing > token.typing
 
@@ -159,9 +162,15 @@ class SyncService:
         if to_device_events or device_changed:
             changed = True
 
+        # to_device: cap the token at min(delivered, floor) — never ack past what was
+        # actually delivered (the page limit) nor past the contiguous floor (a lower
+        # in-flight id). invites use the floor directly (all pending are returned as
+        # current state regardless, so the token only gates change detection).
+        to_device_token = min(new_to_device, await self._db.get_stream_position("to_device"))
+        invites_token = await self._db.get_stream_position("federated_invites")
         next_batch = (
-            f"{current_events}.{new_to_device}.{new_device_list}"
-            f".{new_invites}.{new_receipts}.{new_typing}"
+            f"{current_events}.{to_device_token}.{new_device_list}"
+            f".{invites_token}.{new_receipts}.{new_typing}"
         )
         body = {
             "next_batch": next_batch,
@@ -190,7 +199,7 @@ class SyncService:
     async def _device_lists(
         self, user_id: str, since: int, initial: bool
     ) -> tuple[list[str], int]:
-        new_pos = await e2ee_store.max_device_list_stream(self._db)
+        new_pos = await self._db.get_stream_position("device_lists")
         if initial:
             return [], new_pos
         changed_users = await e2ee_store.get_device_list_changes_after(self._db, since)

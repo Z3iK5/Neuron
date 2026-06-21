@@ -52,12 +52,13 @@ class NeuronServerSettings(BaseSettings):
         default="sqlite:///./neuron_server.db",
         description="Async database URL (sqlite:///... or postgresql://...).",
     )
-    # PostgreSQL connection-pool size (ignored for SQLite). Default 1 keeps writes
-    # serialized — today's single-connection behaviour. KEEP IT AT 1: stream ids
-    # now come from sequences (no id *collisions*), but /sync still uses a
-    # MAX(col)-based watermark that can skip an event committed out of sequence
-    # order across connections (a silent lost event). pool_size>1 / multiple
-    # workers is safe only once a multi-writer position tracker replaces it.
+    # PostgreSQL connection-pool size (ignored for SQLite). Raising it above 1 is
+    # now SAFE within a single process: the multi-writer position tracker means
+    # /sync uses a contiguous "persisted upto" floor instead of MAX(col), so an id
+    # committed out of allocation order across connections is never skipped. (Note:
+    # running multiple worker PROCESSES — distinct instance_names — is loss-free but
+    # still needs the position heartbeat before an idle instance stops holding the
+    # floor back; until then run a single process.)
     db_pool_size: int = Field(
         default=1, gt=0, description="PostgreSQL connection pool size (SQLite ignores this)."
     )
@@ -69,6 +70,15 @@ class NeuronServerSettings(BaseSettings):
     notifier_backend: str = Field(
         default="auto",
         description="Cross-worker /sync wake backend: auto | inprocess | pg | redis.",
+    )
+    # Stable per-process identity for multi-writer stream positions (Postgres).
+    # Each worker records its contiguous "persisted upto" position per stream under
+    # this name; the /sync floor is the minimum across instances. Must be stable
+    # across restarts (a changing name orphans the old row and holds the floor
+    # back). Irrelevant to SQLite (single process). Default "master".
+    instance_name: str = Field(
+        default="master",
+        description="Stable worker identity for multi-writer stream positions.",
     )
 
     # Whether open registration (POST /register) is allowed. Convenient for a

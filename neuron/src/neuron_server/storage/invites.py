@@ -29,17 +29,23 @@ async def store_invite(
     event: dict[str, Any],
     invite_state: list[dict[str, Any]],
 ) -> int:
-    """Record (or refresh) an invite; returns its new stream id."""
-    stream_id = await db.next_stream_id("federated_invites")
-    await db.execute(
-        "INSERT INTO federated_invites"
-        " (user_id, room_id, event_json, invite_state_json, stream_id)"
-        " VALUES (?, ?, ?, ?, ?)"
-        " ON CONFLICT(user_id, room_id) DO UPDATE SET"
-        " event_json = excluded.event_json, invite_state_json = excluded.invite_state_json,"
-        " stream_id = excluded.stream_id",
-        (user_id, room_id, json.dumps(event), json.dumps(invite_state), stream_id),
-    )
+    """Record (or refresh) an invite; returns its new stream id.
+
+    The id allocation and insert run in one transaction so the multi-writer
+    position tracker counts the id as in-flight until the row commits (callers are
+    not already inside a transaction).
+    """
+    async with db.transaction():
+        stream_id = await db.next_stream_id("federated_invites")
+        await db.execute(
+            "INSERT INTO federated_invites"
+            " (user_id, room_id, event_json, invite_state_json, stream_id)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(user_id, room_id) DO UPDATE SET"
+            " event_json = excluded.event_json, invite_state_json = excluded.invite_state_json,"
+            " stream_id = excluded.stream_id",
+            (user_id, room_id, json.dumps(event), json.dumps(invite_state), stream_id),
+        )
     return stream_id
 
 
