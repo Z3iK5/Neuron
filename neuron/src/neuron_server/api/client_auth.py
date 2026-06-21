@@ -61,7 +61,11 @@ async def register(request: Request, auth: AuthService = Depends(get_auth)) -> A
     body = await _json_body(request)
     auth_data = body.get("auth")
     if not await auth.uia_satisfied(auth_data):
-        # Challenge: ask the client to complete the dummy stage and retry.
+        # Throttle sign-ups per client IP at the challenge step: this is the
+        # unauthenticated entry point and it persists a UIA session row, so an
+        # unthrottled flood would bloat the uia_sessions table. Charging here (not on
+        # the completing retry below) also keeps one completed sign-up at one token.
+        request.app.state.rate_limiters.check_registration(client_ip(request))
         session = await auth.begin_uia()
         return JSONResponse(
             status_code=401,
@@ -72,11 +76,6 @@ async def register(request: Request, auth: AuthService = Depends(get_auth)) -> A
                 "completed": [],
             },
         )
-
-    # This request will actually create an account — throttle sign-ups per client IP
-    # (mass-account / spam defence). Done here, not on the challenge above, so one
-    # completed sign-up costs one token (a legit client makes two requests).
-    request.app.state.rate_limiters.check_registration(client_ip(request))
 
     result = await auth.register(
         localpart=body.get("username"),

@@ -47,7 +47,7 @@ services:
       NEURON_SERVER_DB_POOL_SIZE: ${NEURON_SERVER_DB_POOL_SIZE:-8}
       # The first account created at /get-started becomes the server admin.
       NEURON_SERVER_FIRST_USER_ADMIN: "true"
-      NEURON_SERVER_CONSOLE_SESSION_SECRET: ${NEURON_SERVER_CONSOLE_SESSION_SECRET:-}
+      NEURON_SERVER_CONSOLE_SESSION_SECRET: ${NEURON_SERVER_CONSOLE_SESSION_SECRET:?set a stable secret in .env (openssl rand -hex 32) so console sessions survive restarts}
       # Safe to trust any peer here: neuron is only reachable via Caddy on the
       # private network, so X-Forwarded-* always comes from the proxy.
       NEURON_SERVER_TRUSTED_PROXIES: "*"

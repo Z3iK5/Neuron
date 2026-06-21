@@ -517,6 +517,18 @@ def _upload_media(
     return resp.json()["content_uri"].rsplit("/", 1)[1]
 
 
+def test_user_search_escapes_like_wildcards(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "founder", "s3cret-password")  # first account = admin
+        _signup(client, "a_b", "s3cret-password")
+        _signup(client, "axb", "s3cret-password")
+        _console_login(client, "founder", "s3cret-password")
+        # '_' must be literal, not a single-char wildcard, so 'axb' is NOT matched.
+        page = client.get("/console/users?q=a_b").text
+        assert "@a_b:neuron.local" in page
+        assert "@axb:neuron.local" not in page
+
+
 def test_media_is_in_the_nav(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _signup(client, "founder", "s3cret-password")

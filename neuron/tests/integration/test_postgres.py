@@ -497,3 +497,25 @@ async def test_concurrent_sends_get_distinct_stream_ids() -> None:
             await c.get(f"{_CS}/rooms/{room}/messages?dir=b&limit=50", headers=h)
         ).json()["chunk"]
         assert len([m for m in msgs if m["type"] == "m.room.message"]) == n
+
+
+async def test_uploader_like_escape_on_postgres() -> None:
+    """The media uploader filter's `LIKE ? ESCAPE '\\'` + placeholder translation
+    must work on real Postgres/asyncpg, not just SQLite."""
+    from neuron_server.storage import media as media_store
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=2)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        await media_store.create_media(db, "m1", "text/plain", None, 1, "@a_b:pg.test", 1000)
+        await media_store.create_media(db, "m2", "text/plain", None, 1, "@axb:pg.test", 1000)
+        # '_' must be literal (escaped), so 'axb' is NOT matched.
+        assert await media_store.count_media(db, uploader="a_b") == 1
+        rows = await media_store.list_media(db, offset=0, limit=10, uploader="a_b")
+        assert [m.uploader for m in rows] == ["@a_b:pg.test"]
+        # '%' must not match everything.
+        assert await media_store.count_media(db, uploader="%") == 0
+    finally:
+        await db.disconnect()

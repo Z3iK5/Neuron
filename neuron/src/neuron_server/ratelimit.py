@@ -62,7 +62,7 @@ class RateLimiter:
         return (1.0 - tokens) / self._rate
 
     def _prune(self, now: float) -> None:
-        """Drop buckets that have fully refilled (idle), bounding memory."""
+        """Bound memory: drop idle (fully-refilled) buckets, then hard-cap by LRU."""
         idle = [
             key
             for key, (tokens, last) in self._buckets.items()
@@ -70,6 +70,18 @@ class RateLimiter:
         ]
         for key in idle:
             del self._buckets[key]
+        # An attacker rotating the key (e.g. spoofed/rotated client IPs) keeps every
+        # bucket partially drained, so the idle sweep above frees nothing. Hard-cap
+        # the dict by evicting the least-recently-touched buckets. Evict down to a
+        # low-water mark, not just back to the cap, so this O(N log N) sort amortizes
+        # over ~_MAX_KEYS/10 inserts instead of firing on every consume during a
+        # flood. (Evicting a still-drained victim bucket resets its limit, but the
+        # independent per-IP limiter still throttles the source.)
+        if len(self._buckets) > _MAX_KEYS:
+            target = _MAX_KEYS * 9 // 10
+            stale = sorted(self._buckets, key=lambda k: self._buckets[k][1])
+            for key in stale[: len(self._buckets) - target]:
+                del self._buckets[key]
 
 
 @dataclass

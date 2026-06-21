@@ -81,6 +81,21 @@ async def test_sweep_removes_expired_but_keeps_fresh(db: Database) -> None:
     assert await uia_store.session_exists(db, fresh) is True
 
 
+async def test_uia_satisfied_rejects_expired_session_before_sweep(db: Database) -> None:
+    # The read path must enforce the TTL itself, not only the background sweeper, so
+    # an expired-but-not-yet-swept session is rejected.
+    auth = _auth(db, ttl_s=3600.0)
+    now_ms = int(time.time() * 1000)
+    await uia_store.create_session(db, "stale", now_ms - 2 * 3600 * 1000)
+    assert await auth.uia_satisfied(_dummy("stale")) is False
+
+
+async def test_session_exists_enforces_created_ts_cutoff(db: Database) -> None:
+    await uia_store.create_session(db, "old", 1000)
+    assert await uia_store.session_exists(db, "old", min_created_ts=5000) is False
+    assert await uia_store.session_exists(db, "old", min_created_ts=0) is True
+
+
 async def test_storage_delete_expired_uses_cutoff(db: Database) -> None:
     await uia_store.create_session(db, "old", 1000)
     await uia_store.create_session(db, "new", 10_000)
