@@ -67,6 +67,10 @@ class _FakeS3Client:
             raise self.exceptions.NoSuchKey from None
         return {"Body": io.BytesIO(data)}
 
+    def delete_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        self.objects.pop((Bucket, Key), None)  # idempotent, like real S3
+        return {}
+
 
 async def test_s3_store_put_get_roundtrip() -> None:
     fake = _FakeS3Client()
@@ -80,3 +84,23 @@ async def test_s3_store_put_get_roundtrip() -> None:
 async def test_s3_store_get_missing_returns_none() -> None:
     store = S3MediaStore("bucket", client=_FakeS3Client())
     assert await store.get("does-not-exist") is None
+
+
+async def test_s3_store_delete_removes_blob_and_is_idempotent() -> None:
+    fake = _FakeS3Client()
+    store = S3MediaStore("bucket", prefix="media/", client=fake)
+    await store.put("abc123", b"data")
+    await store.delete("abc123")
+    assert await store.get("abc123") is None
+    # Deleting again (missing key) does not raise.
+    await store.delete("abc123")
+
+
+async def test_filesystem_store_delete_removes_blob_and_is_idempotent(tmp_path: Path) -> None:
+    store = FilesystemMediaStore(str(tmp_path))
+    await store.put("abc123", b"data")
+    assert await store.get("abc123") == b"data"
+    await store.delete("abc123")
+    assert await store.get("abc123") is None
+    # Deleting again (missing file) does not raise.
+    await store.delete("abc123")

@@ -78,6 +78,22 @@ class MediaService:
             raise MatrixError(404, "M_NOT_FOUND", "Media content missing")
         return MediaContent(data=data, content_type=row.content_type, upload_name=row.upload_name)
 
+    async def delete(self, media_id: str) -> bool:
+        """Delete local media (metadata + blob). Returns False if it didn't exist.
+
+        Metadata is removed first so the item immediately stops being listed and
+        served; the blob is then removed (idempotently). A stray blob left by a
+        failed object-store delete only wastes disk — it can never be downloaded
+        once its metadata is gone.
+        """
+        if not _MEDIA_ID_RE.match(media_id):
+            return False
+        if await store.get_media(self._db, media_id) is None:
+            return False
+        await store.delete_media(self._db, media_id)
+        await self._store.delete(media_id)
+        return True
+
     async def thumbnail(
         self, server_name: str, media_id: str, width: int, height: int, method: str
     ) -> MediaContent:

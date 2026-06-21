@@ -21,10 +21,12 @@ from neuron_server.auth.passwords import hash_password
 from neuron_server.errors import MatrixError
 from neuron_server.storage import accounts, userdata
 from neuron_server.storage import admin as admin_store
+from neuron_server.storage import media as media_store
 from neuron_server.storage import rooms as rooms_store
 from neuron_server.storage.database import Database
 
 if TYPE_CHECKING:
+    from neuron_server.media.service import MediaService
     from neuron_server.rooms.service import RoomService
 
 
@@ -48,7 +50,12 @@ class AdminService:
     """Server-administration operations for one server."""
 
     def __init__(
-        self, db: Database, server_name: str, *, rooms: RoomService | None = None
+        self,
+        db: Database,
+        server_name: str,
+        *,
+        rooms: RoomService | None = None,
+        media: MediaService | None = None,
     ) -> None:
         self._db = db
         self._server_name = server_name
@@ -56,11 +63,19 @@ class AdminService:
         # bulk redaction, server notices). It's optional so tests can construct an
         # AdminService for the read/flag operations without it.
         self._rooms = rooms
+        # MediaService owns the blob store; needed to actually purge media content.
+        # Optional (media listing reads the DB directly and needs no service).
+        self._media = media
 
     def _require_rooms(self) -> RoomService:
         if self._rooms is None:
             raise MatrixError(500, "M_UNKNOWN", "Room service is not available")
         return self._rooms
+
+    def _require_media(self) -> MediaService:
+        if self._media is None:
+            raise MatrixError(500, "M_UNKNOWN", "Media service is not available")
+        return self._media
 
     # --- server ------------------------------------------------------------
 
@@ -219,6 +234,29 @@ class AdminService:
     async def make_room_admin(self, room_id: str, user_id: str) -> None:
         """Grant a user power level 100 in a room (acts as the room creator)."""
         await self._require_rooms().admin_make_room_admin(room_id, user_id)
+
+    # --- media -------------------------------------------------------------
+
+    async def list_media(
+        self, *, offset: int, limit: int, uploader: str | None = None
+    ) -> dict[str, Any]:
+        """A page of local media metadata plus totals (count + bytes) for the filter."""
+        total = await media_store.count_media(self._db, uploader=uploader)
+        items = await media_store.list_media(
+            self._db, offset=offset, limit=limit, uploader=uploader
+        )
+        body: dict[str, Any] = {
+            "media": items,
+            "total": total,
+            "total_bytes": await media_store.total_media_bytes(self._db, uploader=uploader),
+        }
+        if offset + limit < total:
+            body["next_token"] = str(offset + limit)
+        return body
+
+    async def delete_media(self, media_id: str) -> bool:
+        """Delete one media item (metadata + blob). False if it didn't exist."""
+        return await self._require_media().delete(media_id)
 
     # --- registration tokens ----------------------------------------------
 

@@ -120,6 +120,15 @@ def _fmt_ts(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _fmt_bytes(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024:
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TiB"
+
+
 # The onchange handler on each bulk-select row checkbox (recomputes the selection
 # count and shows/hides the bulk action bar).
 _BULK_ONCHANGE = " onchange=\"neuronBulk(this.closest('.bulk-form'))\""
@@ -948,6 +957,79 @@ async def invite_qr(
     buf = io.BytesIO()
     segno.make(url, error="m").save(buf, kind="svg", scale=5, border=2)
     return Response(buf.getvalue(), media_type="image/svg+xml")
+
+
+# --- media ------------------------------------------------------------------
+@router.get("/console/media", include_in_schema=False)
+async def media_list(
+    request: Request, _: str = Depends(require_console_admin), offset: int = 0, q: str = ""
+) -> Response:
+    admin = _admin(request)
+    offset = max(0, offset)
+    q = q.strip()
+    page = await admin.list_media(offset=offset, limit=_PAGE_SIZE, uploader=q or None)
+    rows = ""
+    for m in page.get("media", []):
+        name_line = f'<div class="muted">{_e(m.upload_name)}</div>' if m.upload_name else ""
+        rows += (
+            f'<tr><td class="check"><input type="checkbox" class="rowcheck"'
+            f' name="media_ids" value="{_e(m.media_id)}"{_BULK_ONCHANGE}></td>'
+            f"<td><code>{_e(m.media_id)}</code>{name_line}</td>"
+            f"<td>{_e(m.content_type)}</td>"
+            f"<td>{_e(_fmt_bytes(m.size))}</td>"
+            f'<td><a href="/console/users/{_quote(m.uploader)}">{_e(m.uploader)}</a></td>'
+            f"<td>{_e(_fmt_ts(m.created_ts))}</td></tr>"
+        )
+    if not rows:
+        rows = '<tr><td colspan="6" class="muted">No media uploaded yet.</td></tr>'
+    total = page.get("total", 0)
+    total_bytes = page.get("total_bytes", 0)
+    nav = _pager("/console/media", offset, _PAGE_SIZE, total, q)
+    search = (
+        '<form class="row" method="get" action="/console/media" style="margin-bottom:14px">'
+        f'<input type="search" name="q" value="{_e(q)}" placeholder="Filter by uploader…">'
+        '<button class="btn sm" type="submit">Search</button>'
+        + ('<a class="btn sm ghost" href="/console/media">Clear</a>' if q else "")
+        + "</form>"
+    )
+    body = (
+        f'<h1 class="page">Media <span class="muted">({total},'
+        f" {_e(_fmt_bytes(total_bytes))})</span></h1>"
+        + search
+        + '<form class="bulk-form" method="post" action="/console/media/bulk">'
+        f"{_csrf_field(request)}"
+        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
+        '<button class="btn sm danger" name="action" value="delete"'
+        " onclick=\"return confirm('Delete the selected media? This cannot be undone.')\">"
+        "Delete</button></div>"
+        '<div class="panel"><table class="tbl"><thead><tr>'
+        '<th class="check"><input type="checkbox" class="checkall"'
+        ' onchange="neuronCheckAll(this)"></th>'
+        "<th>Media</th><th>Type</th><th>Size</th><th>Uploader</th><th>Uploaded</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>{nav}</div></form>"
+    )
+    return _page(request, "Media", "/console/media", body)
+
+
+@router.post("/console/media/bulk", include_in_schema=False)
+async def media_bulk(
+    request: Request,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    action: str = Form(""),
+    media_ids: list[str] = Form([]),
+) -> Response:
+    admin = _admin(request)
+    done = 0
+    if action == "delete":
+        for mid in media_ids:
+            try:
+                if await admin.delete_media(mid):
+                    done += 1
+            except Exception:  # noqa: BLE001 - best-effort bulk; skip per-item failures
+                continue
+    _flash(request, f"Deleted {done} media item(s).")
+    return RedirectResponse("/console/media", status_code=303)
 
 
 # --- settings + doctor ------------------------------------------------------
