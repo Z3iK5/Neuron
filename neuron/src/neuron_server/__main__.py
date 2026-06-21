@@ -30,7 +30,16 @@ def _serve(settings: NeuronServerSettings) -> None:
     # ``log_config=None``: keep our own logging (configured above) and stop uvicorn
     # installing its default config, whose colourised formatter probes
     # ``sys.stdout.isatty()`` and crashes when stdout is None (windowed frozen app).
-    uvicorn.run(app, host=settings.bind_host, port=settings.bind_port, log_config=None)
+    # ``proxy_headers=False``: our own ProxyHeadersMiddleware (config-driven by
+    # NEURON_SERVER_TRUSTED_PROXIES) is the single authority for X-Forwarded-*, so
+    # uvicorn must not also rewrite the client from its default-trusted localhost.
+    uvicorn.run(
+        app,
+        host=settings.bind_host,
+        port=settings.bind_port,
+        log_config=None,
+        proxy_headers=False,
+    )
 
 
 def _doctor(settings: NeuronServerSettings, *, offline: bool, strict: bool) -> int:

@@ -34,12 +34,43 @@ load-bearing ones:
 | `POSTGRES_PASSWORD` | Postgres password (used by both services). Change it. |
 | `NEURON_SERVER_DB_POOL_SIZE` | App connection-pool size — safe to raise above 1. |
 | `NEURON_SERVER_CONSOLE_SESSION_SECRET` | Stable secret so console sessions survive restarts (`openssl rand -hex 32`). |
+| `NEURON_SERVER_TRUSTED_PROXIES` | Proxy IP(s) to trust for `X-Forwarded-*` (or `*`). Set this when behind a reverse proxy. |
+| `NEURON_SERVER_SESSION_HTTPS_ONLY` | Mark the console session cookie `Secure`. Set `true` in production (HTTPS). |
 
 The federation **signing key** persists in the database (no key file to manage);
 back up Postgres and you've backed up the server's identity.
 
-Put the server behind a TLS-terminating reverse proxy (Caddy/nginx/Traefik) and set
-`NEURON_SERVER_PUBLIC_BASE_URL` to the `https://` URL for production.
+## Behind a reverse proxy (TLS)
+
+In production, terminate TLS at a reverse proxy (Caddy/nginx/Traefik) in front of
+Neuron and:
+
+1. Set `NEURON_SERVER_PUBLIC_BASE_URL` to your real `https://` URL.
+2. Set `NEURON_SERVER_SESSION_HTTPS_ONLY=true` so the admin-console session cookie
+   is only sent over HTTPS.
+3. Set `NEURON_SERVER_TRUSTED_PROXIES` to the proxy's address so Neuron uses the
+   real client IP from `X-Forwarded-For` (and the original scheme from
+   `X-Forwarded-Proto`) instead of the proxy's. List the proxy hop(s) explicitly,
+   e.g. `NEURON_SERVER_TRUSTED_PROXIES=172.18.0.2`; use `*` only when Neuron is
+   reachable *solely* through the proxy (e.g. bound to localhost or a private
+   Docker network). **Leave it empty for a directly-exposed server** — otherwise a
+   client could spoof its IP via a forged header.
+
+   Neuron resolves the client as the right-most `X-Forwarded-For` entry that isn't
+   one of your trusted proxies, so addresses an attacker prepends are ignored. Make
+   sure the proxy is configured to *append* (not replace) `X-Forwarded-For`.
+
+The proxy must forward both headers. Minimal Caddy example:
+
+```caddyfile
+matrix.example.org {
+    reverse_proxy neuron:8008
+}
+```
+
+Caddy sets `X-Forwarded-For` and `X-Forwarded-Proto` automatically; with the
+container on the same Docker network, set `NEURON_SERVER_TRUSTED_PROXIES` to the
+proxy container's IP (or `*` if Neuron isn't otherwise reachable).
 
 ## Health & diagnostics
 
