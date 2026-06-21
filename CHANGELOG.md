@@ -2,8 +2,133 @@
 
 All notable changes to Neuron. Each release attaches desktop installers — macOS
 `.dmg`, Windows `.exe`, Linux `.AppImage` — on the [Releases](https://github.com/Z3iK5/Neuron/releases) page.
+Tagged releases also publish a multi-arch container image to
+`ghcr.io/z3ik5/neuron-server`.
 
-## [0.0.3] — unreleased
+## [0.0.16] — 2026-06-21
+
+The multi-worker scaling and deployment release.
+
+### Added
+- **Run safely with a worker pool / multiple processes on PostgreSQL.** Stream IDs
+  are allocated from database sequences; a multi-writer "persisted-upto" position
+  tracker plus an idle-instance heartbeat means no events are lost or skipped with
+  more than one writer; `/sync` long-polls wake across workers via Postgres
+  LISTEN/NOTIFY (typing is now database-backed too); concurrent worker startup is
+  serialized with an advisory lock; and inbound federation transactions are
+  de-duplicated while the send outbox is drained by a single owner so a second
+  worker never double-sends.
+- **PostgreSQL backend** for real: a proper connection pool and a BIGINT schema.
+- **Deployment artifacts.** A `Dockerfile` + `docker-compose.yml` (app on
+  Postgres), a ready-to-run `docker-compose.caddy.yml` stack with automatic HTTPS,
+  and a CI workflow that publishes a multi-arch (amd64 + arm64) image to GHCR on
+  each version tag.
+- **Trusted reverse-proxy support.** Behind a configured proxy, Neuron uses the
+  real client IP and scheme from `X-Forwarded-*` (`NEURON_SERVER_TRUSTED_PROXIES`),
+  and the admin-console session cookie can be marked `Secure`
+  (`NEURON_SERVER_SESSION_HTTPS_ONLY`).
+- **S3 (object-storage) media backend** so multiple hosts can share uploaded media.
+- **Database-backed UIA sessions** so an in-progress registration can be completed
+  by any worker (no sticky load balancer required).
+- **Request rate limiting** on abuse-prone endpoints — per account/sender and per
+  client IP (login brute-force, sign-up spam) — returning `M_LIMIT_EXCEEDED`.
+- **Optional Prometheus `/metrics` endpoint** (`NEURON_SERVER_METRICS_ENABLED`).
+- **Deeper admin console**, Synapse-Admin style: user devices/sessions with
+  force-logout and joined-rooms; a room members table (force-leave, make-admin)
+  with a state viewer; registration-token expiry and custom tokens; bulk-dismiss
+  for reports; an editable runtime-settings page; and a **Media** page that lists
+  and purges uploads.
+- **Federation state-resolution v2** wired onto the live path behind a default-off
+  flag (`NEURON_SERVER_STATE_RES_V2`).
+
+### Changed
+- **Desktop first-run lets you choose the database backend** — SQLite for personal
+  use, or a PostgreSQL URL for a medium/large deployment.
+
+## [0.0.15] — 2026-06-20
+
+### Added
+- **Moderation report triage**: a report detail page with the reported event in
+  context, a dismiss action, and a paginated report list.
+- **Bulk moderation**: multi-select shadow-ban / deactivate on Users, and block /
+  delete on Rooms.
+
+## [0.0.14] — 2026-06-20
+
+### Changed
+- **Admin console restyle.** A light/dark theme driven by CSS variables with a
+  topbar toggle, and a left side-nav shell with a responsive drawer.
+
+## [0.0.13] — 2026-06-20
+
+### Changed
+- **Shadow-ban now covers state events, redactions and invites** (not just
+  messages), including the room-creation invite-list path; membership actions stay
+  un-gated so the ban remains undetectable.
+- **Version is single-sourced** from the installed package metadata — no more
+  hardcoded version literals across the server, desktop and federation surfaces.
+
+## [0.0.12] — 2026-06-20
+
+### Added
+- **Moderation propagates over federation.** Kicks, bans, leaves, invites and
+  redactions on rooms this server hosts are now sent to remote members' servers,
+  with an authority check on inbound redactions.
+
+## [0.0.11] — 2026-06-20
+
+### Added
+- **Passkey (WebAuthn) sign-in for the merged admin console**, scoped per admin
+  account.
+
+## [0.0.10] — 2026-06-20
+
+### Added
+- **First-run wizard** that flows from settings into getting-started.
+
+### Changed
+- The console login page redirects to `/get-started` on a brand-new server (no
+  account yet) instead of a dead-end login.
+
+## [0.0.9] — 2026-06-19
+
+### Added
+- **Real moderation tools**: room block, shadow-ban, delete/purge, message
+  redaction, abuse reports, and server notices.
+
+## [0.0.8] — 2026-06-19
+
+### Fixed
+- Corrected a console settings environment-variable name so the desktop app's
+  settings reach the server process.
+
+## [0.0.7] — 2026-06-19
+
+### Added
+- **Desktop server-settings window**, a native pre-start window, and an in-console
+  **doctor** health check.
+
+## [0.0.6] — 2026-06-19
+
+### Fixed
+- First-account admin detection, the displayed server version, and overview /
+  welcome-page polish.
+
+## [0.0.5] — 2026-06-19
+
+### Changed
+- **The admin console is now served by the homeserver itself** (merged into
+  `neuron_server`) instead of running as a separate app.
+
+## [0.0.4] — 2026-06-19
+
+### Fixed
+- Cross-platform desktop **first-run crashes** introduced in 0.0.3.
+
+### Changed
+- Release notes are generated once per release instead of once per build job.
+
+## [0.0.3] — 2026-06-18
 
 ### Added
 - **Windows MSIX package** for Microsoft Store submission, built every release and
