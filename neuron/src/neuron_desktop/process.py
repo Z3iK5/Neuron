@@ -50,6 +50,11 @@ def config_to_env(config: DesktopConfig) -> dict[str, str]:
         # sign in to the console.
         "NEURON_SERVER_FIRST_USER_ADMIN": str(settings.first_user_admin),
         "NEURON_SERVER_REGISTRATION_ENABLED": str(settings.registration_enabled),
+        "NEURON_SERVER_RATE_LIMIT_ENABLED": str(settings.rate_limit_enabled),
+        "NEURON_SERVER_METRICS_ENABLED": str(settings.metrics_enabled),
+        "NEURON_SERVER_STATE_RES_V2": str(settings.state_res_v2),
+        "NEURON_SERVER_MAX_UPLOAD_BYTES": str(settings.max_upload_bytes),
+        "NEURON_SERVER_LOG_LEVEL": settings.log_level,
         "NEURON_SERVER_BIND_HOST": settings.bind_host,
         "NEURON_SERVER_BIND_PORT": str(settings.bind_port),
         # Lets the in-process console settings page edit the persisted config.

@@ -85,9 +85,11 @@ def test_settings_save_writes_config_and_shows_restart_banner(tmp_path: Path) ->
     with _client(tmp_path, desktop_config=cfg) as client:
         _login(client)
         token = _csrf(client.get(_SETTINGS).text)
-        # Checkbox omitted -> registration disabled.
+        # Checkbox omitted -> registration disabled. max_upload_mib is required.
         resp = client.post(
-            _SETTINGS, data={"csrf_token": token}, follow_redirects=False
+            _SETTINGS,
+            data={"csrf_token": token, "max_upload_mib": "50", "log_level": "INFO"},
+            follow_redirects=False,
         )
         assert resp.status_code == 303
         assert json.loads(cfg.read_text())["registration_enabled"] is False
@@ -97,10 +99,90 @@ def test_settings_save_writes_config_and_shows_restart_banner(tmp_path: Path) ->
         token = _csrf(client.get(_SETTINGS).text)
         client.post(
             _SETTINGS,
-            data={"registration_enabled": "true", "csrf_token": token},
+            data={
+                "registration_enabled": "true",
+                "csrf_token": token,
+                "max_upload_mib": "50",
+                "log_level": "INFO",
+            },
             follow_redirects=False,
         )
         assert json.loads(cfg.read_text())["registration_enabled"] is True
+
+
+def test_settings_form_shows_all_runtime_controls(tmp_path: Path) -> None:
+    cfg = _desktop_config(tmp_path)
+    with _client(tmp_path, desktop_config=cfg) as client:
+        _login(client)
+        text = client.get(_SETTINGS).text
+        for name in (
+            "registration_enabled",
+            "first_user_admin",
+            "rate_limit_enabled",
+            "metrics_enabled",
+            "state_res_v2",
+            "max_upload_mib",
+            "log_level",
+        ):
+            assert f'name="{name}"' in text, name
+
+
+def test_settings_save_persists_all_runtime_fields(tmp_path: Path) -> None:
+    cfg = _desktop_config(tmp_path)
+    with _client(tmp_path, desktop_config=cfg) as client:
+        _login(client)
+        token = _csrf(client.get(_SETTINGS).text)
+        resp = client.post(
+            _SETTINGS,
+            data={
+                "csrf_token": token,
+                "registration_enabled": "true",
+                "metrics_enabled": "true",
+                "state_res_v2": "true",
+                # first_user_admin + rate_limit_enabled omitted -> stored False.
+                "max_upload_mib": "25",
+                "log_level": "DEBUG",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        data = json.loads(cfg.read_text())
+        assert data["registration_enabled"] is True
+        assert data["metrics_enabled"] is True
+        assert data["state_res_v2"] is True
+        assert data["first_user_admin"] is False
+        assert data["rate_limit_enabled"] is False
+        assert data["max_upload_bytes"] == 25 * 1024 * 1024
+        assert data["log_level"] == "DEBUG"
+
+
+def test_settings_save_rejects_bad_upload_size(tmp_path: Path) -> None:
+    cfg = _desktop_config(tmp_path, max_upload_bytes=50 * 1024 * 1024)
+    with _client(tmp_path, desktop_config=cfg) as client:
+        _login(client)
+        token = _csrf(client.get(_SETTINGS).text)
+        resp = client.post(
+            _SETTINGS,
+            data={"csrf_token": token, "max_upload_mib": "0", "log_level": "INFO"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        # Nothing persisted; the original value is untouched.
+        assert json.loads(cfg.read_text())["max_upload_bytes"] == 50 * 1024 * 1024
+        assert "Max upload size" in client.get(_SETTINGS).text
+
+
+def test_settings_save_clamps_unknown_log_level(tmp_path: Path) -> None:
+    cfg = _desktop_config(tmp_path)
+    with _client(tmp_path, desktop_config=cfg) as client:
+        _login(client)
+        token = _csrf(client.get(_SETTINGS).text)
+        client.post(
+            _SETTINGS,
+            data={"csrf_token": token, "max_upload_mib": "50", "log_level": "TRACE"},
+            follow_redirects=False,
+        )
+        assert json.loads(cfg.read_text())["log_level"] == "INFO"
 
 
 def test_settings_readonly_without_desktop_config(tmp_path: Path) -> None:
@@ -109,7 +191,7 @@ def test_settings_readonly_without_desktop_config(tmp_path: Path) -> None:
         page = client.get(_SETTINGS)
         assert page.status_code == 200
         assert 'name="registration_enabled"' not in page.text  # no editable form
-        assert "Registration is" in page.text  # shown read-only instead
+        assert "needs the desktop app" in page.text  # shown read-only instead
         # A save (CSRF token seeded from another form page) is a no-op with an explanation.
         token = _csrf(client.get("/console/users/new").text)
         resp = client.post(_SETTINGS, data={"csrf_token": token}, follow_redirects=False)
