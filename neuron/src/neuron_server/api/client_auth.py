@@ -21,6 +21,7 @@ from starlette.responses import JSONResponse
 from neuron_server.api.deps import get_auth, require_user
 from neuron_server.auth.service import Authenticated, AuthService, LoginResult
 from neuron_server.errors import MatrixError
+from neuron_server.proxy import client_ip
 
 router = APIRouter(prefix="/_matrix/client")
 
@@ -71,6 +72,11 @@ async def register(request: Request, auth: AuthService = Depends(get_auth)) -> A
                 "completed": [],
             },
         )
+
+    # This request will actually create an account — throttle sign-ups per client IP
+    # (mass-account / spam defence). Done here, not on the challenge above, so one
+    # completed sign-up costs one token (a legit client makes two requests).
+    request.app.state.rate_limiters.check_registration(client_ip(request))
 
     result = await auth.register(
         localpart=body.get("username"),
@@ -127,8 +133,9 @@ async def login(request: Request, auth: AuthService = Depends(get_auth)) -> dict
     if not isinstance(password, str) or not password:
         raise MatrixError(400, "M_MISSING_PARAM", "Missing password")
 
-    # Throttle login attempts per account (brute-force defence) before doing the
-    # expensive password verification.
+    # Throttle login attempts — per account (brute-force one login) and per client
+    # IP (one host spraying many accounts) — before the expensive password check.
+    request.app.state.rate_limiters.check_login_ip(client_ip(request))
     request.app.state.rate_limiters.check_login(user)
 
     result = await auth.login(

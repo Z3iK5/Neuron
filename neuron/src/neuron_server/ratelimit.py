@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """In-process request rate limiting (token bucket).
 
-A small, dependency-free limiter for the abuse-prone endpoints: password login
-(brute-force protection, keyed by the account being logged into) and message
-sending (spam protection, keyed by the sender). Keys are application identities
-(usernames / user IDs), not client IPs — so it works correctly behind a reverse
-proxy with no trusted-XFF configuration.
+A small, dependency-free limiter for the abuse-prone endpoints:
+
+- password login — both per **account** (brute-force one login) and per **client
+  IP** (one host spraying many accounts);
+- account **registration** — per client IP (sign-up spam);
+- message sending — per **sender** (spam).
+
+Account/sender-keyed limits work behind a proxy with no extra config. The IP-keyed
+limits use the proxy-aware client IP (see ``neuron_server.proxy.client_ip``), so a
+reverse-proxy deployment must set ``trusted_proxies`` — otherwise every request
+shares the proxy's single bucket.
 
 Per-process: each worker enforces its own buckets. That bounds abuse on every
 worker; a strict global limit across workers would need a shared store (Redis) and
@@ -72,6 +78,8 @@ class RateLimiters:
 
     enabled: bool
     login: RateLimiter
+    login_ip: RateLimiter
+    registration: RateLimiter
     message: RateLimiter
 
     def _check(self, limiter: RateLimiter, key: str) -> None:
@@ -85,6 +93,12 @@ class RateLimiters:
     def check_login(self, account: str) -> None:
         self._check(self.login, account)
 
+    def check_login_ip(self, client_ip: str) -> None:
+        self._check(self.login_ip, client_ip)
+
+    def check_registration(self, client_ip: str) -> None:
+        self._check(self.registration, client_ip)
+
     def check_message(self, user_id: str) -> None:
         self._check(self.message, user_id)
 
@@ -94,5 +108,11 @@ def build_rate_limiters(settings: NeuronServerSettings) -> RateLimiters:
     return RateLimiters(
         enabled=settings.rate_limit_enabled,
         login=RateLimiter(settings.rate_limit_login_hz, settings.rate_limit_login_burst),
+        login_ip=RateLimiter(
+            settings.rate_limit_login_ip_hz, settings.rate_limit_login_ip_burst
+        ),
+        registration=RateLimiter(
+            settings.rate_limit_registration_hz, settings.rate_limit_registration_burst
+        ),
         message=RateLimiter(settings.rate_limit_message_hz, settings.rate_limit_message_burst),
     )
