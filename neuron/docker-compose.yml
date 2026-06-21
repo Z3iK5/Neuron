@@ -1,0 +1,54 @@
+# Neuron homeserver — production-ish stack: the app on PostgreSQL.
+#
+#   cp .env.example .env   # then edit NEURON_SERVER_NAME etc.
+#   docker compose up -d --build
+#
+# This runs ONE app process with a connection pool (db_pool_size>1, safe since the
+# multi-writer storage work). For true multi-process scale-out see docs/deploy.md.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: neuron
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-neuron}
+      POSTGRES_DB: neuron
+    volumes:
+      - neuron-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The app waits for this before starting (depends_on: service_healthy).
+      test: ["CMD-SHELL", "pg_isready -U neuron -d neuron"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  neuron:
+    build: .
+    image: neuron-server
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The homeserver's permanent identity — the domain in every Matrix ID. Set
+      # this to your real domain before first start; it cannot change afterwards.
+      NEURON_SERVER_NAME: ${NEURON_SERVER_NAME:-neuron.local}
+      # Public URL clients use to reach this server (advertised via .well-known).
+      NEURON_SERVER_PUBLIC_BASE_URL: ${NEURON_SERVER_PUBLIC_BASE_URL:-http://localhost:8008}
+      # Use the bundled PostgreSQL; the pool is safe to size up (one app process).
+      NEURON_SERVER_DATABASE_URL: postgresql://neuron:${POSTGRES_PASSWORD:-neuron}@db:5432/neuron
+      NEURON_SERVER_DB_POOL_SIZE: ${NEURON_SERVER_DB_POOL_SIZE:-8}
+      # The first account created at /get-started becomes the server admin.
+      NEURON_SERVER_FIRST_USER_ADMIN: "true"
+      # Stable secret so admin-console sessions survive restarts (set in .env).
+      NEURON_SERVER_CONSOLE_SESSION_SECRET: ${NEURON_SERVER_CONSOLE_SESSION_SECRET:-}
+    ports:
+      - "${NEURON_PORT:-8008}:8008"
+    volumes:
+      # Media uploads (the signing key persists in the database).
+      - neuron-data:/data
+    restart: unless-stopped
+
+volumes:
+  neuron-pgdata:
+  neuron-data:

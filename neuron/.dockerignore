@@ -1,0 +1,27 @@
+# Keep the build context small/clean — the image installs from pyproject + src/.
+.venv/
+**/__pycache__/
+**/*.pyc
+.git/
+.gitignore
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+docs/
+dist/
+build/
+*.egg-info/
+uv.lock
+.env
+.env.*
+!.env.example
+docker-compose.yml
+Dockerfile
+.dockerignore
+# Local data that must never leak into an image.
+neuron-media/
+*.db
+*.db-wal
+*.db-shm
+signing.key
