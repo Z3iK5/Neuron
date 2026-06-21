@@ -70,8 +70,31 @@ heartbeat). Before scaling out, note:
 
 - Give each process a **distinct** `NEURON_SERVER_INSTANCE_NAME` (stable across
   restarts) and put them behind a load balancer.
-- **Media is filesystem-backed today**, so multiple processes must share the same
-  `/data` volume — i.e. they must run on the **same host**. Cross-host scale-out
-  awaits object-storage (S3) media.
+- Use **S3 media** (below) so workers don't depend on a shared local disk — this is
+  what unlocks **cross-host** scale-out. (With filesystem media, multiple processes
+  must share the same `/data` volume, i.e. run on the same host.)
 - A single shared Postgres serves them all; size `NEURON_SERVER_DB_POOL_SIZE` per
   process for your connection budget.
+
+## Media on S3 (object storage)
+
+By default media blobs are stored on the local filesystem (`/data/media`). For
+multi-host deployments, store them in an S3-compatible bucket instead so every
+worker reads/writes the same media:
+
+```env
+NEURON_SERVER_MEDIA_BACKEND=s3
+NEURON_SERVER_S3_MEDIA_BUCKET=my-neuron-media
+# Optional — for S3-compatible stores (MinIO, Cloudflare R2, ...); omit for AWS S3:
+NEURON_SERVER_S3_MEDIA_ENDPOINT_URL=https://minio.example:9000
+NEURON_SERVER_S3_MEDIA_REGION=us-east-1
+NEURON_SERVER_S3_MEDIA_PREFIX=media/
+```
+
+- **Credentials** come from the standard AWS chain — `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY` env vars, or an instance/role profile — never from Neuron
+  config, so secrets stay out of the config file.
+- S3 media needs the `boto3` dependency, which is **not** in the base server image.
+  Install the `s3` extra (`pip install ".[server,s3]"`) — e.g. build the image with
+  it, or add it in a derived image. The default filesystem path needs nothing extra.
+- The metadata (`media` table) still lives in Postgres; only the blobs move to S3.

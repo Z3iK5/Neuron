@@ -55,7 +55,7 @@ from neuron_server.federation.sender import FederationSender
 from neuron_server.keys.resolver import ServerKeyResolver
 from neuron_server.keys.service import ServerKeyService
 from neuron_server.media.service import MediaService
-from neuron_server.media.store import FilesystemMediaStore
+from neuron_server.media.store import build_media_store
 from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
 from neuron_server.storage.database import Database, connect_database
@@ -147,7 +147,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         )
         app.state.sync = SyncService(db, notifier, typing=app.state.typing)
         app.state.media = MediaService(
-            FilesystemMediaStore(settings.media_store_path),
+            build_media_store(settings),
             db,
             settings.name,
             settings.max_upload_bytes,
