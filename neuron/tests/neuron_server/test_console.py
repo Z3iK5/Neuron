@@ -374,6 +374,68 @@ def test_invites_create_qr_and_delete(tmp_path: Path) -> None:
         ).status_code == 303
 
 
+def test_invite_custom_token_and_expiry(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _console_login(client, "admin", "s3cret-password")
+        token = _csrf(client.get("/console/invites").text)
+        assert client.post(
+            "/console/invites/new",
+            data={
+                "uses_allowed": "1",
+                "expiry_days": "7",
+                "token": "vippass",
+                "csrf_token": token,
+            },
+            follow_redirects=False,
+        ).status_code == 303
+        page = client.get("/console/invites").text
+        assert "vippass" in page  # the custom token was honoured
+        # The token is redeemable now (created with an expiry 7 days out).
+        assert client.get("/get-started?token=vippass").status_code == 200
+
+
+def test_reports_bulk_dismiss(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "kate", "pw-123456")
+        atok = _matrix_login(client, "admin", "s3cret-password")
+        room = client.post(
+            "/_matrix/client/v3/createRoom",
+            json={"preset": "public_chat"},
+            headers={"Authorization": f"Bearer {atok}"},
+        ).json()["room_id"]
+        ktok = _matrix_login(client, "kate", "pw-123456")
+        client.post(
+            f"/_matrix/client/v3/rooms/{room}/join",
+            headers={"Authorization": f"Bearer {ktok}"},
+        )
+        ev = client.put(
+            f"/_matrix/client/v3/rooms/{room}/send/m.room.message/t1",
+            json={"msgtype": "m.text", "body": "spam"},
+            headers={"Authorization": f"Bearer {ktok}"},
+        ).json()["event_id"]
+        # admin (in the room) reports the message.
+        assert client.post(
+            f"/_matrix/client/v3/rooms/{room}/report/{ev}",
+            json={"reason": "spam"},
+            headers={"Authorization": f"Bearer {atok}"},
+        ).status_code == 200
+
+        _console_login(client, "admin", "s3cret-password")
+        page = client.get("/console/reports").text
+        assert "Dismiss selected" in page
+        m = re.search(r'name="report_ids" value="([^"]+)"', page)
+        assert m, "no report row rendered"
+        csrf = _csrf(page)
+        assert client.post(
+            "/console/reports/bulk",
+            data={"action": "dismiss", "report_ids": m.group(1), "csrf_token": csrf},
+            follow_redirects=False,
+        ).status_code == 303
+        assert "No reports" in client.get("/console/reports").text
+
+
 # --- security ---------------------------------------------------------------
 def test_bad_csrf_is_rejected(tmp_path: Path) -> None:
     with _client(tmp_path) as client:

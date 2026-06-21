@@ -11,9 +11,11 @@ needs no admin token and no second process.
 Pages are rendered as branded pure-Python HTML via :mod:`neuron_core.branding`
 (no Jinja templates / static files), which keeps the frozen desktop bundle simple.
 
-Operations that the homeserver does not yet fully implement (shadow-ban, server
-notices, room block/delete, redaction, content reports) are shown as disabled
-"coming soon" controls rather than wired to stubs.
+It surfaces the in-process admin operations as granular controls: user management
+(create/edit, admin role, password, deactivate/reactivate, devices/sessions,
+shadow-ban, server notices, redaction), room moderation (members force-leave /
+make-admin, block, delete+purge, state), registration tokens, abuse reports, and
+server settings.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from __future__ import annotations
 import html
 import io
 import json
+import time
 import urllib.parse
 from datetime import UTC, datetime
 from pathlib import Path
@@ -285,7 +288,8 @@ async def users_list(
         '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
         '<button class="btn sm" name="action" value="shadow_ban">Shadow-ban</button>'
         '<button class="btn sm ghost" name="action" value="unshadow_ban">Un-shadow-ban</button>'
-        '<button class="btn sm danger" name="action" value="deactivate">Deactivate</button></div>'
+        '<button class="btn sm danger" name="action" value="deactivate"'
+        " onclick=\"return confirm('Deactivate the selected users?')\">Deactivate</button></div>"
         '<div class="panel"><table class="tbl"><thead><tr>'
         '<th class="check"><input type="checkbox" class="checkall"'
         ' onchange="neuronCheckAll(this)"></th>'
@@ -673,8 +677,9 @@ async def rooms_list(
         '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
         '<button class="btn sm" name="action" value="block">Block</button>'
         '<button class="btn sm ghost" name="action" value="unblock">Unblock</button>'
-        '<button class="btn sm danger" name="action" value="delete">'
-        "Delete &amp; purge</button></div>"
+        '<button class="btn sm danger" name="action" value="delete"'
+        " onclick=\"return confirm('Delete &amp; purge the selected rooms? This cannot be"
+        " undone.')\">Delete &amp; purge</button></div>"
         '<div class="panel"><table class="tbl"><thead><tr>'
         '<th class="check"><input type="checkbox" class="checkall"'
         ' onchange="neuronCheckAll(this)"></th>'
@@ -863,9 +868,12 @@ async def invites_list(
         tok = str(t.get("token", ""))
         url = _invite_url(settings, tok)
         uses = "∞" if t.get("uses_allowed") is None else str(t.get("uses_allowed"))
+        expiry = t.get("expiry_time")
+        expires = _fmt_ts(int(expiry)) if expiry else "never"
         rows += (
             f'<tr><td><code>{_e(tok)}</code></td>'
             f'<td>{t.get("completed", 0)} / {uses}</td>'
+            f'<td class="muted">{expires}</td>'
             f'<td><a href="{_e(url)}">invite link</a> '
             f'&middot; <a href="/console/invites/{_quote(tok)}/qr.svg">QR</a></td>'
             '<td><form class="inline" method="post" '
@@ -874,12 +882,17 @@ async def invites_list(
             "</form></td></tr>"
         )
     if not rows:
-        rows = '<tr><td colspan="4" class="muted">No invite tokens yet.</td></tr>'
+        rows = '<tr><td colspan="5" class="muted">No invite tokens yet.</td></tr>'
     create = (
         '<div class="panel" style="max-width:460px"><h2>New invite</h2>'
-        '<form class="row" method="post" action="/console/invites/new">'
+        '<form method="post" action="/console/invites/new">'
         f"{_csrf_field(request)}"
-        '<input class="q" name="uses_allowed" placeholder="Uses (blank = unlimited)">'
+        '<label for="ua">Uses (blank = unlimited)</label>'
+        '<input id="ua" name="uses_allowed" placeholder="e.g. 1">'
+        '<label for="ed">Expires in days (blank = never)</label>'
+        '<input id="ed" name="expiry_days" placeholder="e.g. 7">'
+        '<label for="ct">Custom token (blank = random)</label>'
+        '<input id="ct" name="token" placeholder="optional" autocapitalize="none">'
         '<button class="btn" type="submit">Create</button></form>'
         '<p class="note" style="margin-top:.7rem">Share the link or QR; anyone with it can '
         "create one account.</p></div>"
@@ -887,7 +900,8 @@ async def invites_list(
     body = (
         '<h1 class="page">Invites</h1>'
         '<div class="panel"><table class="tbl"><thead><tr><th>Token</th><th>Used</th>'
-        f"<th>Share</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>{create}"
+        f"<th>Expires</th><th>Share</th><th></th></tr></thead>"
+        f"<tbody>{rows}</tbody></table></div>{create}"
     )
     return _page(request, "Invites", "/console/invites", body)
 
@@ -898,10 +912,15 @@ async def invites_new(
     _: str = Depends(require_console_admin),
     __: None = Depends(csrf_protect),
     uses_allowed: str = Form(""),
+    expiry_days: str = Form(""),
+    token: str = Form(""),
 ) -> Response:
     uses = int(uses_allowed) if uses_allowed.strip().isdigit() else None
+    expiry_time = None
+    if expiry_days.strip().isdigit() and int(expiry_days) > 0:
+        expiry_time = int(time.time() * 1000) + int(expiry_days) * 86_400_000
     await _admin(request).create_registration_token(
-        token=None, uses_allowed=uses, expiry_time=None
+        token=token.strip() or None, uses_allowed=uses, expiry_time=expiry_time
     )
     _flash(request, "Invite created.")
     return RedirectResponse("/console/invites", status_code=303)
@@ -1295,9 +1314,12 @@ async def reports_page(
     rows = ""
     for r in data.get("event_reports", []):
         rid = str(r.get("room_id", ""))
-        report_url = f'/console/reports/{_quote(str(r.get("id", "")))}'
+        report_id = str(r.get("id", ""))
+        report_url = f"/console/reports/{_quote(report_id)}"
         rows += (
-            f'<tr><td><a href="{report_url}">{_e(str(r.get("user_id", "")))}</a></td>'
+            f'<tr><td class="check"><input type="checkbox" class="rowcheck"'
+            f' name="report_ids" value="{_e(report_id)}"{_BULK_ONCHANGE}></td>'
+            f'<td><a href="{report_url}">{_e(str(r.get("user_id", "")))}</a></td>'
             f'<td><a href="/console/rooms/{_quote(rid)}">{_e(rid)}</a></td>'
             f'<td><code>{_e(str(r.get("event_id", "")))}</code></td>'
             f'<td>{_e(r.get("reason") or "")}</td>'
@@ -1305,16 +1327,46 @@ async def reports_page(
         )
     if not rows:
         rows = (
-            '<tr><td colspan="5"><div class="empty"><div class="big">No reports</div>'
+            '<tr><td colspan="6"><div class="empty"><div class="big">No reports</div>'
             "Nothing has been reported on this server.</div></td></tr>"
         )
     body = (
         f'<h1 class="page">Reports <span class="muted">({total})</span></h1>'
-        '<div class="panel"><table class="tbl"><thead><tr><th>Reporter</th><th>Room</th>'
-        f"<th>Event</th><th>Reason</th><th></th></tr></thead><tbody>{rows}</tbody></table>"
-        f'{_pager("/console/reports", offset, _REPORTS_PER_PAGE, total, "")}</div>'
+        '<form class="bulk-form" method="post" action="/console/reports/bulk">'
+        f"{_csrf_field(request)}"
+        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
+        '<button class="btn sm danger" name="action" value="dismiss"'
+        " onclick=\"return confirm('Dismiss the selected reports?')\">Dismiss selected"
+        "</button></div>"
+        '<div class="panel"><table class="tbl"><thead><tr>'
+        '<th class="check"><input type="checkbox" class="checkall"'
+        ' onchange="neuronCheckAll(this)"></th>'
+        '<th>Reporter</th><th>Room</th><th>Event</th><th>Reason</th><th></th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+        f'{_pager("/console/reports", offset, _REPORTS_PER_PAGE, total, "")}</div></form>'
     )
     return _page(request, "Reports", "/console/reports", body)
+
+
+@router.post("/console/reports/bulk", include_in_schema=False)
+async def reports_bulk(
+    request: Request,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+    action: str = Form(""),
+    report_ids: list[str] = Form([]),
+) -> Response:
+    admin = _admin(request)
+    done = 0
+    if action == "dismiss":
+        for rid in report_ids:
+            try:
+                await admin.delete_event_report(rid)
+                done += 1
+            except Exception:  # noqa: BLE001 - best-effort bulk; skip per-item failures
+                continue
+    _flash(request, f"Dismissed {done} report(s).")
+    return RedirectResponse("/console/reports", status_code=303)
 
 
 @router.get("/console/reports/{report_id}", include_in_schema=False)
