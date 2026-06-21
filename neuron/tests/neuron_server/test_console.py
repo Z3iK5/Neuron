@@ -253,6 +253,47 @@ def test_users_status_filter(tmp_path: Path) -> None:
         assert "heidi" not in client.get("/console/users?status=active").text
 
 
+def test_user_devices_panel_and_force_logout(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _signup(client, "admin", "s3cret-password")
+        _signup(client, "ivan", "pw-123456")
+        # ivan signs in over the Matrix API, creating a device + access token.
+        login = client.post(
+            "/_matrix/client/v3/login",
+            json={
+                "type": "m.login.password",
+                "identifier": {"type": "m.id.user", "user": "ivan"},
+                "password": "pw-123456",
+            },
+        )
+        assert login.status_code == 200
+        device_id, token = login.json()["device_id"], login.json()["access_token"]
+        _console_login(client, "admin", "s3cret-password")
+        uid = "@ivan:neuron.local"
+
+        detail = client.get(f"/console/users/{uid}").text
+        assert "Devices &amp; sessions" in detail and device_id in detail
+        assert "Not in any rooms." in detail  # the Rooms panel renders (empty)
+
+        # Deleting the device revokes its access token.
+        csrf = _csrf(detail)
+        assert client.post(
+            f"/console/users/{uid}/devices/{device_id}/delete",
+            data={"csrf_token": csrf},
+            follow_redirects=False,
+        ).status_code == 303
+        who = client.get(
+            "/_matrix/client/v3/account/whoami", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert who.status_code == 401  # token no longer valid
+
+        # Force-logout-all is reachable and succeeds even with no devices left.
+        csrf = _csrf(client.get(f"/console/users/{uid}").text)
+        assert client.post(
+            f"/console/users/{uid}/logout", data={"csrf_token": csrf}, follow_redirects=False
+        ).status_code == 303
+
+
 # --- invites ----------------------------------------------------------------
 def test_invites_create_qr_and_delete(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
