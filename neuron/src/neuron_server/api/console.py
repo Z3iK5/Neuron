@@ -732,17 +732,42 @@ async def room_detail(
         f'<dt>State events</dt><dd>{room.get("state_events", len(state.get("state", [])))}</dd>'
         "</dl>"
     )
-    member_items = "".join(f"<li>{_e(m)}</li>" for m in members.get("members", []))
+    csrf = _csrf_field(request)
+    quoted = _quote(room_id)
+    member_rows = "".join(
+        f'<tr><td>{_e(m)}</td><td class="row">'
+        f'<form class="inline" method="post" '
+        f'action="/console/rooms/{quoted}/members/{_quote(m)}/make-admin">{csrf}'
+        '<button class="btn sm" type="submit">Make admin</button></form>'
+        f'<form class="inline" method="post" '
+        f'action="/console/rooms/{quoted}/members/{_quote(m)}/force-leave" '
+        "onsubmit=\"return confirm('Force this user out of the room?')\">"
+        f'{csrf}<button class="btn sm danger" type="submit">Force-leave</button></form>'
+        "</td></tr>"
+        for m in members.get("members", [])
+    )
     members_panel = (
         f'<div class="panel"><h2>Members ({members.get("total", 0)})</h2>'
-        '<ul class="muted" style="columns:2;margin:0;padding-left:1.1rem">'
-        f"{member_items}</ul></div>"
-        if member_items
+        '<table class="tbl"><thead><tr><th>User</th><th></th></tr></thead>'
+        f"<tbody>{member_rows}</tbody></table></div>"
+        if member_rows
+        else ""
+    )
+    state_rows = "".join(
+        f'<tr><td>{_e(str(e.get("type", "")))}</td>'
+        f'<td>{_e(str(e.get("state_key", "")))}</td>'
+        f'<td class="muted">{_e(str(e.get("sender", "")))}</td></tr>'
+        for e in state.get("state", [])
+    )
+    state_panel = (
+        '<div class="panel"><h2>Room state</h2>'
+        '<table class="tbl"><thead><tr><th>Type</th><th>State key</th>'
+        '<th>Sender</th></tr></thead>'
+        f"<tbody>{state_rows}</tbody></table></div>"
+        if state_rows
         else ""
     )
     blocked = await admin.is_room_blocked(room_id)
-    csrf = _csrf_field(request)
-    quoted = _quote(room_id)
     block_label = "Unblock room" if blocked else "Block room"
     block_value = "false" if blocked else "true"
     mod = (
@@ -763,7 +788,7 @@ async def room_detail(
     )
     body = (
         f'<h1 class="page">{_e(room.get("name") or room_id)}</h1>'
-        f'<div class="panel">{info}</div>{members_panel}{mod}'
+        f'<div class="panel">{info}</div>{members_panel}{mod}{state_panel}'
         '<p class="muted"><a href="/console/rooms">&larr; All rooms</a></p>'
     )
     return _page(request, "Room", "/console/rooms", body)
@@ -793,6 +818,32 @@ async def room_delete(
     await _admin(request).delete_room(room_id, purge=purge, block=not purge)
     _flash(request, "Room deleted.")
     return RedirectResponse("/console/rooms", status_code=303)
+
+
+@router.post("/console/rooms/{room_id}/members/{user_id}/force-leave", include_in_schema=False)
+async def room_member_force_leave(
+    request: Request,
+    room_id: str,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    await _admin(request).force_leave_room(room_id, user_id)
+    _flash(request, f"Removed {user_id} from the room.")
+    return RedirectResponse(f"/console/rooms/{_quote(room_id)}", status_code=303)
+
+
+@router.post("/console/rooms/{room_id}/members/{user_id}/make-admin", include_in_schema=False)
+async def room_member_make_admin(
+    request: Request,
+    room_id: str,
+    user_id: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    await _admin(request).make_room_admin(room_id, user_id)
+    _flash(request, f"Granted {user_id} admin in the room.")
+    return RedirectResponse(f"/console/rooms/{_quote(room_id)}", status_code=303)
 
 
 # --- invites / registration tokens -----------------------------------------
