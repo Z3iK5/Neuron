@@ -44,3 +44,12 @@ def media_path(base: Path) -> Path:
 
 def signing_key_path(base: Path) -> Path:
     return base / "signing.key"
+
+
+def version_path(base: Path) -> Path:
+    """File recording the app version that last configured/ran this data dir.
+
+    Used to tell an upgrade (a different version over existing data) from a normal
+    relaunch (same version) and from a clean first run (no data at all).
+    """
+    return base / ".neuron-version"

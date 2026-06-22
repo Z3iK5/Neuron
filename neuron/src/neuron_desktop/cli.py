@@ -42,14 +42,36 @@ def _reveal(path: Path) -> None:
 def _configured(base: Path) -> config_module.DesktopConfig:
     """Ensure the app is configured (first-run setup if needed).
 
-    After a non-interactive first run (the double-clicked app), reveal the
-    WELCOME.txt so the user can find their auto-created admin credentials.
+    First handle an existing install of a different version (upgrade vs fresh), then
+    run first-run setup if needed. After a non-interactive first run (the
+    double-clicked app), reveal WELCOME.txt with the auto-created admin credentials.
     """
+    try:
+        action = setup.resolve_existing_install(
+            base, setup.current_app_version(), chooser=setup.default_install_chooser
+        )
+    except OSError as exc:  # a fresh-install purge couldn't complete (e.g. locked file)
+        print(f"Could not complete the fresh install: {exc}")
+        raise SystemExit(1) from exc
+    if action == setup.INSTALL_CANCEL:
+        print("Cancelled — leaving the existing installation untouched.")
+        raise SystemExit(0)
     fresh = setup.is_first_run(base)
     config = setup.load_or_create(base)
     if fresh and setup.welcome_path(base).exists():
         _reveal(setup.welcome_path(base))
     return config
+
+
+def _gui_install_chooser(existing: setup.ExistingInstall) -> str:
+    """Ask upgrade-vs-fresh via a native dialog; fall back to terminal/headless."""
+    try:
+        from neuron_desktop import settings_window
+
+        choice = settings_window.ask_install_action(existing)
+    except Exception:  # noqa: BLE001 - no display / tkinter unavailable
+        return setup.default_install_chooser(existing)
+    return choice if choice is not None else setup.INSTALL_CANCEL
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,6 +147,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _open_settings_window(base)
 
     if args.command == "tray":
+        # An existing install of a different version -> ask upgrade vs fresh (native
+        # dialog, falling back to terminal/headless). Cancel leaves it untouched.
+        try:
+            tray_action = setup.resolve_existing_install(
+                base, setup.current_app_version(), chooser=_gui_install_chooser
+            )
+        except OSError as exc:  # a fresh-install purge couldn't complete
+            print(f"Could not complete the fresh install: {exc}")
+            return 1
+        if tray_action == setup.INSTALL_CANCEL:
+            print("Cancelled — leaving the existing installation untouched.")
+            return 0
         first = setup.is_first_run(base)
         # On first run the tray shows the setup wizard (which writes the config and
         # starts the server); otherwise load the existing config.
@@ -133,6 +167,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if first
             else config_module.load(paths.config_path(base))
         )
+        if not first:
+            # Stamp this version as having run (first-run stamps via write_config).
+            setup.record_version(base, setup.current_app_version())
         try:
             from neuron_desktop import tray
 

@@ -5,8 +5,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
-from neuron_desktop import cli, process
+import pytest
+
+from neuron_desktop import cli, paths, process, setup
+from neuron_desktop import config as config_module
+from neuron_desktop.config import DesktopConfig
 
 
 def test_default_server_command_normal_vs_frozen(monkeypatch) -> None:
@@ -36,3 +41,30 @@ def test_cli_where_prints_paths(monkeypatch, tmp_path, capsys) -> None:
     assert cli.main(["where"]) == 0
     out = capsys.readouterr().out
     assert str(tmp_path) in out and "config file" in out
+
+
+def _existing_install(base: Path, *, version: str = "0.0.0-old") -> None:
+    config_module.save(DesktopConfig("old.server", str(base), "admin"), paths.config_path(base))
+    paths.database_path(base).write_bytes(b"db")
+    setup.welcome_path(base).write_text("welcome", encoding="utf-8")
+    setup.record_version(base, version)
+
+
+def test_configured_upgrades_existing_install_when_headless(tmp_path: Path) -> None:
+    # No tty in tests -> the default chooser upgrades (never auto-erases).
+    _existing_install(tmp_path)
+    config = cli._configured(tmp_path)
+    assert config.server_name == "old.server"  # data preserved
+    assert paths.database_path(tmp_path).exists()
+    assert not setup.welcome_path(tmp_path).exists()  # pruned
+    assert setup.installed_version(tmp_path) == setup.current_app_version()  # re-stamped
+
+
+def test_configured_aborts_when_install_choice_cancelled(monkeypatch, tmp_path: Path) -> None:
+    _existing_install(tmp_path)
+    monkeypatch.setattr(setup, "default_install_chooser", lambda _e: setup.INSTALL_CANCEL)
+    with pytest.raises(SystemExit):
+        cli._configured(tmp_path)
+    # Nothing was removed.
+    assert paths.config_path(tmp_path).exists()
+    assert setup.welcome_path(tmp_path).exists()

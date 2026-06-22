@@ -279,3 +279,213 @@ def test_first_run_then_admin_can_sign_in(tmp_path: Path) -> None:
         )
         assert version.status_code == 200
         assert version.json()["server_version"].startswith("Neuron")
+
+
+# --- existing-install detection: upgrade vs fresh --------------------------
+
+
+def _make_install(base: Path, *, version: str = "0.0.1", server_name: str = "old.server") -> None:
+    """Simulate a full prior install in ``base`` (config + db + key + media + welcome)."""
+    base.mkdir(parents=True, exist_ok=True)
+    config_module.save(
+        DesktopConfig(server_name, str(base), "admin"), paths.config_path(base)
+    )
+    paths.media_path(base).mkdir(parents=True, exist_ok=True)
+    (paths.media_path(base) / "blob").write_bytes(b"media")
+    db = paths.database_path(base)
+    db.write_bytes(b"sqlite")
+    db.with_name(db.name + "-wal").write_bytes(b"wal")
+    paths.signing_key_path(base).write_text("key", encoding="utf-8")
+    setup.welcome_path(base).write_text("welcome", encoding="utf-8")
+    setup.record_version(base, version)
+
+
+def test_detect_existing_install_none_on_empty_dir(tmp_path: Path) -> None:
+    assert setup.detect_existing_install(tmp_path) is None
+
+
+def test_detect_ignores_foreign_or_corrupt_config(tmp_path: Path) -> None:
+    # A directory that merely happens to contain a non-Neuron config.json (e.g. a
+    # mis-pointed NEURON_DATA_DIR) must NOT be treated as ours — so the destructive
+    # fresh path can never fire against unrelated files.
+    paths.config_path(tmp_path).write_text("THIS IS NOT JSON", encoding="utf-8")
+    (paths.media_path(tmp_path)).mkdir()
+    (paths.media_path(tmp_path) / "precious").write_text("user file", encoding="utf-8")
+    assert setup.detect_existing_install(tmp_path) is None
+    assert setup.needs_install_choice(tmp_path, "9.9.9") is None
+
+
+def test_detect_none_when_only_a_database_no_config(tmp_path: Path) -> None:
+    # Without a loadable config.json we don't claim ownership (config is the marker).
+    paths.database_path(tmp_path).write_bytes(b"sqlite")
+    assert setup.detect_existing_install(tmp_path) is None
+
+
+def test_detect_reports_postgres_backend(tmp_path: Path) -> None:
+    config_module.save(
+        DesktopConfig(
+            "pg.server", str(tmp_path), "admin",
+            database_url="postgresql://u:p@host:5432/neuron",
+        ),
+        paths.config_path(tmp_path),
+    )
+    info = setup.detect_existing_install(tmp_path)
+    assert info is not None and info.uses_postgres is True
+
+
+def test_detect_existing_install_reads_version_and_name(tmp_path: Path) -> None:
+    _make_install(tmp_path, version="0.0.1", server_name="my.server")
+    info = setup.detect_existing_install(tmp_path)
+    assert info is not None
+    assert info.version == "0.0.1"
+    assert info.server_name == "my.server"
+    assert info.has_database is True
+
+
+def test_version_stamp_roundtrip(tmp_path: Path) -> None:
+    assert setup.installed_version(tmp_path) is None
+    setup.record_version(tmp_path, "1.2.3")
+    assert setup.installed_version(tmp_path) == "1.2.3"
+
+
+def test_write_config_stamps_current_version(tmp_path: Path) -> None:
+    setup.write_first_run_config(
+        tmp_path, setup.default_first_run_config(tmp_path), print_fn=lambda _m: None
+    )
+    assert setup.installed_version(tmp_path) == setup.current_app_version()
+
+
+def test_needs_install_choice(tmp_path: Path) -> None:
+    # Clean machine -> no choice.
+    assert setup.needs_install_choice(tmp_path, "9.9.9") is None
+    _make_install(tmp_path, version="0.0.1")
+    # Different version -> prompt.
+    assert setup.needs_install_choice(tmp_path, "9.9.9") is not None
+    # Same version -> no prompt (a normal relaunch).
+    assert setup.needs_install_choice(tmp_path, "0.0.1") is None
+
+
+def test_purge_installation_removes_everything(tmp_path: Path) -> None:
+    _make_install(tmp_path)
+    setup.purge_installation(tmp_path)
+    db = paths.database_path(tmp_path)
+    assert not paths.config_path(tmp_path).exists()
+    assert not db.exists() and not db.with_name(db.name + "-wal").exists()
+    assert not paths.signing_key_path(tmp_path).exists()
+    assert not paths.media_path(tmp_path).exists()
+    assert not setup.welcome_path(tmp_path).exists()
+    assert not paths.version_path(tmp_path).exists()
+
+
+def test_prune_for_upgrade_keeps_data_drops_welcome(tmp_path: Path) -> None:
+    _make_install(tmp_path)
+    setup.prune_for_upgrade(tmp_path)
+    assert not setup.welcome_path(tmp_path).exists()  # stale once initialized
+    # Durable state is preserved across the upgrade.
+    assert paths.config_path(tmp_path).exists()
+    assert paths.database_path(tmp_path).exists()
+    assert paths.signing_key_path(tmp_path).exists()
+    assert (paths.media_path(tmp_path) / "blob").exists()
+
+
+def test_prune_keeps_welcome_when_uninitialized(tmp_path: Path) -> None:
+    # Config present but no database (set up, never finished) -> keep the setup
+    # instructions; only a stale post-init WELCOME.txt is dropped.
+    config_module.save(DesktopConfig("s", str(tmp_path), "admin"), paths.config_path(tmp_path))
+    setup.welcome_path(tmp_path).write_text("welcome", encoding="utf-8")
+    setup.prune_for_upgrade(tmp_path)
+    assert setup.welcome_path(tmp_path).exists()
+
+
+def test_purge_raises_and_keeps_config_marker_on_failure(tmp_path: Path) -> None:
+    _make_install(tmp_path)
+    # Force a removal failure: replace signing.key with a non-empty directory, which
+    # Path.unlink() can't remove (raises OSError).
+    paths.signing_key_path(tmp_path).unlink()
+    keydir = paths.signing_key_path(tmp_path)
+    keydir.mkdir()
+    (keydir / "x").write_text("x", encoding="utf-8")
+
+    import pytest
+
+    with pytest.raises(OSError, match="signing.key"):
+        setup.purge_installation(tmp_path)
+    # The config marker survives a failed purge, so the install stays detectable and
+    # the next launch re-offers the choice instead of first-running over leftovers.
+    assert paths.config_path(tmp_path).exists()
+    assert setup.detect_existing_install(tmp_path) is not None
+
+
+def test_resolve_existing_install_upgrade(tmp_path: Path) -> None:
+    _make_install(tmp_path, version="0.0.1")
+    action = setup.resolve_existing_install(
+        tmp_path, "9.9.9", chooser=lambda _e: setup.INSTALL_UPGRADE
+    )
+    assert action == setup.INSTALL_UPGRADE
+    assert paths.database_path(tmp_path).exists()  # data kept
+    assert not setup.welcome_path(tmp_path).exists()  # pruned
+
+
+def test_resolve_existing_install_fresh(tmp_path: Path) -> None:
+    _make_install(tmp_path, version="0.0.1")
+    action = setup.resolve_existing_install(
+        tmp_path, "9.9.9", chooser=lambda _e: setup.INSTALL_FRESH
+    )
+    assert action == setup.INSTALL_FRESH
+    assert not paths.config_path(tmp_path).exists()  # wiped
+    assert not paths.database_path(tmp_path).exists()
+    assert setup.is_first_run(tmp_path)  # next launch will do first-run setup
+
+
+def test_resolve_existing_install_cancel_touches_nothing(tmp_path: Path) -> None:
+    _make_install(tmp_path, version="0.0.1")
+    action = setup.resolve_existing_install(
+        tmp_path, "9.9.9", chooser=lambda _e: setup.INSTALL_CANCEL
+    )
+    assert action == setup.INSTALL_CANCEL
+    assert paths.config_path(tmp_path).exists()
+    assert setup.welcome_path(tmp_path).exists()  # not pruned
+
+
+def test_resolve_existing_install_noop_on_same_version(tmp_path: Path) -> None:
+    _make_install(tmp_path, version="0.0.1")
+
+    def _never(_e: setup.ExistingInstall) -> str:
+        raise AssertionError("chooser must not be called when versions match")
+
+    assert setup.resolve_existing_install(tmp_path, "0.0.1", chooser=_never) is None
+    assert setup.welcome_path(tmp_path).exists()  # nothing removed
+
+
+def test_resolve_existing_install_noop_on_clean_machine(tmp_path: Path) -> None:
+    def _never(_e: setup.ExistingInstall) -> str:
+        raise AssertionError("chooser must not be called on a clean machine")
+
+    assert setup.resolve_existing_install(tmp_path, "9.9.9", chooser=_never) is None
+
+
+def test_choose_via_terminal_defaults_to_upgrade(tmp_path: Path) -> None:
+    info = setup.ExistingInstall(
+        version="0.0.1", server_name="s", has_database=True, uses_postgres=False
+    )
+    # Empty answer -> upgrade.
+    assert (
+        setup.choose_via_terminal(info, input_fn=lambda _p: "", print_fn=lambda _m: None)
+        == setup.INSTALL_UPGRADE
+    )
+    # 'f' without typing the confirmation word -> stays on the safe upgrade.
+    answers = iter(["f", "nope"])
+    assert (
+        setup.choose_via_terminal(
+            info, input_fn=lambda _p: next(answers), print_fn=lambda _m: None
+        )
+        == setup.INSTALL_UPGRADE
+    )
+    # 'f' then 'erase' -> fresh.
+    answers2 = iter(["f", "erase"])
+    assert (
+        setup.choose_via_terminal(
+            info, input_fn=lambda _p: next(answers2), print_fn=lambda _m: None
+        )
+        == setup.INSTALL_FRESH
+    )
