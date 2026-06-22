@@ -5,6 +5,18 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.18] — 2026-06-22
+
+### Added
+- **Upgrade or fresh install.** When the desktop app starts and finds an existing
+  installation from a different version, it asks whether to **upgrade** (keep all
+  your data) or do a **fresh install** (erase the previous server and start over).
+  A clean machine and a same-version relaunch are unaffected. Upgrade preserves the
+  database, accounts, media and signing key (the server migrates itself); fresh
+  removes the local data only — a note reminds you that an external PostgreSQL
+  database is not dropped. A fresh install requires an explicit confirmation, and
+  with no display it always upgrades (never auto-erases).
+
 ## [0.0.17] — 2026-06-21
 
 Hardening follow-up to 0.0.16, from a code review of the new proxy / rate-limit /
