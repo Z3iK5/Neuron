@@ -16,9 +16,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from neuron_desktop import paths
 from neuron_desktop.config import DesktopConfig, validate_database_url
+
+if TYPE_CHECKING:
+    from neuron_desktop.setup import ExistingInstall
 
 # Server-name rule (mirrors neuron_server.doctor._check_server_name): no spaces/slashes.
 _INVALID_NAME_CHARS = (" ", "/")
@@ -310,3 +314,69 @@ def open_settings_window(
     name_entry.focus_set()
     root.mainloop()
     return result["value"]
+
+
+def ask_install_action(existing: ExistingInstall) -> str | None:
+    """Native dialog asking whether to upgrade or do a fresh install.
+
+    Returns ``"upgrade"``, ``"fresh"``, or ``None`` (cancelled / window closed).
+    Raises (e.g. ``tkinter.TclError``) when no display is available; callers fall
+    back to the terminal / headless chooser. A fresh install is confirmed a second
+    time because it erases all existing data.
+    """
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+
+    from neuron_desktop.setup import INSTALL_FRESH, INSTALL_UPGRADE
+
+    result: dict[str, str | None] = {"choice": None}
+    root = tk.Tk()
+    root.title("Neuron — Existing installation found")
+    root.resizable(False, False)
+    frame = ttk.Frame(root, padding=18)
+    frame.grid(sticky="nsew")
+
+    detail = "An existing Neuron installation was found"
+    if existing.version:
+        detail += f" (version {existing.version})"
+    if existing.server_name:
+        detail += f" for server “{existing.server_name}”"
+    detail += ". Upgrade keeps your data; a fresh install erases it."
+    ttk.Label(frame, text=detail, wraplength=380).grid(column=0, row=0, pady=(0, 14))
+
+    if existing.uses_postgres:
+        warning = (
+            "A fresh install removes this server's LOCAL data — its media, identity "
+            "key and configuration. Its accounts, rooms and messages live in an "
+            "external PostgreSQL database, which is NOT erased — drop or recreate "
+            "that database yourself for a truly clean start.\n\nRemove the local data "
+            "and start fresh?"
+        )
+    else:
+        warning = (
+            "A fresh install permanently deletes the existing server's data — "
+            "accounts, rooms, messages, media and its identity key. This cannot be "
+            "undone.\n\nErase everything and start fresh?"
+        )
+
+    def _choose(choice: str) -> None:
+        if choice == INSTALL_FRESH and not messagebox.askyesno(
+            "Erase all data?", warning, icon="warning", default="no"
+        ):
+            return
+        result["choice"] = choice
+        root.destroy()
+
+    ttk.Button(
+        frame, text="Upgrade (keep my data)", command=lambda: _choose(INSTALL_UPGRADE)
+    ).grid(column=0, row=1, sticky="ew", pady=3)
+    ttk.Button(
+        frame, text="Fresh install (erase everything)", command=lambda: _choose(INSTALL_FRESH)
+    ).grid(column=0, row=2, sticky="ew", pady=3)
+    ttk.Button(frame, text="Cancel", command=root.destroy).grid(
+        column=0, row=3, sticky="ew", pady=(10, 0)
+    )
+
+    root.protocol("WM_DELETE_WINDOW", root.destroy)
+    root.mainloop()
+    return result["choice"]

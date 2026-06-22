@@ -9,11 +9,15 @@ same storage the server uses, so the admin can immediately sign in to the consol
 from __future__ import annotations
 
 import asyncio
+import shutil
 import socket
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from getpass import getpass
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from neuron_desktop import config as config_module
@@ -32,6 +36,206 @@ PrintFn = Callable[[str], None]
 def is_first_run(base: Path) -> bool:
     """True when no desktop config exists yet in ``base``."""
     return not paths.config_path(base).exists()
+
+
+# --- existing-install detection: upgrade vs fresh install -------------------
+
+INSTALL_UPGRADE = "upgrade"
+INSTALL_FRESH = "fresh"
+INSTALL_CANCEL = "cancel"
+
+
+@dataclass(frozen=True)
+class ExistingInstall:
+    """What was found in the data dir from a previous install/version."""
+
+    version: str | None  # app version that last ran here (None if pre-versioning)
+    server_name: str | None  # from config.json
+    has_database: bool  # a local SQLite database file is present
+    uses_postgres: bool  # the config points at an external PostgreSQL backend
+
+
+def current_app_version() -> str:
+    """The running app's version (from package metadata; '0.0.0' if unavailable)."""
+    try:
+        return _pkg_version("neuron")
+    except PackageNotFoundError:  # pragma: no cover - metadata present when installed
+        return "0.0.0"
+
+
+def installed_version(base: Path) -> str | None:
+    """The version recorded in the data dir, or None if there's no stamp."""
+    path = paths.version_path(base)
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def record_version(base: Path, version: str) -> None:
+    """Stamp ``version`` as the one that has configured/run this data dir."""
+    base.mkdir(parents=True, exist_ok=True)
+    paths.version_path(base).write_text(version, encoding="utf-8")
+
+
+def detect_existing_install(base: Path) -> ExistingInstall | None:
+    """Describe a prior Neuron installation in ``base``, or None if there's none.
+
+    Ownership is proven by a **loadable** desktop ``config.json`` — the file Neuron
+    writes for every install. A missing, unreadable, or foreign config means we do
+    NOT treat the directory as ours, so the destructive fresh-install path can never
+    fire against an unrelated folder (important when ``NEURON_DATA_DIR`` points at a
+    shared/home directory).
+    """
+    config_file = paths.config_path(base)
+    if not config_file.exists():
+        return None
+    try:
+        config = config_module.load(config_file)
+    except Exception:  # noqa: BLE001 - not a readable Neuron config -> not our dir
+        return None
+    return ExistingInstall(
+        version=installed_version(base),
+        server_name=config.server_name,
+        has_database=paths.database_path(base).exists(),
+        uses_postgres=config.uses_postgres,
+    )
+
+
+def needs_install_choice(base: Path, current_version: str) -> ExistingInstall | None:
+    """Return the existing install when the user should pick upgrade-vs-fresh.
+
+    Only when there IS a prior install of a *different* (or unknown) version — a
+    same-version relaunch and a clean machine both return None (no prompt).
+    """
+    existing = detect_existing_install(base)
+    if existing is None or existing.version == current_version:
+        return None
+    return existing
+
+
+def purge_installation(base: Path) -> None:
+    """Fresh install: remove everything pertaining to the previous install.
+
+    Deletes the SQLite database (and its -wal/-shm sidecars), the signing key, the
+    media blobs, the welcome file, the version stamp, and finally the desktop config.
+
+    Order and atomicity matter: ``config.json`` is the ownership marker
+    :func:`detect_existing_install` keys on, so it is removed **last** and only once
+    everything else is gone. If any removal fails (e.g. a file is locked by a still-
+    running server on Windows), we raise with the leftovers named instead of leaving
+    a half-erased directory — the config survives, so the next launch still detects
+    the install and re-offers the choice rather than silently first-running over the
+    old database / federation key.
+
+    A PostgreSQL-backed install keeps its data in the external database, which this
+    cannot (and must not) drop; only local state is removed (see the warning shown
+    before this runs).
+    """
+    db = paths.database_path(base)
+    failed: list[str] = []
+
+    media = paths.media_path(base)
+    shutil.rmtree(media, ignore_errors=True)
+    if media.exists():
+        failed.append(str(media))
+
+    for path in (
+        db,
+        db.with_name(db.name + "-wal"),
+        db.with_name(db.name + "-shm"),
+        paths.signing_key_path(base),
+        welcome_path(base),
+        paths.version_path(base),
+    ):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            failed.append(str(path))
+
+    # Remove the ownership marker only after the rest is gone.
+    if not failed:
+        try:
+            paths.config_path(base).unlink(missing_ok=True)
+        except OSError:
+            failed.append(str(paths.config_path(base)))
+
+    if failed:
+        raise OSError(
+            "Could not fully remove the existing installation: "
+            + ", ".join(failed)
+            + ". Stop any running Neuron server and try again."
+        )
+
+
+def prune_for_upgrade(base: Path) -> None:
+    """Upgrade: remove only what an upgrade doesn't need, keeping all durable data.
+
+    The database, signing key, config and media are preserved (the server migrates
+    the schema on start). The only thing dropped is a now-stale WELCOME.txt — and
+    only once the server has been initialized (its database exists), so an install
+    that was set up but never finished in the browser keeps its setup instructions.
+    """
+    if paths.database_path(base).exists():
+        welcome_path(base).unlink(missing_ok=True)
+
+
+Chooser = Callable[["ExistingInstall"], str]
+
+
+def choose_via_terminal(
+    existing: ExistingInstall, *, input_fn: InputFn = input, print_fn: PrintFn = print
+) -> str:
+    """Ask on the terminal whether to upgrade or do a fresh install."""
+    found = "Found an existing Neuron installation"
+    if existing.version:
+        found += f" (version {existing.version})"
+    if existing.server_name:
+        found += f" for server '{existing.server_name}'"
+    print_fn(found + ".")
+    print_fn("  [U] Upgrade — keep your data (database, accounts, media, signing key)")
+    print_fn("  [F] Fresh install — ERASE all existing data and start over")
+    if existing.uses_postgres:
+        print_fn(
+            "  NOTE: this server uses an external PostgreSQL database — a fresh install"
+            " removes local files only; drop/recreate the Postgres database yourself."
+        )
+    answer = input_fn("Upgrade or fresh install? [U/f]: ").strip().lower()
+    if answer in ("f", "fresh"):
+        confirm = input_fn(
+            "This permanently deletes the existing server's data. Type 'erase' to confirm: "
+        ).strip().lower()
+        return INSTALL_FRESH if confirm == "erase" else INSTALL_UPGRADE
+    return INSTALL_UPGRADE
+
+
+def default_install_chooser(existing: ExistingInstall) -> str:
+    """Prompt on a terminal if one is attached; otherwise upgrade (never auto-erase)."""
+    if stdin_is_interactive():
+        return choose_via_terminal(existing)
+    return INSTALL_UPGRADE
+
+
+def resolve_existing_install(
+    base: Path, current_version: str, *, chooser: Chooser = default_install_chooser
+) -> str | None:
+    """Detect a prior install of another version and act on the chosen action.
+
+    Returns the action taken (``INSTALL_UPGRADE``/``INSTALL_FRESH``), ``INSTALL_CANCEL``
+    if the user backed out, or ``None`` when there was nothing to decide (clean
+    machine or same-version relaunch). On fresh it purges; on upgrade it prunes.
+    """
+    existing = needs_install_choice(base, current_version)
+    if existing is None:
+        return None
+    choice = chooser(existing)
+    if choice == INSTALL_FRESH:
+        purge_installation(base)
+        return INSTALL_FRESH
+    if choice == INSTALL_CANCEL:
+        return INSTALL_CANCEL
+    prune_for_upgrade(base)
+    return INSTALL_UPGRADE
 
 
 def stdin_is_interactive() -> bool:
@@ -129,6 +333,9 @@ def _write_config(base: Path, config: DesktopConfig) -> None:
     base.mkdir(parents=True, exist_ok=True)
     paths.media_path(base).mkdir(parents=True, exist_ok=True)
     config_module.save(config, paths.config_path(base))
+    # Stamp the version that wrote this data dir so a later launch can tell an
+    # upgrade (different version) from a normal relaunch (same version).
+    record_version(base, current_app_version())
 
 
 def _finalize_first_run(
@@ -226,4 +433,8 @@ def load_or_create(
                 base, input_fn=input_fn, getpass_fn=getpass_fn, print_fn=print_fn
             )
         return perform_noninteractive_first_run(base, print_fn=print_fn)
-    return config_module.load(paths.config_path(base))
+    config = config_module.load(paths.config_path(base))
+    # Mark that this app version has run here (so an upgrade isn't re-detected on the
+    # next launch after the user has chosen to upgrade).
+    record_version(base, current_app_version())
+    return config
