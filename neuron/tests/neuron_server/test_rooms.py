@@ -311,3 +311,107 @@ def test_unknown_room_is_not_found(tmp_path: Path) -> None:
             f"{_BASE}/rooms/!nope:neuron.local/state", headers=_h(alice)
         )
         assert resp.status_code == 404 and resp.json()["errcode"] == "M_NOT_FOUND"
+
+
+# --- /context --------------------------------------------------------------
+
+
+def _send_texts(client: TestClient, token: str, room_id: str, bodies: list[str]) -> list[str]:
+    event_ids = []
+    for i, body in enumerate(bodies):
+        resp = client.put(
+            f"{_BASE}/rooms/{room_id}/send/m.room.message/ctx{i}",
+            headers=_h(token),
+            json={"msgtype": "m.text", "body": body},
+        )
+        assert resp.status_code == 200, resp.text
+        event_ids.append(resp.json()["event_id"])
+    return event_ids
+
+
+def test_context_around_mid_timeline_event(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        alice = _register(client, "alice")
+        room_id = _create_room(client, alice)
+        m1, m2, m3, m4, m5 = _send_texts(client, alice, room_id, ["1", "2", "3", "4", "5"])
+
+        resp = client.get(
+            f"{_BASE}/rooms/{room_id}/context/{m3}?limit=4", headers=_h(alice)
+        )
+        assert resp.status_code == 200, resp.text
+        ctx = resp.json()
+
+        assert ctx["event"]["event_id"] == m3
+        # limit=4 splits into 2 before + 2 after; before is reverse-chronological.
+        assert [e["event_id"] for e in ctx["events_before"]] == [m2, m1]
+        assert [e["event_id"] for e in ctx["events_after"]] == [m4, m5]
+        assert {e["type"] for e in ctx["state"]} >= {"m.room.create", "m.room.member"}
+
+        # start/end are compatible with /messages from-tokens.
+        older = client.get(
+            f"{_BASE}/rooms/{room_id}/messages?dir=b&from={ctx['start']}&limit=100",
+            headers=_h(alice),
+        ).json()["chunk"]
+        older_ids = {e["event_id"] for e in older}
+        assert m1 not in older_ids and m2 not in older_ids and m3 not in older_ids
+
+        newer = client.get(
+            f"{_BASE}/rooms/{room_id}/messages?dir=f&from={ctx['end']}&limit=100",
+            headers=_h(alice),
+        ).json()["chunk"]
+        assert [e["event_id"] for e in newer] == []  # m5 was the last event
+
+
+def test_context_requires_membership_and_known_event(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        alice = _register(client, "alice")
+        bob = _register(client, "bob")
+        room_id = _create_room(client, alice)
+        (m1,) = _send_texts(client, alice, room_id, ["hello"])
+
+        denied = client.get(f"{_BASE}/rooms/{room_id}/context/{m1}", headers=_h(bob))
+        assert denied.status_code == 403 and denied.json()["errcode"] == "M_FORBIDDEN"
+
+        missing = client.get(
+            f"{_BASE}/rooms/{room_id}/context/$nosuchevent", headers=_h(alice)
+        )
+        assert missing.status_code == 404 and missing.json()["errcode"] == "M_NOT_FOUND"
+
+
+# --- /members ---------------------------------------------------------------
+
+
+def test_members_filters_by_membership(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        alice = _register(client, "alice")
+        _bob = _register(client, "bob")
+        room_id = _create_room(client, alice)
+        client.post(
+            f"{_BASE}/rooms/{room_id}/invite",
+            headers=_h(alice),
+            json={"user_id": "@bob:neuron.local"},
+        )
+
+        everyone = client.get(f"{_BASE}/rooms/{room_id}/members", headers=_h(alice)).json()
+        by_user = {e["state_key"]: e["content"]["membership"] for e in everyone["chunk"]}
+        assert by_user == {"@alice:neuron.local": "join", "@bob:neuron.local": "invite"}
+        assert all(e["type"] == "m.room.member" for e in everyone["chunk"])
+
+        joined = client.get(
+            f"{_BASE}/rooms/{room_id}/members?membership=join", headers=_h(alice)
+        ).json()["chunk"]
+        assert [e["state_key"] for e in joined] == ["@alice:neuron.local"]
+
+        not_invited = client.get(
+            f"{_BASE}/rooms/{room_id}/members?not_membership=invite", headers=_h(alice)
+        ).json()["chunk"]
+        assert [e["state_key"] for e in not_invited] == ["@alice:neuron.local"]
+
+
+def test_members_requires_membership(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        alice = _register(client, "alice")
+        carol = _register(client, "carol")
+        room_id = _create_room(client, alice)
+        denied = client.get(f"{_BASE}/rooms/{room_id}/members", headers=_h(carol))
+        assert denied.status_code == 403 and denied.json()["errcode"] == "M_FORBIDDEN"

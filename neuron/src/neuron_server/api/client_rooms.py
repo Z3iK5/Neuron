@@ -305,6 +305,40 @@ async def get_one_event(
     return await rooms.get_event(room_id, event_id)
 
 
+@router.get("/v3/rooms/{room_id}/context/{event_id}")
+async def get_event_context(
+    room_id: str,
+    event_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    rooms: RoomService = Depends(get_rooms),
+) -> dict[str, Any]:
+    limit_param = request.query_params.get("limit", "10")
+    try:
+        limit = int(limit_param)
+    except ValueError as exc:
+        raise MatrixError(400, "M_INVALID_PARAM", "limit must be an integer") from exc
+    return await rooms.get_event_context(room_id, who.user_id, event_id, limit=limit)
+
+
+@router.get("/v3/rooms/{room_id}/members")
+async def get_room_members(
+    room_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    rooms: RoomService = Depends(get_rooms),
+) -> dict[str, Any]:
+    # The `at` param (members as of a sync token) is accepted but loosely honoured:
+    # the current membership state is returned.
+    chunk = await rooms.get_member_events(
+        room_id,
+        who.user_id,
+        membership=request.query_params.get("membership"),
+        not_membership=request.query_params.get("not_membership"),
+    )
+    return {"chunk": chunk}
+
+
 @router.get("/v3/rooms/{room_id}/joined_members")
 async def get_joined_members(
     room_id: str,
