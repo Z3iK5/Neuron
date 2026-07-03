@@ -77,20 +77,30 @@ async def claim_one_time_key(
     The pick and the delete are one ``DELETE ... RETURNING`` statement, so a key is
     only returned if *this* claimer removed it. A SELECT-then-DELETE would let two
     concurrent Postgres transactions (READ COMMITTED, pool > 1) select the same row
-    and both hand it out, breaking Olm's single-use guarantee; here the loser's
-    DELETE matches no row and it falls through to the fallback key. (RETURNING
-    needs SQLite >= 3.35, 2021 — universal on supported platforms.)
+    and both hand it out, breaking Olm's single-use guarantee. A claimer whose
+    DELETE matched no row lost the race for that particular key — not necessarily
+    the last key — so it retries against the remaining rows and only falls through
+    to the fallback key once none are left. (RETURNING needs SQLite >= 3.35,
+    2021 — universal on supported platforms.)
     """
-    rows = await db.fetchall(
-        "DELETE FROM one_time_keys WHERE user_id = ? AND device_id = ? AND key_alg_id = ("
-        " SELECT key_alg_id FROM one_time_keys"
-        " WHERE user_id = ? AND device_id = ? AND key_alg_id LIKE ?"
-        " ORDER BY key_alg_id LIMIT 1"
-        ") RETURNING key_alg_id, key_json",
-        (user_id, device_id, user_id, device_id, f"{algorithm}:%"),
-    )
-    if rows:
-        return {str(rows[0][0]): json.loads(str(rows[0][1]))}
+    while True:
+        rows = await db.fetchall(
+            "DELETE FROM one_time_keys WHERE user_id = ? AND device_id = ? AND key_alg_id = ("
+            " SELECT key_alg_id FROM one_time_keys"
+            " WHERE user_id = ? AND device_id = ? AND key_alg_id LIKE ?"
+            " ORDER BY key_alg_id LIMIT 1"
+            ") RETURNING key_alg_id, key_json",
+            (user_id, device_id, user_id, device_id, f"{algorithm}:%"),
+        )
+        if rows:
+            return {str(rows[0][0]): json.loads(str(rows[0][1]))}
+        remaining = await db.fetchall(
+            "SELECT 1 FROM one_time_keys"
+            " WHERE user_id = ? AND device_id = ? AND key_alg_id LIKE ? LIMIT 1",
+            (user_id, device_id, f"{algorithm}:%"),
+        )
+        if not remaining:
+            break
 
     # Fall back to the device's unused fallback key (not consumed).
     fallback = await db.fetchall(
