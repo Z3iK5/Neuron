@@ -6,7 +6,8 @@ multi-stage flow: the server replies ``401`` with a list of acceptable flows and
 a ``session`` id; the client repeats the request, supplying ``auth`` that
 references that session. We track the open sessions here.
 
-The only flow we need today is ``m.login.dummy`` (registration). Sessions live in
+The flows we support are ``m.login.dummy`` (registration) and ``m.login.password``
+(password change / account deactivation). Sessions live in
 the database so the challenge and the retry can be served by different workers
 (no sticky load balancer required). A background sweep removes sessions older than
 the configured TTL, since an abandoned challenge would otherwise leave a row

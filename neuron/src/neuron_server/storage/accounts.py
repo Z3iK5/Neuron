@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from neuron_server.storage.database import Database
+from neuron_server.storage.database import Database, escape_like
 
 
 @dataclass
@@ -73,6 +73,40 @@ async def user_exists(db: Database, name: str) -> bool:
 async def any_users(db: Database) -> bool:
     """True if at least one account exists (used to grant the first user admin)."""
     return (await db.fetchval("SELECT 1 FROM users LIMIT 1")) is not None
+
+
+async def search_users(
+    db: Database, search_term: str, server_name: str, limit: int
+) -> list[tuple[str, str | None, str | None]]:
+    """Case-insensitively match local accounts for the user directory.
+
+    Matches ``search_term`` against the localpart (the part of ``users.name``
+    before ``:server_name``) and the profile displayname. Deactivated accounts
+    are excluded. Returns up to ``limit`` ``(user_id, displayname, avatar_url)``
+    rows, ordered by user id.
+    """
+    escaped = escape_like(search_term.lower())
+    # Localparts cannot contain ':', so anything matched before ":server" is
+    # within the localpart.
+    localpart_pattern = f"@%{escaped}%:{server_name.lower()}"
+    displayname_pattern = f"%{escaped}%"
+    rows = await db.fetchall(
+        "SELECT u.name, p.displayname, p.avatar_url"
+        " FROM users u LEFT JOIN profiles p ON p.user_id = u.name"
+        " WHERE u.deactivated = 0"
+        " AND (LOWER(u.name) LIKE ? ESCAPE '\\'"
+        " OR LOWER(COALESCE(p.displayname, '')) LIKE ? ESCAPE '\\')"
+        " ORDER BY u.name LIMIT ?",
+        (localpart_pattern, displayname_pattern, limit),
+    )
+    return [
+        (
+            str(row[0]),
+            None if row[1] is None else str(row[1]),
+            None if row[2] is None else str(row[2]),
+        )
+        for row in rows
+    ]
 
 
 # --- devices ---------------------------------------------------------------

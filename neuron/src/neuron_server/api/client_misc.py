@@ -2,9 +2,9 @@
 """Client-Server API: profile, account data, capabilities, filters, and the
 typing/receipt/presence/push-rule surfaces (HS-6).
 
-These round out the everyday client API. Presence, typing and receipts are
-accepted but not yet distributed (stubs that return success); push rules return a
-minimal empty ruleset. Profile, account data and filters are fully stored.
+These round out the everyday client API. Presence is accepted but not distributed;
+push rules return a minimal empty ruleset. Profile, account data, filters, typing,
+read receipts and read markers are fully stored (and surfaced via /sync).
 """
 
 from __future__ import annotations
@@ -108,6 +108,7 @@ async def set_global_account_data(
 ) -> dict[str, Any]:
     _require_self(who, user_id)
     await userdata.set_account_data(db, user_id, "", data_type, await json_body(request))
+    request.app.state.notify()  # wake long-polling /sync so the change roams
     return {}
 
 
@@ -137,6 +138,7 @@ async def set_room_account_data(
 ) -> dict[str, Any]:
     _require_self(who, user_id)
     await userdata.set_account_data(db, user_id, room_id, data_type, await json_body(request))
+    request.app.state.notify()  # wake long-polling /sync so the change roams
     return {}
 
 
@@ -242,19 +244,48 @@ async def receipt(
     who: Authenticated = Depends(require_user),
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
-    if receipt_type != "m.read":
-        return {}  # only read receipts are persisted/federated for now
+    if receipt_type not in ("m.read", "m.read.private"):
+        return {}  # only read receipts are persisted for now
     ts = int(time.time() * 1000)
     await receipts_store.upsert_receipt(db, room_id, who.user_id, receipt_type, event_id, ts)
     request.app.state.notify()
-    await request.app.state.federation_sender.send_receipt(
-        room_id, who.user_id, receipt_type, event_id, ts
-    )
+    if receipt_type == "m.read":  # private receipts never leave this server
+        await request.app.state.federation_sender.send_receipt(
+            room_id, who.user_id, receipt_type, event_id, ts
+        )
     return {}
 
 
 @router.post("/v3/rooms/{room_id}/read_markers")
 async def read_markers(
-    room_id: str, who: Authenticated = Depends(require_user)
+    room_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
+    body = await json_body(request)
+    wrote = False
+    fully_read = body.get("m.fully_read")
+    if isinstance(fully_read, str):
+        # Stored as per-room account data so it roams to the user's other clients
+        # via the /sync account-data stream.
+        await userdata.set_account_data(
+            db, who.user_id, room_id, "m.fully_read", {"event_id": fully_read}
+        )
+        wrote = True
+    ts = int(time.time() * 1000)
+    for receipt_type in ("m.read", "m.read.private"):
+        event_id = body.get(receipt_type)
+        if not isinstance(event_id, str):
+            continue
+        await receipts_store.upsert_receipt(
+            db, room_id, who.user_id, receipt_type, event_id, ts
+        )
+        wrote = True
+        if receipt_type == "m.read":  # private receipts never leave this server
+            await request.app.state.federation_sender.send_receipt(
+                room_id, who.user_id, receipt_type, event_id, ts
+            )
+    if wrote:
+        request.app.state.notify()
     return {}

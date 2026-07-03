@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from neuron_server.storage.database import Database
@@ -56,12 +57,54 @@ async def get_account_data(
 
 async def set_account_data(
     db: Database, user_id: str, room_id: str, data_type: str, content: dict[str, Any]
-) -> None:
-    await db.execute(
-        "INSERT INTO account_data (user_id, room_id, type, content_json) VALUES (?, ?, ?, ?)"
-        " ON CONFLICT(user_id, room_id, type) DO UPDATE SET content_json = excluded.content_json",
-        (user_id, room_id, data_type, json.dumps(content)),
+) -> int:
+    """Upsert one account-data entry; returns its new stream id.
+
+    Allocation and insert share a transaction (like receipts) so the multi-writer
+    position tracker counts the id as in-flight until the row commits.
+    """
+    async with db.transaction():
+        stream_id = await db.next_stream_id("account_data")
+        await db.execute(
+            "INSERT INTO account_data (user_id, room_id, type, content_json, stream_id)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(user_id, room_id, type) DO UPDATE SET"
+            " content_json = excluded.content_json, stream_id = excluded.stream_id",
+            (user_id, room_id, data_type, json.dumps(content), stream_id),
+        )
+    return stream_id
+
+
+@dataclass(frozen=True)
+class AccountDataEntry:
+    room_id: str  # "" for global account data
+    data_type: str
+    content: dict[str, Any]
+    stream_id: int
+
+
+async def get_account_data_changes(
+    db: Database, user_id: str, since_stream: int
+) -> list[AccountDataEntry]:
+    """All of a user's account-data entries changed after ``since_stream``.
+
+    Pass ``-1`` for an initial sync so pre-migration rows (stream_id 0) are
+    included too.
+    """
+    rows = await db.fetchall(
+        "SELECT room_id, type, content_json, stream_id FROM account_data"
+        " WHERE user_id = ? AND stream_id > ? ORDER BY stream_id",
+        (user_id, since_stream),
     )
+    return [
+        AccountDataEntry(
+            room_id=str(room_id),
+            data_type=str(data_type),
+            content=json.loads(str(content_json)),
+            stream_id=int(stream_id),
+        )
+        for room_id, data_type, content_json, stream_id in rows
+    ]
 
 
 # --- filters ---------------------------------------------------------------

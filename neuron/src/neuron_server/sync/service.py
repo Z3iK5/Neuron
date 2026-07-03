@@ -8,10 +8,9 @@ returns each joined room's current state plus a recent timeline slice; increment
 sync returns what arrived after the token. Long-polling waits on the
 :class:`StreamNotifier` until something changes.
 
-Honest scope (HS-5): history visibility is treated as "shared"; presence and
-account-data payloads are empty; ``device_lists.changed`` reports users sharing a
-room with the syncer whose keys changed (slight over-reporting is harmless —
-clients just re-query).
+Honest scope (HS-5): history visibility is treated as "shared"; presence payloads
+are empty; ``device_lists.changed`` reports users sharing a room with the syncer
+whose keys changed (slight over-reporting is harmless — clients just re-query).
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from neuron_server.storage import e2ee as e2ee_store
 from neuron_server.storage import invites as invites_store
 from neuron_server.storage import receipts as receipts_store
 from neuron_server.storage import rooms as store
+from neuron_server.storage import userdata as userdata_store
 from neuron_server.storage.database import Database
 from neuron_server.sync.notifier import Notifier
 from neuron_server.typing_state import TypingHandler
@@ -54,6 +54,7 @@ class _Token:
     invites: int = 0
     receipts: int = 0
     typing: int = 0
+    account_data: int = 0
 
 
 class SyncService:
@@ -89,6 +90,7 @@ class SyncService:
             invites = int(parts[3]) if len(parts) > 3 else 0
             receipts = int(parts[4]) if len(parts) > 4 else 0
             typing = int(parts[5]) if len(parts) > 5 else 0
+            account_data = int(parts[6]) if len(parts) > 6 else 0
         except ValueError as exc:
             raise MatrixError(400, "M_INVALID_PARAM", "Invalid sync token") from exc
         return _Token(
@@ -98,6 +100,7 @@ class SyncService:
             invites=invites,
             receipts=receipts,
             typing=typing,
+            account_data=account_data,
         )
 
     async def _build(
@@ -119,20 +122,51 @@ class SyncService:
         new_typing = await self._typing.serial() if self._typing is not None else 0
         typing_changed = new_typing > token.typing
 
+        new_account_data = await self._db.get_stream_position("account_data")
+        # -1 on initial sync so pre-stream rows (stream_id 0) are delivered too.
+        account_entries = await userdata_store.get_account_data_changes(
+            self._db, user_id, -1 if initial else token.account_data
+        )
+        global_account: list[dict[str, Any]] = []
+        room_account: dict[str, list[dict[str, Any]]] = {}
+        for entry in account_entries:
+            event = {"type": entry.data_type, "content": entry.content}
+            if entry.room_id:
+                room_account.setdefault(entry.room_id, []).append(event)
+            else:
+                global_account.append(event)
+        if global_account and not initial:
+            changed = True
+
+        highlight_terms = await self._highlight_terms(user_id)
+
         for room_id, membership in memberships:
             if membership == "join":
                 section, room_changed = await self._joined_room(room_id, token.events, initial)
+                account_events = room_account.get(room_id, [])
+                section["account_data"]["events"] = account_events
+                account_changed = bool(account_events) and not initial
                 receipt_event, receipts_changed = await self._room_receipts(
-                    room_id, token.receipts, initial
+                    room_id, user_id, token.receipts, initial
                 )
                 if receipt_event is not None:
                     section["ephemeral"]["events"].append(receipt_event)
                 typing_event = await self._typing_event(room_id)
                 if typing_event is not None:
                     section["ephemeral"]["events"].append(typing_event)
-                if initial or room_changed or receipts_changed or typing_changed:
+                notifications, highlights = await receipts_store.get_unread_counts(
+                    self._db, room_id, user_id, highlight_terms
+                )
+                section["unread_notifications"] = {
+                    "notification_count": notifications,
+                    "highlight_count": highlights,
+                }
+                room_changed = (
+                    room_changed or receipts_changed or typing_changed or account_changed
+                )
+                if initial or room_changed:
                     join[room_id] = section
-                    changed = changed or room_changed or receipts_changed or typing_changed
+                    changed = changed or room_changed
             elif membership == "invite":
                 include, section = await self._invited_room(
                     room_id, user_id, token.events, initial
@@ -170,13 +204,13 @@ class SyncService:
         invites_token = await self._db.get_stream_position("federated_invites")
         next_batch = (
             f"{current_events}.{to_device_token}.{new_device_list}"
-            f".{invites_token}.{new_receipts}.{new_typing}"
+            f".{invites_token}.{new_receipts}.{new_typing}.{new_account_data}"
         )
         body = {
             "next_batch": next_batch,
             "rooms": {"join": join, "invite": invite, "leave": leave, "knock": {}},
             "presence": {"events": []},
-            "account_data": {"events": []},
+            "account_data": {"events": global_account},
             "to_device": {"events": to_device_events},
             "device_lists": {"changed": device_changed, "left": []},
             "device_one_time_keys_count": otk_counts,
@@ -249,11 +283,28 @@ class SyncService:
             return None
         return {"type": "m.typing", "content": {"user_ids": users}}
 
+    async def _highlight_terms(self, user_id: str) -> list[str]:
+        """Needles whose mention makes an event a highlight: localpart + display name."""
+        terms = [user_id.split(":", 1)[0].lstrip("@")]
+        profile = await userdata_store.get_profile(self._db, user_id)
+        displayname = profile.get("displayname")
+        if displayname:
+            terms.append(str(displayname))
+        return terms
+
     async def _room_receipts(
-        self, room_id: str, since_receipts: int, initial: bool
+        self, room_id: str, user_id: str, since_receipts: int, initial: bool
     ) -> tuple[dict[str, Any] | None, bool]:
-        """Build the room's ``m.receipt`` ephemeral event; flag whether it changed."""
-        receipts = await receipts_store.get_room_receipts(self._db, room_id)
+        """Build the room's ``m.receipt`` ephemeral event; flag whether it changed.
+
+        Private read receipts (``m.read.private``) are only ever shown to their
+        owner — that is their entire point.
+        """
+        receipts = [
+            receipt
+            for receipt in await receipts_store.get_room_receipts(self._db, room_id)
+            if receipt.receipt_type != "m.read.private" or receipt.user_id == user_id
+        ]
         if not receipts:
             return None, False
         content: dict[str, Any] = {}

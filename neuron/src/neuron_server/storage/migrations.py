@@ -438,6 +438,17 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=20,
+        name="account_data_stream",
+        # A stream position on account data so /sync can deliver only rows changed
+        # since a client's token (same pattern as receipts). Existing rows keep
+        # stream_id 0: an initial sync returns everything regardless, and any later
+        # write re-stamps the row with a fresh id.
+        statements=(
+            "ALTER TABLE account_data ADD COLUMN stream_id BIGINT NOT NULL DEFAULT 0",
+        ),
+    ),
 )
 
 

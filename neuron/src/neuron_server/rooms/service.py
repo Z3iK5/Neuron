@@ -528,6 +528,84 @@ class RoomService:
             raise MatrixError(404, "M_NOT_FOUND", "Event not found")
         return event.client_dict()
 
+    async def _require_joined(self, room_id: str, user_id: str) -> AuthState:
+        """Require ``user_id`` to be a joined member; return the current state."""
+        state = await self._load_state(room_id)
+        if authrules.membership_of(state, user_id) != "join":
+            raise MatrixError(403, "M_FORBIDDEN", "User is not in the room")
+        return state
+
+    async def get_event_context(
+        self, room_id: str, requester: str, event_id: str, *, limit: int
+    ) -> dict[str, Any]:
+        """Return an event with surrounding timeline events and room state.
+
+        ``start``/``end`` are stream-ordering tokens compatible with the
+        ``from``/``to`` tokens of :meth:`get_messages`. ``state`` is the room's
+        *current* state (historical state-at-event is not tracked; at this
+        server's scale the current state is an acceptable approximation).
+        """
+        await self._require_room(room_id)
+        state = await self._require_joined(room_id, requester)
+        event = await store.get_event(self._db, room_id, event_id)
+        if event is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Event not found")
+
+        limit = max(0, min(limit, 1000))
+        before_limit = limit // 2
+        after_limit = limit - before_limit
+        events_before = (
+            await store.get_messages(
+                self._db, room_id, from_ordering=event.stream_ordering,
+                direction="b", limit=before_limit,
+            )
+            if before_limit
+            else []
+        )
+        events_after = (
+            await store.get_messages(
+                self._db, room_id, from_ordering=event.stream_ordering,
+                direction="f", limit=after_limit,
+            )
+            if after_limit
+            else []
+        )
+        # events_before is reverse-chronological (per spec), so its last element is
+        # the oldest event returned — the right `from` for paginating further back.
+        start = events_before[-1].stream_ordering if events_before else event.stream_ordering
+        end = events_after[-1].stream_ordering if events_after else event.stream_ordering
+        return {
+            "event": event.client_dict(),
+            "events_before": [e.client_dict() for e in events_before],
+            "events_after": [e.client_dict() for e in events_after],
+            "start": str(start),
+            "end": str(end),
+            "state": [e.client_dict() for e in state.values()],
+        }
+
+    async def get_member_events(
+        self,
+        room_id: str,
+        requester: str,
+        *,
+        membership: str | None = None,
+        not_membership: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the room's ``m.room.member`` state events, optionally filtered."""
+        await self._require_room(room_id)
+        state = await self._require_joined(room_id, requester)
+        chunk: list[dict[str, Any]] = []
+        for (etype, _), event in sorted(state.items()):
+            if etype != "m.room.member":
+                continue
+            value = str(event.content.get("membership"))
+            if membership is not None and value != membership:
+                continue
+            if not_membership is not None and value == not_membership:
+                continue
+            chunk.append(event.client_dict())
+        return chunk
+
     async def get_messages(
         self, room_id: str, *, from_token: str | None, direction: str, limit: int
     ) -> dict[str, Any]:

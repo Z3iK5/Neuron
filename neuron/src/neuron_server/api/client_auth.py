@@ -160,6 +160,84 @@ async def whoami(who: Authenticated = Depends(require_user)) -> dict[str, Any]:
     return {"user_id": who.user_id, "device_id": who.device_id, "is_guest": False}
 
 
+# --- self-serve account management (password change / deactivation) ---------
+
+
+async def _password_uia_gate(
+    request: Request, auth: AuthService, who: Authenticated, body: dict[str, Any]
+) -> JSONResponse | None:
+    """Run the single-stage m.login.password UIA flow for a sensitive endpoint.
+
+    Returns the 401 challenge response when no completed auth was submitted, or
+    ``None`` once the stage has been satisfied (the session is then closed). A
+    wrong password / cross-user identifier raises M_FORBIDDEN and leaves the
+    session open for a retry.
+    """
+    auth_data = body.get("auth")
+    if not await auth.uia_password_submitted(auth_data):
+        session = await auth.begin_uia()
+        return JSONResponse(
+            status_code=401,
+            content={
+                "session": session,
+                "flows": [{"stages": ["m.login.password"]}],
+                "params": {},
+                "completed": [],
+            },
+        )
+    # Re-authenticating here is a password check just like /login, so charge the
+    # same limiters (per account and per client IP) *before* verifying — otherwise
+    # this endpoint would be an unthrottled password-guessing side door.
+    request.app.state.rate_limiters.check_login_ip(client_ip(request))
+    request.app.state.rate_limiters.check_login(who.user_id)
+    assert isinstance(auth_data, dict)  # guaranteed by uia_password_submitted
+    await auth.verify_uia_password(auth_data, who.user_id)
+    await auth.complete_uia(auth_data)
+    return None
+
+
+@router.post("/v3/account/password")
+async def change_password(
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    auth: AuthService = Depends(get_auth),
+) -> Any:
+    body = await json_body(request)
+    # Validate the new password before the UIA gate so a doomed request fails
+    # early instead of burning the just-completed UIA session.
+    new_password = body.get("new_password")
+    if not isinstance(new_password, str) or not new_password:
+        raise MatrixError(400, "M_MISSING_PARAM", "Missing new_password")
+
+    challenge = await _password_uia_gate(request, auth, who, body)
+    if challenge is not None:
+        return challenge
+
+    logout_devices = bool(body.get("logout_devices", True))  # spec default: true
+    await auth.change_password(
+        who.user_id, new_password, logout_devices=logout_devices, keep_device_id=who.device_id
+    )
+    return {}
+
+
+@router.post("/v3/account/deactivate")
+async def deactivate_account(
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    auth: AuthService = Depends(get_auth),
+) -> Any:
+    body = await json_body(request)
+    challenge = await _password_uia_gate(request, auth, who, body)
+    if challenge is not None:
+        return challenge
+
+    # The "erase" flag is accepted but ignored: full erasure (redacting history,
+    # clearing the profile) is out of scope — deactivation disables login and
+    # revokes every session. No identity server is involved, so unbind succeeds.
+    await auth.deactivate_account(who.user_id)
+    return {"id_server_unbind_result": "success"}
+
+
 # --- devices ---------------------------------------------------------------
 
 

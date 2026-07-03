@@ -31,6 +31,7 @@ from neuron_core import branding, configure_logging, get_logger
 from neuron_server.admin.service import AdminService
 from neuron_server.api import console as console_ui
 from neuron_server.api.client_auth import router as client_auth_router
+from neuron_server.api.client_directory import router as client_directory_router
 from neuron_server.api.client_keys import router as client_keys_router
 from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_misc import router as client_misc_router
@@ -334,6 +335,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_media_router)
     app.include_router(client_keys_router)
     app.include_router(client_misc_router)
+    app.include_router(client_directory_router)
     app.include_router(synapse_admin_router)
     app.include_router(federation_keys_router)
     app.include_router(federation_read_router)

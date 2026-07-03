@@ -7,9 +7,11 @@ rooms whose receipts changed since a client's token.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
-from neuron_server.storage.database import Database
+from neuron_server.storage.database import Database, escape_like
 
 
 @dataclass(frozen=True)
@@ -57,3 +59,48 @@ async def get_room_receipts(db: Database, room_id: str) -> list[Receipt]:
         )
         for user_id, receipt_type, event_id, ts, stream_id in rows
     ]
+
+
+async def get_unread_counts(
+    db: Database, room_id: str, user_id: str, highlight_terms: Sequence[str] = ()
+) -> tuple[int, int]:
+    """``(notification_count, highlight_count)`` for a user in a room.
+
+    A family-scale approximation, one query per room: counts message-like events
+    from *other* senders after the user's read point — the latest event covered by
+    their ``m.read``/``m.read.private`` receipt, falling back to their current
+    membership event (i.e. their join) when they have no receipt. Highlights are
+    events whose content contains any ``highlight_terms`` needle (case-insensitive
+    substring over the stored content JSON — good enough for name mentions).
+    """
+    like_clauses: list[str] = []
+    params: list[Any] = []
+    for term in highlight_terms:
+        like_clauses.append("LOWER(content) LIKE ? ESCAPE '\\'")
+        params.append(f"%{escape_like(term.lower())}%")
+    highlight_expr = (
+        "SUM(CASE WHEN " + " OR ".join(like_clauses) + " THEN 1 ELSE 0 END)"
+        if like_clauses
+        else "0"
+    )
+    sql = (
+        f"SELECT COUNT(*), COALESCE({highlight_expr}, 0) FROM events"
+        " WHERE room_id = ? AND sender != ?"
+        " AND type IN ('m.room.message', 'm.room.encrypted')"
+        " AND stream_ordering > COALESCE("
+        # The read point: the latest locally-known event any of the user's read
+        # receipts (public or private) points at.
+        " (SELECT MAX(re.stream_ordering) FROM receipts r"
+        "   JOIN events re ON re.room_id = r.room_id AND re.event_id = r.event_id"
+        "  WHERE r.room_id = ? AND r.user_id = ?"
+        "  AND r.receipt_type IN ('m.read', 'm.read.private')),"
+        # No receipt yet: count from the user's current membership (join) event.
+        " (SELECT me.stream_ordering FROM current_state cs"
+        "   JOIN events me ON me.event_id = cs.event_id"
+        "  WHERE cs.room_id = ? AND cs.type = 'm.room.member' AND cs.state_key = ?),"
+        " 0)"
+    )
+    params.extend((room_id, user_id, room_id, user_id, room_id, user_id))
+    rows = await db.fetchall(sql, params)
+    notifications, highlights = rows[0]
+    return int(notifications), int(highlights or 0)

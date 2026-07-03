@@ -35,6 +35,9 @@ neuron-server doctor          # preflight / health check (add --offline to skip 
 | `NEURON_SERVER_SIGNING_KEY_PATH` | _(empty → DB)_ | Path to the Ed25519 federation signing key; if empty it is generated and stored in the database. **Back this up** — it is the server's federation identity. |
 | `NEURON_SERVER_BIND_HOST` / `NEURON_SERVER_BIND_PORT` | `127.0.0.1` / `8008` | Where the ASGI server binds. |
 | `NEURON_SERVER_FEDERATION_RETRY_INTERVAL_S` | `30` | How often queued outbound federation transactions are retried. |
+| `NEURON_SERVER_TURN_URIS` | `[]` | TURN server URIs advertised via `/voip/turnServer` so calls work across NATs, as a JSON list — e.g. `'["turn:turn.example.org:3478?transport=udp"]'`. Empty = no TURN. |
+| `NEURON_SERVER_TURN_SHARED_SECRET` | _(unset)_ | Must match coturn's `static-auth-secret`; used to mint time-limited TURN credentials (REST scheme). Required for TURN to be advertised. |
+| `NEURON_SERVER_TURN_TTL_S` | `86400` (24 h) | Lifetime of issued TURN credentials, in seconds. |
 | `NEURON_SERVER_LOG_LEVEL` / `NEURON_SERVER_LOG_FORMAT` | `INFO` / `json` | Logging level and format (`json` or `console`). |
 
 **Register the first user** (open registration, UIA `m.login.dummy`):
