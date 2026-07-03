@@ -12,32 +12,17 @@ UIA work in a later phase).
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import JSONResponse
 
-from neuron_server.api.deps import get_auth, require_user
+from neuron_server.api.deps import get_auth, json_body, require_user
 from neuron_server.auth.service import Authenticated, AuthService, LoginResult
 from neuron_server.errors import MatrixError
 from neuron_server.proxy import client_ip
 
 router = APIRouter(prefix="/_matrix/client")
-
-
-async def _json_body(request: Request) -> dict[str, Any]:
-    """Parse the JSON request body, or raise the spec's M_NOT_JSON error."""
-    raw = await request.body()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        raise MatrixError(400, "M_NOT_JSON", "Request body is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise MatrixError(400, "M_BAD_JSON", "Request body must be a JSON object")
-    return data
 
 
 def _login_payload(result: LoginResult) -> dict[str, Any]:
@@ -58,7 +43,7 @@ async def register(request: Request, auth: AuthService = Depends(get_auth)) -> A
     if not auth.registration_enabled:
         raise MatrixError(403, "M_FORBIDDEN", "Registration is disabled on this server")
 
-    body = await _json_body(request)
+    body = await json_body(request)
     auth_data = body.get("auth")
     if not await auth.uia_satisfied(auth_data):
         # Throttle sign-ups per client IP at the challenge step: this is the
@@ -122,7 +107,7 @@ def _extract_login_user(body: dict[str, Any]) -> str | None:
 
 @router.post("/v3/login")
 async def login(request: Request, auth: AuthService = Depends(get_auth)) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     if body.get("type") != "m.login.password":
         raise MatrixError(400, "M_UNKNOWN", "Unsupported login type")
     user = _extract_login_user(body)
@@ -134,8 +119,13 @@ async def login(request: Request, auth: AuthService = Depends(get_auth)) -> dict
 
     # Throttle login attempts — per account (brute-force one login) and per client
     # IP (one host spraying many accounts) — before the expensive password check.
+    # Key the per-account bucket on the full Matrix ID (mirroring how
+    # AuthService.login resolves the account), so 'alice' and '@alice:server'
+    # can't be alternated to double the budget.
+    server_name = request.app.state.settings.name
+    account_key = user if user.startswith("@") else f"@{user}:{server_name}"
     request.app.state.rate_limiters.check_login_ip(client_ip(request))
-    request.app.state.rate_limiters.check_login(user)
+    request.app.state.rate_limiters.check_login(account_key)
 
     result = await auth.login(
         user=user,
@@ -196,7 +186,7 @@ async def update_device(
     who: Authenticated = Depends(require_user),
     auth: AuthService = Depends(get_auth),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     await auth.update_device(who.user_id, device_id, body.get("display_name"))
     return {}
 

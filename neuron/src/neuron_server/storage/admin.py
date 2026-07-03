@@ -96,20 +96,21 @@ def user_to_admin_dict(row: UserRow, displayname: str | None) -> dict[str, Any]:
 # --- registration tokens ---------------------------------------------------
 
 
+def _token_dict(r: tuple[Any, ...]) -> dict[str, Any]:
+    return {
+        "token": str(r[0]),
+        "uses_allowed": None if r[1] is None else int(r[1]),
+        "pending": int(r[2]),
+        "completed": int(r[3]),
+        "expiry_time": None if r[4] is None else int(r[4]),
+    }
+
+
 async def list_registration_tokens(db: Database) -> list[dict[str, Any]]:
     rows = await db.fetchall(
         "SELECT token, uses_allowed, pending, completed, expiry_time FROM registration_tokens"
     )
-    return [
-        {
-            "token": str(r[0]),
-            "uses_allowed": None if r[1] is None else int(r[1]),
-            "pending": int(r[2]),
-            "completed": int(r[3]),
-            "expiry_time": None if r[4] is None else int(r[4]),
-        }
-        for r in rows
-    ]
+    return [_token_dict(r) for r in rows]
 
 
 async def get_registration_token(db: Database, token: str) -> dict[str, Any] | None:
@@ -118,16 +119,7 @@ async def get_registration_token(db: Database, token: str) -> dict[str, Any] | N
         " FROM registration_tokens WHERE token = ?",
         (token,),
     )
-    if not rows:
-        return None
-    r = rows[0]
-    return {
-        "token": str(r[0]),
-        "uses_allowed": None if r[1] is None else int(r[1]),
-        "pending": int(r[2]),
-        "completed": int(r[3]),
-        "expiry_time": None if r[4] is None else int(r[4]),
-    }
+    return _token_dict(rows[0]) if rows else None
 
 
 async def create_registration_token(

@@ -13,6 +13,7 @@ import httpx
 
 from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
+from neuron_server.storage import rooms as room_store
 
 _REG = "/_matrix/client/v3/register"
 _ADMIN = "/_synapse/admin"
@@ -37,10 +38,13 @@ def _auth(token: str) -> dict[str, str]:
 
 
 class _Env:
-    def __init__(self, raw: httpx.AsyncClient, admin_token: str, bob_token: str) -> None:
+    def __init__(
+        self, raw: httpx.AsyncClient, admin_token: str, bob_token: str, db: Any
+    ) -> None:
         self.raw = raw
         self.admin = admin_token
         self.bob = bob_token
+        self.db = db
 
     async def send(
         self, room: str, token: str, body: str, txn: str
@@ -73,7 +77,7 @@ async def _env(tmp_path: Path) -> AsyncIterator[_Env]:
         async with httpx.AsyncClient(transport=transport, base_url="http://hs.test") as raw:
             admin_token = await _register(raw, "admin")
             bob_token = await _register(raw, "bob")
-            yield _Env(raw, admin_token, bob_token)
+            yield _Env(raw, admin_token, bob_token, app.state.db)
 
 
 async def _make_room_with_bob(env: _Env) -> str:
@@ -281,6 +285,25 @@ async def test_delete_room_purges(tmp_path: Path) -> None:
         # The room is gone: admin state lookup 404s.
         gone = await env.raw.get(f"{_ADMIN}/v1/rooms/{room}/state", headers=_auth(env.admin))
         assert gone.status_code == 404
+
+
+async def test_delete_room_with_block_and_purge_keeps_the_block(tmp_path: Path) -> None:
+    """block and purge are independent flags (Synapse semantics): asking for both
+    must purge the room *and* leave it blocked against re-creation/re-join."""
+    async with _env(tmp_path) as env:
+        room = await _make_room_with_bob(env)
+        r = await env.raw.request(
+            "DELETE",
+            f"{_ADMIN}/v2/rooms/{room}",
+            headers=_auth(env.admin),
+            json={"purge": True, "block": True},
+        )
+        assert r.status_code == 200
+        # Purged: the room's data is gone...
+        gone = await env.raw.get(f"{_ADMIN}/v1/rooms/{room}/state", headers=_auth(env.admin))
+        assert gone.status_code == 404
+        # ...and the block survived the purge.
+        assert await room_store.is_room_blocked(env.db, room)
 
 
 async def test_redact_user_events(tmp_path: Path) -> None:

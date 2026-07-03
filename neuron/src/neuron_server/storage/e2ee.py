@@ -72,20 +72,25 @@ async def count_one_time_keys(db: Database, user_id: str, device_id: str) -> dic
 async def claim_one_time_key(
     db: Database, user_id: str, device_id: str, algorithm: str
 ) -> dict[str, Any] | None:
-    """Atomically remove and return one OTK ``{key_alg_id: key_obj}`` for the device."""
+    """Atomically remove and return one OTK ``{key_alg_id: key_obj}`` for the device.
+
+    The pick and the delete are one ``DELETE ... RETURNING`` statement, so a key is
+    only returned if *this* claimer removed it. A SELECT-then-DELETE would let two
+    concurrent Postgres transactions (READ COMMITTED, pool > 1) select the same row
+    and both hand it out, breaking Olm's single-use guarantee; here the loser's
+    DELETE matches no row and it falls through to the fallback key. (RETURNING
+    needs SQLite >= 3.35, 2021 — universal on supported platforms.)
+    """
     rows = await db.fetchall(
-        "SELECT key_alg_id, key_json FROM one_time_keys"
+        "DELETE FROM one_time_keys WHERE user_id = ? AND device_id = ? AND key_alg_id = ("
+        " SELECT key_alg_id FROM one_time_keys"
         " WHERE user_id = ? AND device_id = ? AND key_alg_id LIKE ?"
-        " ORDER BY key_alg_id LIMIT 1",
-        (user_id, device_id, f"{algorithm}:%"),
+        " ORDER BY key_alg_id LIMIT 1"
+        ") RETURNING key_alg_id, key_json",
+        (user_id, device_id, user_id, device_id, f"{algorithm}:%"),
     )
     if rows:
-        key_alg_id, key_json = str(rows[0][0]), str(rows[0][1])
-        await db.execute(
-            "DELETE FROM one_time_keys WHERE user_id = ? AND device_id = ? AND key_alg_id = ?",
-            (user_id, device_id, key_alg_id),
-        )
-        return {key_alg_id: json.loads(key_json)}
+        return {str(rows[0][0]): json.loads(str(rows[0][1]))}
 
     # Fall back to the device's unused fallback key (not consumed).
     fallback = await db.fetchall(
@@ -186,10 +191,6 @@ async def delete_to_device_up_to(
     )
 
 
-async def max_to_device_stream(db: Database) -> int:
-    return int(await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) FROM to_device_messages"))
-
-
 # --- device-list change tracking -------------------------------------------
 
 
@@ -208,7 +209,3 @@ async def get_device_list_changes_after(db: Database, after_stream: int) -> list
         (after_stream,),
     )
     return [str(row[0]) for row in rows]
-
-
-async def max_device_list_stream(db: Database) -> int:
-    return int(await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) FROM device_list_changes"))

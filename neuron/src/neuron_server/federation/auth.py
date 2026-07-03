@@ -29,11 +29,14 @@ class XMatrixCredentials:
 
 
 def _signing_payload(
-    *, method: str, uri: str, origin: str, destination: str | None, content: Any | None
+    *, method: str, uri: str, origin: str, destination: str, content: Any | None
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"method": method.upper(), "uri": uri, "origin": origin}
-    if destination is not None:
-        payload["destination"] = destination
+    payload: dict[str, Any] = {
+        "method": method.upper(),
+        "uri": uri,
+        "origin": origin,
+        "destination": destination,
+    }
     if content is not None:
         payload["content"] = content
     return payload
@@ -99,7 +102,8 @@ def verify_request(
     verify_key = verify_keys.get(creds.key_id)
     if verify_key is None:
         return False
-    # A server that sent a destination must have signed it; otherwise sign without.
+    # A server that sent a destination must have signed it; otherwise assume it
+    # signed our server name (the payload always carries a destination).
     payload = _signing_payload(
         method=method,
         uri=uri,

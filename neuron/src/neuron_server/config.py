@@ -65,11 +65,10 @@ class NeuronServerSettings(BaseSettings):
     # How ``/sync`` long-polls are woken across worker processes. ``auto`` (the
     # default) stays in-process for SQLite and uses Postgres LISTEN/NOTIFY for a
     # postgresql:// URL — so a wake on one worker reaches syncs parked on another.
-    # ``inprocess`` forces the single-process notifier; ``pg`` requires Postgres;
-    # ``redis`` is reserved for a future Redis transport.
+    # ``inprocess`` forces the single-process notifier; ``pg`` requires Postgres.
     notifier_backend: str = Field(
         default="auto",
-        description="Cross-worker /sync wake backend: auto | inprocess | pg | redis.",
+        description="Cross-worker /sync wake backend: auto | inprocess | pg.",
     )
     # Stable per-process identity for multi-writer stream positions (Postgres).
     # Each worker records its contiguous "persisted upto" position per stream under

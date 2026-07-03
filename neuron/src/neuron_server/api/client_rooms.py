@@ -11,23 +11,17 @@ guests, third-party invites, room upgrades, and event filtering on /messages.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import JSONResponse
 
-from neuron_server.api.deps import require_user
+from neuron_server.api.deps import get_rooms, json_body, require_target_user, require_user
 from neuron_server.auth.service import Authenticated
 from neuron_server.errors import MatrixError
 from neuron_server.rooms.service import RoomService
 
 router = APIRouter(prefix="/_matrix/client")
-
-
-def get_rooms(request: Request) -> RoomService:
-    service: RoomService = request.app.state.rooms
-    return service
 
 
 async def _join_any(request: Request, room_id: str, user_id: str) -> str:
@@ -70,19 +64,6 @@ async def _invite_any(request: Request, room_id: str, sender: str, target: str) 
     await rooms.apply_invite(room_id, co_signed)
 
 
-async def _json_body(request: Request) -> dict[str, Any]:
-    raw = await request.body()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        raise MatrixError(400, "M_NOT_JSON", "Request body is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise MatrixError(400, "M_BAD_JSON", "Request body must be a JSON object")
-    return data
-
-
 # --- create ----------------------------------------------------------------
 
 
@@ -92,7 +73,7 @@ async def create_room(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     room_id = await rooms.create_room(who.user_id, body)
     return {"room_id": room_id}
 
@@ -109,7 +90,7 @@ async def send_message(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    content = await _json_body(request)
+    content = await json_body(request)
     request.app.state.rate_limiters.check_message(who.user_id)
     event_id = await rooms.send_message(room_id, who.user_id, event_type, content, txn_id)
     return {"event_id": event_id}
@@ -124,7 +105,7 @@ async def send_state_with_key(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    content = await _json_body(request)
+    content = await json_body(request)
     event_id = await rooms.send_state(room_id, who.user_id, event_type, state_key, content)
     return {"event_id": event_id}
 
@@ -137,7 +118,7 @@ async def send_state_no_key(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    content = await _json_body(request)
+    content = await json_body(request)
     event_id = await rooms.send_state(room_id, who.user_id, event_type, "", content)
     return {"event_id": event_id}
 
@@ -181,10 +162,8 @@ async def invite_to_room(
     request: Request,
     who: Authenticated = Depends(require_user),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
-    target = body.get("user_id")
-    if not isinstance(target, str):
-        raise MatrixError(400, "M_MISSING_PARAM", "Missing user_id")
+    body = await json_body(request)
+    target = require_target_user(body)
     await _invite_any(request, room_id, who.user_id, target)
     return {}
 
@@ -196,10 +175,8 @@ async def kick_from_room(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
-    target = body.get("user_id")
-    if not isinstance(target, str):
-        raise MatrixError(400, "M_MISSING_PARAM", "Missing user_id")
+    body = await json_body(request)
+    target = require_target_user(body)
     await rooms.kick(room_id, who.user_id, target, body.get("reason"))
     return {}
 
@@ -211,10 +188,8 @@ async def ban_from_room(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
-    target = body.get("user_id")
-    if not isinstance(target, str):
-        raise MatrixError(400, "M_MISSING_PARAM", "Missing user_id")
+    body = await json_body(request)
+    target = require_target_user(body)
     await rooms.ban(room_id, who.user_id, target, body.get("reason"))
     return {}
 
@@ -226,10 +201,8 @@ async def unban_from_room(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
-    target = body.get("user_id")
-    if not isinstance(target, str):
-        raise MatrixError(400, "M_MISSING_PARAM", "Missing user_id")
+    body = await json_body(request)
+    target = require_target_user(body)
     await rooms.unban(room_id, who.user_id, target)
     return {}
 
@@ -246,7 +219,7 @@ async def redact_event(
     who: Authenticated = Depends(require_user),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     redaction_id = await rooms.redact(room_id, who.user_id, event_id, txn_id, body.get("reason"))
     return {"event_id": redaction_id}
 
@@ -263,7 +236,7 @@ async def report_event(
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
     """Report an event for abuse; admins review reports in the console."""
-    body = await _json_body(request)
+    body = await json_body(request)
     await rooms.get_event(room_id, event_id)  # 404 if the event isn't in the room
     raw_score = body.get("score")
     try:
@@ -341,8 +314,14 @@ async def get_joined_members(
     return {"joined": await rooms.joined_members(room_id)}
 
 
-async def _messages(
-    room_id: str, request: Request, rooms: RoomService
+# /messages is served under both v3 (spec) and v1 (used by neuron_core's client).
+@router.get("/v3/rooms/{room_id}/messages")
+@router.get("/v1/rooms/{room_id}/messages")
+async def get_messages(
+    room_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
     direction = request.query_params.get("dir", "b")
     if direction not in ("b", "f"):
@@ -355,24 +334,3 @@ async def _messages(
     return await rooms.get_messages(
         room_id, from_token=request.query_params.get("from"), direction=direction, limit=limit
     )
-
-
-# /messages is served under both v3 (spec) and v1 (used by neuron_core's client).
-@router.get("/v3/rooms/{room_id}/messages")
-async def get_messages_v3(
-    room_id: str,
-    request: Request,
-    who: Authenticated = Depends(require_user),
-    rooms: RoomService = Depends(get_rooms),
-) -> dict[str, Any]:
-    return await _messages(room_id, request, rooms)
-
-
-@router.get("/v1/rooms/{room_id}/messages")
-async def get_messages_v1(
-    room_id: str,
-    request: Request,
-    who: Authenticated = Depends(require_user),
-    rooms: RoomService = Depends(get_rooms),
-) -> dict[str, Any]:
-    return await _messages(room_id, request, rooms)

@@ -4,20 +4,12 @@
 from __future__ import annotations
 
 from pydantic import Field, SecretStr
-from pydantic_settings import SettingsConfigDict
 
 from neuron_core.config import NeuronCoreSettings
 
 
 class SupervisorSettings(NeuronCoreSettings):
     """Settings for neuron-supervisor (inherits homeserver connection + logging)."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="NEURON_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
 
     # The bot's full Matrix ID, e.g. "@supervisor:example.org". Must be a LOCAL
     # account on the homeserver (make_room_admin only works for local users).

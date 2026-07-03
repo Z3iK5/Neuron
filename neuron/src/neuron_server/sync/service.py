@@ -219,7 +219,9 @@ class SyncService:
             room_changed = True
         else:
             after = since or 0
-            fetched = await store.get_events_after(self._db, room_id, after, _TIMELINE_LIMIT + 1)
+            fetched = await store.get_messages(
+                self._db, room_id, from_ordering=after, direction="f", limit=_TIMELINE_LIMIT + 1
+            )
             limited = len(fetched) > _TIMELINE_LIMIT
             timeline = fetched[:_TIMELINE_LIMIT]
             state = []

@@ -32,7 +32,7 @@ import httpx
 from neuron_server.config import NeuronServerSettings
 from neuron_server.crypto.signing import SigningKey, parse_signing_key
 from neuron_server.federation.client import FederationClient, OpenClient
-from neuron_server.federation.discovery import pick_base_url
+from neuron_server.federation.discovery import fetch_well_known, pick_base_url
 from neuron_server.keys.resolver import parse_and_verify_key_document
 from neuron_server.storage.database import Database, connect_database
 from neuron_server.storage.metadata import get_metadata
@@ -338,20 +338,41 @@ async def _check_client_discovery(
     )
 
 
-def _check_federation_routing(settings: NeuronServerSettings) -> CheckResult:
-    base = pick_base_url(settings.name, None)
-    return CheckResult(
-        "federation routing",
-        Status.OK,
-        f"other servers reach {settings.name} at {base} "
-        "(add a /.well-known/matrix/server delegation to change this)",
-    )
+async def _resolve_federation_base(
+    settings: NeuronServerSettings, fed_open_client: OpenClient | None
+) -> str:
+    """Resolve where other servers actually dial ``settings.name``.
+
+    Honours ``/.well-known/matrix/server`` delegation exactly like
+    :class:`FederationClient` does. When ``fed_open_client`` is injected (tests),
+    routing is overridden anyway, so the network lookup is skipped — the same
+    seam the federation client uses.
+    """
+    well_known = None
+    if fed_open_client is None:
+        well_known = await fetch_well_known(settings.name, timeout=_NET_TIMEOUT)
+    return pick_base_url(settings.name, well_known)
+
+
+def _check_federation_routing(settings: NeuronServerSettings, base: str) -> CheckResult:
+    if base != pick_base_url(settings.name, None):
+        detail = (
+            f"other servers reach {settings.name} at {base} "
+            "(delegated via /.well-known/matrix/server)"
+        )
+    else:
+        detail = (
+            f"other servers reach {settings.name} at {base} "
+            "(add a /.well-known/matrix/server delegation to change this)"
+        )
+    return CheckResult("federation routing", Status.OK, detail)
 
 
 async def _check_federation_self(
     settings: NeuronServerSettings,
     signing_key: SigningKey | None,
     fed_open_client: OpenClient | None,
+    base: str,
 ) -> CheckResult:
     if signing_key is None:
         return CheckResult(
@@ -362,7 +383,6 @@ async def _check_federation_self(
     client = FederationClient(
         settings.name, signing_key, open_client=fed_open_client, timeout=_NET_TIMEOUT
     )
-    base = pick_base_url(settings.name, None)
     try:
         doc = await client.get_json(settings.name, "/_matrix/key/v2/server", sign=False)
     except Exception as exc:
@@ -418,8 +438,11 @@ async def run_checks(
     if not offline:
         results.append(await _check_listening(settings))
         results.append(await _check_client_discovery(settings, http_client))
-        results.append(_check_federation_routing(settings))
-        results.append(await _check_federation_self(settings, signing_key, fed_open_client))
+        fed_base = await _resolve_federation_base(settings, fed_open_client)
+        results.append(_check_federation_routing(settings, fed_base))
+        results.append(
+            await _check_federation_self(settings, signing_key, fed_open_client, fed_base)
+        )
 
     return results
 

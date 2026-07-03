@@ -8,14 +8,13 @@ requires a **server-admin** access token.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import JSONResponse
 
 from neuron_server.admin.service import AdminService
-from neuron_server.api.deps import require_admin
+from neuron_server.api.deps import get_rooms, json_body, require_admin, require_target_user
 from neuron_server.auth.service import Authenticated
 from neuron_server.errors import MatrixError
 from neuron_server.rooms.service import RoomService
@@ -26,22 +25,6 @@ router = APIRouter(prefix="/_synapse/admin")
 def get_admin(request: Request) -> AdminService:
     service: AdminService = request.app.state.admin
     return service
-
-
-def get_rooms(request: Request) -> RoomService:
-    service: RoomService = request.app.state.rooms
-    return service
-
-
-async def _json_body(request: Request) -> dict[str, Any]:
-    raw = await request.body()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        raise MatrixError(400, "M_NOT_JSON", "Request body is not valid JSON") from exc
-    return data if isinstance(data, dict) else {}
 
 
 def _int_param(request: Request, key: str, default: int) -> int:
@@ -101,7 +84,7 @@ async def upsert_user(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> JSONResponse:
-    user, created = await admin.upsert_user(user_id, await _json_body(request))
+    user, created = await admin.upsert_user(user_id, await json_body(request, strict=False))
     return JSONResponse(status_code=201 if created else 200, content=user)
 
 
@@ -121,7 +104,7 @@ async def reset_password(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request, strict=False)
     new_password = body.get("new_password")
     if not isinstance(new_password, str) or not new_password:
         raise MatrixError(400, "M_MISSING_PARAM", "Missing new_password")
@@ -153,7 +136,7 @@ async def redact_user(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request, strict=False)
     rooms = body.get("rooms")
     rooms_list = [str(r) for r in rooms] if isinstance(rooms, list) else None
     return await admin.redact_user_events(user_id, rooms=rooms_list)
@@ -207,7 +190,7 @@ async def make_room_admin(
     who: Authenticated = Depends(require_admin),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request, strict=False)
     raw = body.get("user_id")
     target = raw if isinstance(raw, str) else who.user_id
     await rooms.admin_make_room_admin(room_id, target)
@@ -221,7 +204,7 @@ async def room_block(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request, strict=False)
     return await admin.set_room_block(room_id, bool(body.get("block", True)))
 
 
@@ -232,7 +215,7 @@ async def delete_room(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request, strict=False)
     return await admin.delete_room(
         room_id, block=bool(body.get("block", False)), purge=bool(body.get("purge", True))
     )
@@ -263,10 +246,8 @@ async def force_join(
     who: Authenticated = Depends(require_admin),
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
-    target = body.get("user_id")
-    if not isinstance(target, str):
-        raise MatrixError(400, "M_MISSING_PARAM", "Missing user_id")
+    body = await json_body(request, strict=False)
+    target = require_target_user(body)
     if not room_id_or_alias.startswith("!"):
         raise MatrixError(400, "M_INVALID_PARAM", "Room aliases are not supported yet")
     await rooms.admin_force_join(room_id_or_alias, target)
@@ -289,7 +270,7 @@ async def new_registration_token(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request, strict=False)
     return await admin.create_registration_token(
         token=body.get("token"),
         uses_allowed=body.get("uses_allowed"),
@@ -341,7 +322,7 @@ async def send_server_notice(
     who: Authenticated = Depends(require_admin),
     admin: AdminService = Depends(get_admin),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request, strict=False)
     user_id = str(body.get("user_id") or "")
     if not user_id:
         raise MatrixError(400, "M_MISSING_PARAM", "user_id is required")

@@ -14,6 +14,8 @@ Override the whole location with the ``NEURON_DATA_DIR`` environment variable.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import platformdirs
@@ -44,6 +46,19 @@ def media_path(base: Path) -> Path:
 
 def signing_key_path(base: Path) -> Path:
     return base / "signing.key"
+
+
+def reveal(path: Path) -> None:
+    """Open a file or folder in the OS default handler (best effort, never raises)."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        elif sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception:
+        pass
 
 
 def version_path(base: Path) -> Path:

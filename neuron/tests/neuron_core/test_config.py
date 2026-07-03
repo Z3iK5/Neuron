@@ -19,7 +19,7 @@ def test_defaults_when_no_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.homeserver_url == "http://localhost:8008"
     assert settings.log_level == "INFO"
     assert settings.log_format == "json"
-    assert settings.has_admin_token() is False
+    assert settings.homeserver_admin_token.get_secret_value() == ""
 
 
 def test_reads_prefixed_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -31,7 +31,6 @@ def test_reads_prefixed_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert settings.homeserver_url == "https://matrix.example.org"
     assert settings.log_level == "DEBUG"
-    assert settings.has_admin_token() is True
     # The token is a SecretStr: its real value is only available via get_secret_value().
     assert settings.homeserver_admin_token.get_secret_value() == "syt_secret_token"
 

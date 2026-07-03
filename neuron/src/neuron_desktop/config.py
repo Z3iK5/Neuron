@@ -11,7 +11,7 @@ configuration.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from neuron_desktop import paths
@@ -98,7 +98,12 @@ class DesktopConfig:
 
 def load(config_file: Path) -> DesktopConfig:
     data = json.loads(config_file.read_text(encoding="utf-8"))
-    return DesktopConfig(**data)
+    # Ignore keys this version doesn't know: a newer app may have written extra
+    # fields (downgrade), and config.json is the ownership marker the upgrade-vs-
+    # fresh detection keys on, so an unknown key must not make loading crash.
+    # Missing *required* fields still raise, keeping foreign configs rejected.
+    known = {f.name for f in fields(DesktopConfig)}
+    return DesktopConfig(**{k: v for k, v in data.items() if k in known})
 
 
 def save(config: DesktopConfig, config_file: Path) -> None:

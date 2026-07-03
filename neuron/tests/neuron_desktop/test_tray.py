@@ -77,7 +77,6 @@ class _FakePopen:
     def __init__(self, command: list[str], **kwargs: object) -> None:
         self.command = command
         self.env = kwargs.get("env")
-        self.pid = 4242
         self._returncode: int | None = None
         self.terminated = False
         _FakePopen.instances.append(self)
@@ -104,7 +103,6 @@ def test_server_process_state_machine(tmp_path: Path) -> None:
 
     server.start()
     assert server.is_running() and server.status() == "running"
-    assert server.pid == 4242
     # The child was launched with the server environment.
     assert _FakePopen.instances[-1].env["NEURON_SERVER_NAME"] == "hs.test"  # type: ignore[index]
 
@@ -128,7 +126,6 @@ def test_server_process_starts_and_stops_a_real_child(tmp_path: Path) -> None:
     try:
         server.start()
         assert server.is_running()
-        assert isinstance(server.pid, int)
     finally:
         server.stop(timeout=5)
     assert not server.is_running()

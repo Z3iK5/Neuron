@@ -36,7 +36,6 @@ for package in ("python_multipart", "multipart", "segno", "itsdangerous", "webau
 # PyNaCl reaches its Ed25519 code through cffi's C extension, which the analysis
 # does not see; aiosqlite/asyncpg are imported by name by the storage layer.
 hidden |= {"aiosqlite", "asyncpg", "nacl", "platformdirs", "cffi", "_cffi_backend"}
-hidden |= {"python_multipart", "multipart", "segno", "itsdangerous", "webauthn", "cbor2"}
 
 # Packages that ship data files / dynamically-loaded backends. ``pystray`` selects
 # a platform backend on import, which can fail on a headless builder; skip it

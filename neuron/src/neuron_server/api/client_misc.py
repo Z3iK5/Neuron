@@ -9,13 +9,12 @@ minimal empty ruleset. Profile, account data and filters are fully stored.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from neuron_server.api.deps import require_user
+from neuron_server.api.deps import json_body, require_user
 from neuron_server.auth.service import Authenticated
 from neuron_server.errors import MatrixError
 from neuron_server.rooms import versions
@@ -29,19 +28,6 @@ router = APIRouter(prefix="/_matrix/client")
 def get_db(request: Request) -> Database:
     db: Database = request.app.state.db
     return db
-
-
-async def _json_body(request: Request) -> dict[str, Any]:
-    raw = await request.body()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        raise MatrixError(400, "M_NOT_JSON", "Request body is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise MatrixError(400, "M_BAD_JSON", "Request body must be a JSON object")
-    return data
 
 
 def _require_self(who: Authenticated, user_id: str) -> None:
@@ -71,7 +57,7 @@ async def set_displayname(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     _require_self(who, user_id)
-    body = await _json_body(request)
+    body = await json_body(request)
     await userdata.set_displayname(db, user_id, body.get("displayname"))
     return {}
 
@@ -90,7 +76,7 @@ async def set_avatar_url(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     _require_self(who, user_id)
-    body = await _json_body(request)
+    body = await json_body(request)
     await userdata.set_avatar_url(db, user_id, body.get("avatar_url"))
     return {}
 
@@ -121,7 +107,7 @@ async def set_global_account_data(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     _require_self(who, user_id)
-    await userdata.set_account_data(db, user_id, "", data_type, await _json_body(request))
+    await userdata.set_account_data(db, user_id, "", data_type, await json_body(request))
     return {}
 
 
@@ -150,7 +136,7 @@ async def set_room_account_data(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     _require_self(who, user_id)
-    await userdata.set_account_data(db, user_id, room_id, data_type, await _json_body(request))
+    await userdata.set_account_data(db, user_id, room_id, data_type, await json_body(request))
     return {}
 
 
@@ -166,7 +152,7 @@ async def create_filter(
 ) -> dict[str, Any]:
     _require_self(who, user_id)
     filter_id = str(await userdata.count_filters(db, user_id))
-    await userdata.create_filter(db, user_id, filter_id, await _json_body(request))
+    await userdata.create_filter(db, user_id, filter_id, await json_body(request))
     return {"filter_id": filter_id}
 
 
@@ -236,9 +222,12 @@ async def typing(
 ) -> dict[str, Any]:
     if user_id != who.user_id:
         raise MatrixError(403, "M_FORBIDDEN", "Cannot set another user's typing state")
-    body = await _json_body(request)
+    body = await json_body(request)
     is_typing = bool(body.get("typing"))
-    timeout = int(body.get("timeout", 30000))
+    try:
+        timeout = int(body.get("timeout", 30000))
+    except (TypeError, ValueError) as exc:
+        raise MatrixError(400, "M_INVALID_PARAM", "timeout must be an integer") from exc
     await request.app.state.typing.set_typing(room_id, user_id, is_typing, timeout)
     await request.app.state.federation_sender.send_typing(room_id, user_id, is_typing)
     return {}

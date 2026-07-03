@@ -24,13 +24,10 @@ Example::
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from types import TracebackType
+from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
-from neuron_core._http import ok_json
+from neuron_core._http import BaseApiClient
 from neuron_core.errors import AdminApiError
 
 
@@ -46,7 +43,6 @@ class UserListPage:
     users: list[dict[str, Any]]
     total: int
     next_token: str | None = None
-    raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass
@@ -63,7 +59,6 @@ class RoomListPage:
     offset: int = 0
     next_batch: int | None = None
     prev_batch: int | None = None
-    raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 @dataclass
@@ -73,70 +68,14 @@ class EventReportPage:
     event_reports: list[dict[str, Any]]
     total: int
     next_token: str | None = None
-    raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
-class AdminClient:
-    """Typed async client for the homeserver Admin API."""
+class AdminClient(BaseApiClient):
+    """Typed async client for the homeserver Admin API (server-admin token)."""
 
-    def __init__(
-        self,
-        base_url: str,
-        access_token: str,
-        *,
-        timeout: float = 30.0,
-        client: httpx.AsyncClient | None = None,
-    ) -> None:
-        """Create the client.
-
-        :param base_url: homeserver base URL, e.g. ``http://localhost:8008``.
-        :param access_token: a server-admin access token.
-        :param timeout: per-request timeout in seconds.
-        :param client: an optional pre-built ``httpx.AsyncClient`` (used by tests
-            to inject a mock transport). When omitted we build our own.
-        """
-        self._base_url = base_url.rstrip("/")
-        self._owns_client = client is None
-        self._client = client or httpx.AsyncClient(
-            base_url=self._base_url,
-            timeout=timeout,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-
-    # --- lifecycle ----------------------------------------------------------
-    async def aclose(self) -> None:
-        """Close the underlying HTTP client (only if we created it)."""
-        if self._owns_client:
-            await self._client.aclose()
-
-    async def __aenter__(self) -> AdminClient:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        await self.aclose()
+    _error_cls = AdminApiError
 
     # --- internal helpers ---------------------------------------------------
-    @staticmethod
-    def _ok_json(response: httpx.Response) -> dict[str, Any]:
-        """Return the parsed JSON body, or raise ``AdminApiError`` on failure."""
-        return ok_json(response, AdminApiError)
-
-    async def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        response = await self._client.request(method, path, params=params, json=json)
-        return self._ok_json(response)
-
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         return await self._request("GET", path, params=params)
 
@@ -165,16 +104,15 @@ class AdminClient:
         if name is not None:
             params["name"] = name
         if guests is not None:
-            params["guests"] = _bool_param(guests)
+            params["guests"] = guests
         if deactivated is not None:
-            params["deactivated"] = _bool_param(deactivated)
+            params["deactivated"] = deactivated
 
         body = await self._get("/_synapse/admin/v2/users", params=params)
         return UserListPage(
             users=body.get("users", []),
             total=body.get("total", 0),
             next_token=body.get("next_token"),
-            raw=body,
         )
 
     async def get_user(self, user_id: str) -> dict[str, Any]:
@@ -203,7 +141,6 @@ class AdminClient:
             offset=body.get("offset", 0),
             next_batch=body.get("next_batch"),
             prev_batch=body.get("prev_batch"),
-            raw=body,
         )
 
     async def get_room(self, room_id: str) -> dict[str, Any]:
@@ -242,7 +179,6 @@ class AdminClient:
             event_reports=body.get("event_reports", []),
             total=body.get("total", 0),
             next_token=body.get("next_token"),
-            raw=body,
         )
 
     async def list_registration_tokens(self) -> list[dict[str, Any]]:
@@ -399,18 +335,3 @@ class AdminClient:
             f"/_synapse/admin/v1/rooms/{room_id}/make_room_admin",
             json={"user_id": user_id},
         )
-
-    async def force_join(self, room_id_or_alias: str, user_id: str) -> dict[str, Any]:
-        """``POST /_synapse/admin/v1/join/{room_id_or_alias}`` — force a local user to join.
-
-        Note: the *admin* whose token is used must already be in the room with
-        permission to invite. For arbitrary rooms, prefer :meth:`make_room_admin`.
-        """
-        return await self._request(
-            "POST", f"/_synapse/admin/v1/join/{room_id_or_alias}", json={"user_id": user_id}
-        )
-
-
-def _bool_param(value: bool) -> str:
-    """The Admin API expects query booleans as the lowercase strings 'true'/'false'."""
-    return "true" if value else "false"

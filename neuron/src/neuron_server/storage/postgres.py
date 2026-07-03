@@ -224,15 +224,7 @@ class PostgresDatabase(Database):
                 # GREATEST keeps a restart from regressing an already-higher row.
                 max_id = int(await conn.fetchval(f"SELECT COALESCE(MAX({col}), 0) FROM {table}"))
                 self._trackers[name] = _StreamTracker(max_id)
-                await conn.execute(
-                    "INSERT INTO stream_positions (stream_name, instance_name, stream_id)"
-                    " VALUES ($1, $2, $3)"
-                    " ON CONFLICT (stream_name, instance_name) DO UPDATE SET"
-                    " stream_id = GREATEST(stream_positions.stream_id, EXCLUDED.stream_id)",
-                    name,
-                    self._instance_name,
-                    max_id,
-                )
+                await self._flush_position(conn, name, max_id)
 
     async def next_stream_id(self, name: str) -> int:
         # nextval is non-transactional: concurrent connections get distinct ids

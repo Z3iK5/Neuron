@@ -12,20 +12,12 @@ import secrets
 from pathlib import Path
 
 from pydantic import SecretStr
-from pydantic_settings import SettingsConfigDict
 
 from neuron_core.config import NeuronCoreSettings
 
 
 class ConsoleSettings(NeuronCoreSettings):
     """Settings for neuron-console."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="NEURON_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
 
     # The password an operator types to log in to the console. REQUIRED in
     # practice; defaults to empty so tests can set it explicitly.

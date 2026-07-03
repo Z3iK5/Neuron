@@ -217,6 +217,50 @@ def test_kick_and_ban(tmp_path: Path) -> None:
         assert rejoin.status_code == 403
 
 
+def test_unban_requires_ban_level_not_just_kick(tmp_path: Path) -> None:
+    """Room v11 auth rules: lifting a ban needs the ban level, so a kick-only
+    moderator (kick <= PL < ban) must not be able to unban."""
+    with _client(tmp_path) as client:
+        alice = _register(client, "alice")
+        mod = _register(client, "mod")
+        bob = _register(client, "bob")
+        room_id = _create_room(
+            client,
+            alice,
+            preset="public_chat",
+            power_level_content_override={
+                "kick": 50,
+                "ban": 75,
+                "users": {"@alice:neuron.local": 100, "@mod:neuron.local": 50},
+            },
+        )
+        client.post(f"{_BASE}/rooms/{room_id}/join", headers=_h(mod))
+        client.post(f"{_BASE}/rooms/{room_id}/join", headers=_h(bob))
+
+        banned = client.post(
+            f"{_BASE}/rooms/{room_id}/ban", headers=_h(alice), json={"user_id": "@bob:neuron.local"}
+        )
+        assert banned.status_code == 200
+
+        # The kick-level moderator cannot lift the ban...
+        denied = client.post(
+            f"{_BASE}/rooms/{room_id}/unban",
+            headers=_h(mod),
+            json={"user_id": "@bob:neuron.local"},
+        )
+        assert denied.status_code == 403 and denied.json()["errcode"] == "M_FORBIDDEN"
+
+        # ...but a ban-level user can, after which bob may rejoin.
+        allowed = client.post(
+            f"{_BASE}/rooms/{room_id}/unban",
+            headers=_h(alice),
+            json={"user_id": "@bob:neuron.local"},
+        )
+        assert allowed.status_code == 200
+        rejoin = client.post(f"{_BASE}/rooms/{room_id}/join", headers=_h(bob))
+        assert rejoin.status_code == 200
+
+
 def test_redaction_strips_content(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         alice = _register(client, "alice")

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi import FastAPI
 
 from neuron_server.app import create_app
@@ -161,6 +162,43 @@ async def test_online_checks_against_in_process_server(tmp_path: Path) -> None:
     assert _by_name(results, "federation routing").status is Status.OK
     # The server self-signs the key document we fetch back over federation.
     assert _by_name(results, "federation reachability").status is Status.OK
+
+
+async def test_federation_routing_honours_well_known_delegation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The doctor must report the *actual* dial target when delegation exists."""
+    from neuron_server import doctor as doctor_mod
+
+    async def fake_well_known(name: str, *, timeout: float) -> dict[str, str]:
+        assert name == "chat.example.org"
+        return {"m.server": "backend.example.org:8449"}
+
+    monkeypatch.setattr(doctor_mod, "fetch_well_known", fake_well_known)
+    settings = _settings(tmp_path)
+    base = await doctor_mod._resolve_federation_base(settings, None)
+    assert base == "https://backend.example.org:8449"
+    result = doctor_mod._check_federation_routing(settings, base)
+    assert result.status is Status.OK
+    assert "https://backend.example.org:8449" in result.detail
+    assert "delegated via /.well-known/matrix/server" in result.detail
+
+
+async def test_federation_routing_without_delegation_suggests_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from neuron_server import doctor as doctor_mod
+
+    async def fake_well_known(name: str, *, timeout: float) -> None:
+        return None  # absent / unreachable -> direct connection
+
+    monkeypatch.setattr(doctor_mod, "fetch_well_known", fake_well_known)
+    settings = _settings(tmp_path)
+    base = await doctor_mod._resolve_federation_base(settings, None)
+    assert base == "https://chat.example.org:8448"
+    result = doctor_mod._check_federation_routing(settings, base)
+    assert result.status is Status.OK
+    assert "add a /.well-known/matrix/server delegation" in result.detail
 
 
 # --- reporting / CLI --------------------------------------------------------

@@ -135,6 +135,58 @@ def test_register_then_login_with_passkey(tmp_path: Path, monkeypatch: pytest.Mo
         assert client.get("/console", follow_redirects=False).status_code == 200
 
 
+def test_passkey_login_rejects_deactivated_bootstrap_admin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deactivation locks out passkey login even for NEURON_SERVER_ADMIN_USERS entries.
+
+    Regression: ``_owner_is_admin`` used to short-circuit on the bootstrap admin list
+    before the deactivation check, so a deactivated bootstrap admin (blocked from
+    password login) could still sign in with a passkey.
+    """
+    settings = NeuronServerSettings(
+        name="neuron.local",
+        database_url=f"sqlite:///{tmp_path / 'hs.db'}",
+        first_user_admin=True,
+        public_base_url="http://localhost:8008",
+        admin_users="admin",
+    )
+    with TestClient(create_app(settings)) as client:
+        _login(client)
+        csrf = _page_csrf(client)
+        client.post("/console/passkeys/register/options", headers={"X-CSRF-Token": csrf})
+        monkeypatch.setattr(
+            pk, "verify_registration",
+            lambda *a, **k: {
+                "credential_id": "AAAA", "public_key": "UEs", "sign_count": 0,
+                "label": "MacBook", "created_ts": 1,
+            },
+        )
+        ok = client.post(
+            "/console/passkeys/register/verify",
+            headers={"X-CSRF-Token": csrf},
+            json={"credential": {"id": "AAAA"}, "label": "MacBook"},
+        )
+        assert ok.status_code == 200
+
+        # Deactivate the account; it stays listed in admin_users.
+        gone = client.post(
+            "/console/users/@admin:neuron.local/deactivate",
+            data={"csrf_token": csrf},
+            follow_redirects=False,
+        )
+        assert gone.status_code == 303
+        client.get("/console/logout")
+
+        client.post("/console/passkeys/login/options")
+        monkeypatch.setattr(pk, "verify_authentication", lambda *a, **k: 1)
+        resp = client.post(
+            "/console/passkeys/login/verify", json={"credential": {"id": "AAAA"}}
+        )
+        assert resp.status_code == 400
+        assert client.get("/console", follow_redirects=False).status_code == 303
+
+
 def test_login_verify_rejects_unknown_passkey(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         _login(client)

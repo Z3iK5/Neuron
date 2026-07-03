@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import platform
 import secrets
-import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING, Any
 
 from neuron_server.auth.passwords import hash_password
+from neuron_server.clock import now_ms
 from neuron_server.errors import MatrixError
 from neuron_server.storage import accounts, userdata
 from neuron_server.storage import admin as admin_store
@@ -41,9 +41,6 @@ def _server_version_string() -> str:
     except PackageNotFoundError:  # pragma: no cover - metadata present when installed
         return "Neuron"
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 class AdminService:
@@ -119,7 +116,7 @@ class AdminService:
             if existing is None:
                 pw_hash = hash_password(password) if isinstance(password, str) else None
                 await accounts.create_user(
-                    self._db, user_id, pw_hash, bool(admin), _now_ms()
+                    self._db, user_id, pw_hash, bool(admin), now_ms()
                 )
             else:
                 if isinstance(password, str):
@@ -277,11 +274,11 @@ class AdminService:
 
     async def registration_token_valid(self, token: str) -> bool:
         """True if ``token`` can currently be redeemed (unexpired, uses left)."""
-        return await admin_store.registration_token_valid(self._db, token, _now_ms())
+        return await admin_store.registration_token_valid(self._db, token, now_ms())
 
     async def consume_registration_token(self, token: str) -> bool:
         """Claim one use of ``token``; False if it is invalid, expired or spent."""
-        return await admin_store.consume_registration_token(self._db, token, _now_ms())
+        return await admin_store.consume_registration_token(self._db, token, now_ms())
 
     # --- moderation --------------------------------------------------------
 
@@ -293,7 +290,7 @@ class AdminService:
 
     async def set_room_block(self, room_id: str, block: bool) -> dict[str, Any]:
         await rooms_store.set_room_blocked(
-            self._db, room_id, block, by=None, ts=_now_ms()
+            self._db, room_id, block, by=None, ts=now_ms()
         )
         return {"block": block}
 
@@ -307,7 +304,7 @@ class AdminService:
             room_id, purge=purge, block=block, by=None
         )
         delete_id = await admin_store.record_room_deletion(
-            self._db, room_id, result["kicked_users"], ts=_now_ms()
+            self._db, room_id, result["kicked_users"], ts=now_ms()
         )
         return {"delete_id": delete_id, "kicked_users": result["kicked_users"]}
 
@@ -328,7 +325,7 @@ class AdminService:
             total += int(part["total"])
             failed.extend(part["failed"])
         redact_id = await admin_store.record_redaction(
-            self._db, user_id, total, failed, ts=_now_ms()
+            self._db, user_id, total, failed, ts=now_ms()
         )
         return {"redact_id": redact_id}
 
@@ -355,7 +352,7 @@ class AdminService:
             reporter=reporter,
             reason=reason,
             score=score,
-            ts=_now_ms(),
+            ts=now_ms(),
         )
 
     async def list_event_reports(
@@ -397,7 +394,7 @@ class AdminService:
         svc = self._require_rooms()
         notices_user = f"@notices:{self._server_name}"
         if await accounts.get_user(self._db, notices_user) is None:
-            await accounts.create_user(self._db, notices_user, None, False, _now_ms())
+            await accounts.create_user(self._db, notices_user, None, False, now_ms())
 
         room_id = await admin_store.get_server_notices_room(self._db, user_id)
         if room_id is None:

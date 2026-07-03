@@ -27,16 +27,6 @@ SettingsLauncher = Callable[[], None]
 ServerFactory = Callable[[DesktopConfig], ServerProcess]
 
 
-def open_data_folder(path: Path) -> None:
-    """Reveal a folder in the OS file manager (best effort, per platform)."""
-    if sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
-    elif sys.platform.startswith("win"):
-        subprocess.Popen(["explorer", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path)])
-
-
 class TrayController:
     """The actions behind the tray menu, independent of any GUI toolkit."""
 
@@ -47,7 +37,7 @@ class TrayController:
         server: ServerProcess | None = None,
         server_factory: ServerFactory = ServerProcess,
         console_opener: Callable[[str], object] = webbrowser.open,
-        folder_opener: Callable[[Path], None] = open_data_folder,
+        folder_opener: Callable[[Path], None] = paths.reveal,
         settings_launcher: SettingsLauncher | None = None,
     ) -> None:
         self._config = config

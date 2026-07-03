@@ -12,9 +12,9 @@ are unchanged apart from awaiting them.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 
+from neuron_server.clock import now_ms
 from neuron_server.storage import typing as typing_store
 from neuron_server.storage.database import Database
 
@@ -22,9 +22,6 @@ from neuron_server.storage.database import Database
 # carries no timeout of its own).
 _DEFAULT_TIMEOUT_MS = 30_000
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 class TypingHandler:
@@ -43,13 +40,13 @@ class TypingHandler:
     ) -> None:
         if typing:
             await typing_store.set_typing(
-                self._db, room_id, user_id, _now_ms() + max(0, timeout_ms)
+                self._db, room_id, user_id, now_ms() + max(0, timeout_ms)
             )
             changed = True
         else:
             # Only a transition (was typing -> not) is a change worth waking on,
             # matching the previous in-memory semantics.
-            if await typing_store.is_typing(self._db, room_id, user_id, _now_ms()):
+            if await typing_store.is_typing(self._db, room_id, user_id, now_ms()):
                 await typing_store.set_typing(self._db, room_id, user_id, 0)
                 changed = True
             else:
@@ -59,4 +56,4 @@ class TypingHandler:
 
     async def typing_users(self, room_id: str) -> list[str]:
         """The currently-typing users in a room (expired entries excluded)."""
-        return await typing_store.typing_users(self._db, room_id, _now_ms())
+        return await typing_store.typing_users(self._db, room_id, now_ms())

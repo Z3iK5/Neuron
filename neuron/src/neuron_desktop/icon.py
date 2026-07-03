@@ -18,17 +18,11 @@ _WHITE = (0xFF, 0xFF, 0xFF)
 _SUPERSAMPLE = 4  # render large, then downscale for clean anti-aliasing
 
 
-def _rgb(value: str) -> tuple[int, int, int]:
-    value = value.lstrip("#")
-    return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
-
-
 def render_icon(
     size: int = 512,
     *,
     background: tuple[int, int, int] | None = _NAVY,
     foreground: tuple[int, int, int] = _WHITE,
-    squircle: bool = True,
     padding_ratio: float = 0.2,
 ) -> Image.Image:
     """Return the app icon as an RGBA :class:`PIL.Image.Image` of ``size`` px.
@@ -47,12 +41,8 @@ def render_icon(
     draw = ImageDraw.Draw(image)
 
     if background is not None:
-        fill = (*background, 255)
-        if squircle:
-            radius = int(big * 0.24)
-            draw.rounded_rectangle((0, 0, big - 1, big - 1), radius=radius, fill=fill)
-        else:
-            draw.rectangle((0, 0, big, big), fill=fill)
+        radius = int(big * 0.24)
+        draw.rounded_rectangle((0, 0, big - 1, big - 1), radius=radius, fill=(*background, 255))
 
     pad = big * padding_ratio
     scale = (big - 2 * pad) / viewbox
@@ -80,7 +70,3 @@ def render_icon(
     disc((cx, cy), center_r)
 
     return image.resize((size, size), Image.Resampling.LANCZOS)
-
-
-def navy() -> tuple[int, int, int]:
-    return _rgb(branding.NAVY)

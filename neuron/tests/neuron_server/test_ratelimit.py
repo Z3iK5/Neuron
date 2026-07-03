@@ -94,6 +94,35 @@ def test_login_endpoint_is_rate_limited(tmp_path: Path) -> None:
         assert last.headers.get("Retry-After")
 
 
+def test_login_rate_limit_key_is_normalized_across_identifier_forms(tmp_path: Path) -> None:
+    """'alice' and '@alice:server' are the same account — alternating the
+    identifier form must not grant a second per-account bucket."""
+    settings = NeuronServerSettings(
+        name="neuron.local",
+        database_url=f"sqlite:///{tmp_path / 'hs.db'}",
+        rate_limit_login_burst=3,
+        rate_limit_login_hz=0.001,  # effectively no refill during the test
+    )
+    with TestClient(create_app(settings)) as client:
+        def _try(user: str):  # type: ignore[no-untyped-def]
+            return client.post(
+                _LOGIN,
+                json={
+                    "type": "m.login.password",
+                    "identifier": {"type": "m.id.user", "user": user},
+                    "password": "wrong-password",
+                },
+            )
+
+        # Alternate the localpart and full-MXID forms of the same account. With
+        # burst 3, the 4th attempt must be limited even though only 2 of each
+        # form were sent — both forms charge the one normalized bucket.
+        forms = ["alice", "@alice:neuron.local", "alice", "@alice:neuron.local"]
+        statuses = [_try(form).status_code for form in forms]
+        assert statuses[:3] == [403, 403, 403]  # wrong password, not limited
+        assert statuses[3] == 429
+
+
 def test_bucket_dict_is_hard_capped_under_key_rotation() -> None:
     now = [1000.0]
     # No refill during the test, so every bucket stays partially drained — the

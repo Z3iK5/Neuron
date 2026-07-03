@@ -11,7 +11,31 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 _DEFAULT_PORT = 8448
+
+
+async def fetch_well_known(
+    server_name: str, *, timeout: float = 10.0
+) -> dict[str, Any] | None:
+    """Fetch ``server_name``'s ``/.well-known/matrix/server`` document.
+
+    Returns ``None`` if the document is absent, unreachable or malformed — the
+    caller then falls back to connecting to ``server_name`` directly.
+    """
+    if ":" in server_name:
+        return None  # explicit port: no delegation lookup
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(
+                f"https://{server_name}/.well-known/matrix/server"
+            )
+            response.raise_for_status()
+            data = response.json()
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def pick_base_url(server_name: str, well_known: dict[str, Any] | None) -> str:

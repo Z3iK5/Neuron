@@ -21,7 +21,6 @@ server settings.
 from __future__ import annotations
 
 import html
-import io
 import json
 import time
 import urllib.parse
@@ -135,6 +134,23 @@ def _fmt_bytes(n: int) -> str:
 _BULK_ONCHANGE = " onchange=\"neuronBulk(this.closest('.bulk-form'))\""
 
 
+def _bulk_table(
+    request: Request, action: str, buttons: str, headers: str, rows: str, nav: str
+) -> str:
+    """The bulk-select table scaffold shared by the users/rooms/media/reports pages."""
+    return (
+        f'<form class="bulk-form" method="post" action="{action}">'
+        f"{_csrf_field(request)}"
+        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
+        f"{buttons}</div>"
+        '<div class="panel"><table class="tbl"><thead><tr>'
+        '<th class="check"><input type="checkbox" class="checkall"'
+        ' onchange="neuronCheckAll(this)"></th>'
+        f"{headers}</tr></thead>"
+        f"<tbody>{rows}</tbody></table>{nav}</div></form>"
+    )
+
+
 # --- auth -------------------------------------------------------------------
 @router.get("/console/login", include_in_schema=False)
 async def login_form(request: Request) -> Response:
@@ -162,7 +178,6 @@ async def login_submit(
     username: str = Form(...),
     password: str = Form(...),
     csrf_token: str = Form(""),
-    next: str = Form("/console"),
 ) -> Response:
     settings = _settings(request)
     name = settings.name
@@ -189,8 +204,7 @@ async def login_submit(
         return _fail("That account is not a server administrator.", 403)
 
     request.session["console_user"] = user_id
-    target = next if next.startswith("/console") else "/console"
-    return RedirectResponse(target, status_code=303)
+    return RedirectResponse("/console", status_code=303)
 
 
 @router.get("/console/logout", include_in_schema=False)
@@ -260,7 +274,7 @@ async def users_list(
         uid = str(u.get("name", ""))
         link = f'/console/users/{_quote(uid)}'
         display = _e(u.get("displayname") or "")
-        created = _fmt_ts(int(u.get("creation_ts") or 0)) if u.get("creation_ts") else "—"
+        created = _fmt_ts(int(u.get("creation_ts") or 0))
         rows += (
             f'<tr><td class="check"><input type="checkbox" class="rowcheck"'
             f' name="user_ids" value="{_e(uid)}"{_BULK_ONCHANGE}></td>'
@@ -293,19 +307,17 @@ async def users_list(
     body = (
         f'<div class="spread"><h1 class="page">Users <span class="muted">({total})</span></h1>'
         f"{search}</div>"
-        '<form class="bulk-form" method="post" action="/console/users/bulk">'
-        f"{_csrf_field(request)}"
-        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
-        '<button class="btn sm" name="action" value="shadow_ban">Shadow-ban</button>'
-        '<button class="btn sm ghost" name="action" value="unshadow_ban">Un-shadow-ban</button>'
-        '<button class="btn sm danger" name="action" value="deactivate"'
-        " onclick=\"return confirm('Deactivate the selected users?')\">Deactivate</button></div>"
-        '<div class="panel"><table class="tbl"><thead><tr>'
-        '<th class="check"><input type="checkbox" class="checkall"'
-        ' onchange="neuronCheckAll(this)"></th>'
-        '<th>User</th><th>Display name</th><th>Role</th><th>Status</th>'
-        '<th>Created</th></tr></thead>'
-        f"<tbody>{rows}</tbody></table>{nav}</div></form>"
+        + _bulk_table(
+            request,
+            "/console/users/bulk",
+            '<button class="btn sm" name="action" value="shadow_ban">Shadow-ban</button>'
+            '<button class="btn sm ghost" name="action" value="unshadow_ban">Un-shadow-ban</button>'
+            '<button class="btn sm danger" name="action" value="deactivate"'
+            " onclick=\"return confirm('Deactivate the selected users?')\">Deactivate</button>",
+            '<th>User</th><th>Display name</th><th>Role</th><th>Status</th><th>Created</th>',
+            rows,
+            nav,
+        )
     )
     return _page(request, "Users", "/console/users", body)
 
@@ -412,7 +424,7 @@ async def user_detail(
     csrf = _csrf_field(request)
     quoted = _quote(user_id)
 
-    created = _fmt_ts(int(user.get("creation_ts") or 0)) if user.get("creation_ts") else "—"
+    created = _fmt_ts(int(user.get("creation_ts") or 0))
     info = (
         '<dl class="kv">'
         f"<dt>User ID</dt><dd>{_e(user_id)}</dd>"
@@ -482,7 +494,7 @@ async def user_detail(
         device_rows = "".join(
             f'<tr><td>{_e(d["device_id"])}</td><td>{_e(d.get("display_name") or "—")}</td>'
             f'<td class="muted">'
-            f'{_fmt_ts(int(d["created_ts"])) if d.get("created_ts") else "—"}</td>'
+            f'{_fmt_ts(int(d.get("created_ts") or 0))}</td>'
             f'<td><form class="inline" method="post" action="/console/users/{quoted}'
             f'/devices/{_quote(str(d["device_id"]))}/delete">{csrf}'
             '<button class="btn sm danger" type="submit">Delete</button></form></td></tr>'
@@ -546,8 +558,7 @@ async def user_redact(
     _: str = Depends(require_console_admin),
     __: None = Depends(csrf_protect),
 ) -> Response:
-    result = await _admin(request).redact_user_events(user_id)
-    await _admin(request).get_redact_status(result["redact_id"])
+    await _admin(request).redact_user_events(user_id)
     _flash(request, "Redacted the user's messages.")
     return RedirectResponse(f"/console/users/{_quote(user_id)}", status_code=303)
 
@@ -682,19 +693,18 @@ async def rooms_list(
     nav = _pager("/console/rooms", offset, _PAGE_SIZE, total, "")
     body = (
         f'<h1 class="page">Rooms <span class="muted">({total})</span></h1>'
-        '<form class="bulk-form" method="post" action="/console/rooms/bulk">'
-        f"{_csrf_field(request)}"
-        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
-        '<button class="btn sm" name="action" value="block">Block</button>'
-        '<button class="btn sm ghost" name="action" value="unblock">Unblock</button>'
-        '<button class="btn sm danger" name="action" value="delete"'
-        " onclick=\"return confirm('Delete &amp; purge the selected rooms? This cannot be"
-        " undone.')\">Delete &amp; purge</button></div>"
-        '<div class="panel"><table class="tbl"><thead><tr>'
-        '<th class="check"><input type="checkbox" class="checkall"'
-        ' onchange="neuronCheckAll(this)"></th>'
-        '<th>Room</th><th>Members</th><th>Encryption</th><th>Version</th></tr></thead>'
-        f"<tbody>{rows}</tbody></table>{nav}</div></form>"
+        + _bulk_table(
+            request,
+            "/console/rooms/bulk",
+            '<button class="btn sm" name="action" value="block">Block</button>'
+            '<button class="btn sm ghost" name="action" value="unblock">Unblock</button>'
+            '<button class="btn sm danger" name="action" value="delete"'
+            " onclick=\"return confirm('Delete &amp; purge the selected rooms? This cannot be"
+            " undone.')\">Delete &amp; purge</button>",
+            '<th>Room</th><th>Members</th><th>Encryption</th><th>Version</th>',
+            rows,
+            nav,
+        )
     )
     return _page(request, "Rooms", "/console/rooms", body)
 
@@ -952,12 +962,10 @@ async def invites_delete(
 async def invite_qr(
     request: Request, token: str, _: str = Depends(require_console_admin)
 ) -> Response:
-    import segno
+    from neuron_core.qr import qr_svg
 
     url = _invite_url(_settings(request), token)
-    buf = io.BytesIO()
-    segno.make(url, error="m").save(buf, kind="svg", scale=5, border=2)
-    return Response(buf.getvalue(), media_type="image/svg+xml")
+    return Response(qr_svg(url, scale=5), media_type="image/svg+xml")
 
 
 # --- media ------------------------------------------------------------------
@@ -997,17 +1005,16 @@ async def media_list(
         f'<h1 class="page">Media <span class="muted">({total},'
         f" {_e(_fmt_bytes(total_bytes))})</span></h1>"
         + search
-        + '<form class="bulk-form" method="post" action="/console/media/bulk">'
-        f"{_csrf_field(request)}"
-        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
-        '<button class="btn sm danger" name="action" value="delete"'
-        " onclick=\"return confirm('Delete the selected media? This cannot be undone.')\">"
-        "Delete</button></div>"
-        '<div class="panel"><table class="tbl"><thead><tr>'
-        '<th class="check"><input type="checkbox" class="checkall"'
-        ' onchange="neuronCheckAll(this)"></th>'
-        "<th>Media</th><th>Type</th><th>Size</th><th>Uploader</th><th>Uploaded</th></tr></thead>"
-        f"<tbody>{rows}</tbody></table>{nav}</div></form>"
+        + _bulk_table(
+            request,
+            "/console/media/bulk",
+            '<button class="btn sm danger" name="action" value="delete"'
+            " onclick=\"return confirm('Delete the selected media? This cannot be undone.')\">"
+            "Delete</button>",
+            "<th>Media</th><th>Type</th><th>Size</th><th>Uploader</th><th>Uploaded</th>",
+            rows,
+            nav,
+        )
     )
     return _page(request, "Media", "/console/media", body)
 
@@ -1044,11 +1051,11 @@ async def media_bulk(
 _DOCTOR_PILL = {"ok": "on", "warn": "amber", "fail": "warn"}
 
 
-def _save_desktop_config_key(path: str, key: str, value: Any) -> None:
-    """Update one key in the desktop app's flat config.json (no neuron_desktop import)."""
+def _save_desktop_config(path: str, updates: dict[str, Any]) -> None:
+    """Update keys in the desktop app's flat config.json (no neuron_desktop import)."""
     p = Path(path)
     data = json.loads(p.read_text(encoding="utf-8"))
-    data[key] = value
+    data.update(updates)
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
@@ -1204,8 +1211,7 @@ async def settings_save(
         "max_upload_bytes": mib * 1024 * 1024,
         "log_level": log_level,
     }
-    for key, value in updates.items():
-        _save_desktop_config_key(settings.desktop_config_path, key, value)
+    _save_desktop_config(settings.desktop_config_path, updates)
     _flash(
         request,
         "Settings saved. Restart the server to apply (Neuron tray menu → Restart server).",
@@ -1313,11 +1319,12 @@ def _rp(request: Request) -> tuple[str, str]:
 
 
 async def _owner_is_admin(request: Request, user_id: str) -> bool:
-    settings = _settings(request)
-    if user_id in settings.admin_user_ids():
-        return True
+    # Mirror the password-login gate: a deactivated (or missing) account is never
+    # an admin, even if it is listed in NEURON_SERVER_ADMIN_USERS.
     row = await accounts.get_user(request.app.state.db, user_id)
-    return bool(row and row.admin and not row.deactivated)
+    if row is None or row.deactivated:
+        return False
+    return user_id in _settings(request).admin_user_ids() or bool(row.admin)
 
 
 def _passkey_script(request: Request) -> str:
@@ -1452,15 +1459,12 @@ async def passkey_login_verify(request: Request) -> Response:
 
 
 # --- reports ----------------------------------------------------------------
-_REPORTS_PER_PAGE = 25
-
-
 @router.get("/console/reports", include_in_schema=False)
 async def reports_page(
     request: Request, _: str = Depends(require_console_admin), offset: int = 0
 ) -> Response:
     offset = max(0, offset)
-    data = await _admin(request).list_event_reports(offset=offset, limit=_REPORTS_PER_PAGE)
+    data = await _admin(request).list_event_reports(offset=offset, limit=_PAGE_SIZE)
     total = int(data.get("total", 0))
     rows = ""
     for r in data.get("event_reports", []):
@@ -1483,18 +1487,16 @@ async def reports_page(
         )
     body = (
         f'<h1 class="page">Reports <span class="muted">({total})</span></h1>'
-        '<form class="bulk-form" method="post" action="/console/reports/bulk">'
-        f"{_csrf_field(request)}"
-        '<div class="bulkbar"><strong><span data-count>0</span> selected</strong>'
-        '<button class="btn sm danger" name="action" value="dismiss"'
-        " onclick=\"return confirm('Dismiss the selected reports?')\">Dismiss selected"
-        "</button></div>"
-        '<div class="panel"><table class="tbl"><thead><tr>'
-        '<th class="check"><input type="checkbox" class="checkall"'
-        ' onchange="neuronCheckAll(this)"></th>'
-        '<th>Reporter</th><th>Room</th><th>Event</th><th>Reason</th><th></th></tr></thead>'
-        f"<tbody>{rows}</tbody></table>"
-        f'{_pager("/console/reports", offset, _REPORTS_PER_PAGE, total, "")}</div></form>'
+        + _bulk_table(
+            request,
+            "/console/reports/bulk",
+            '<button class="btn sm danger" name="action" value="dismiss"'
+            " onclick=\"return confirm('Dismiss the selected reports?')\">Dismiss selected"
+            "</button>",
+            '<th>Reporter</th><th>Room</th><th>Event</th><th>Reason</th><th></th>',
+            rows,
+            _pager("/console/reports", offset, _PAGE_SIZE, total, ""),
+        )
     )
     return _page(request, "Reports", "/console/reports", body)
 

@@ -14,12 +14,12 @@ received events into room state.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
 from fastapi import APIRouter, Request
 
+from neuron_server.api.deps import json_body
 from neuron_server.errors import MatrixError
 from neuron_server.federation.request import authenticate_request
 from neuron_server.federation.validation import (
@@ -41,13 +41,7 @@ _MAX_EDUS = 100
 
 @router.put("/send/{txn_id}")
 async def send_transaction(txn_id: str, request: Request) -> dict[str, Any]:
-    raw = await request.body()
-    try:
-        body = json.loads(raw) if raw else {}
-    except ValueError as exc:
-        raise MatrixError(400, "M_NOT_JSON", "Request body is not valid JSON") from exc
-    if not isinstance(body, dict):
-        raise MatrixError(400, "M_BAD_JSON", "Transaction must be a JSON object")
+    body = await json_body(request, message="Transaction must be a JSON object")
 
     origin = await authenticate_request(request, content=body)
     body_origin = body.get("origin")

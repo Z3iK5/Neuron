@@ -23,7 +23,6 @@ import olm
 from neuron_crypto.base import DecryptResult
 
 MEGOLM_ALGORITHM = "m.megolm.v1.aes-sha2"
-ROOM_KEY_TYPE = "m.room_key"
 
 
 class MegolmSessionStore:
@@ -72,9 +71,6 @@ class MegolmSessionStore:
                 self.import_session_key(key)
                 count += 1
         return count
-
-    def has_session(self, session_id: str) -> bool:
-        return session_id in self._sessions
 
     # --- decryption ---------------------------------------------------------
     def decrypt_event(self, event: dict[str, Any]) -> DecryptResult:

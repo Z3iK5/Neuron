@@ -81,9 +81,10 @@ async def test_invite_remote_user_then_they_join(tmp_path: Path) -> None:
             assert invited.status_code == 200, invited.text
 
         # B recorded the invite, co-signed by both servers.
-        recorded = await invite_store.get_invite(app_b.state.db, _BOB, room_id)  # type: ignore[attr-defined]
+        pending = await invite_store.list_pending_invites(app_b.state.db, _BOB)  # type: ignore[attr-defined]
+        recorded = next((p for p in pending if p.room_id == room_id), None)
         assert recorded is not None
-        assert {"a.test", "b.test"} <= set(recorded["event"]["signatures"])
+        assert {"a.test", "b.test"} <= set(recorded.event["signatures"])
 
         # A's room state shows bob invited (not yet joined).
         assert _BOB not in await store.get_joined_members(app_a.state.db, room_id)  # type: ignore[attr-defined]

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from neuron_desktop import config as config_module
@@ -78,6 +79,37 @@ def test_config_loads_without_database_fields(tmp_path: Path) -> None:
     cfg = config_module.load(cfg_file)
     assert cfg.database_url == "" and cfg.db_pool_size == 1
     assert cfg.uses_postgres is False
+
+
+def test_config_load_ignores_unknown_keys(tmp_path: Path) -> None:
+    """Forward compat: a config.json written by a newer app version (extra keys)
+    still loads after a downgrade — config.json is the ownership marker that
+    upgrade-vs-fresh detection keys on, so unknown keys must not crash load()."""
+    import json
+
+    cfg_file = paths.config_path(tmp_path)
+    cfg_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "server_name": "newer",
+                "data_dir": str(tmp_path),
+                "admin_username": "admin",
+                "some_future_setting": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = config_module.load(cfg_file)
+    assert cfg.server_name == "newer"
+    # ... and detect_existing_install still recognises the directory as ours.
+    existing = setup.detect_existing_install(tmp_path)
+    assert existing is not None and existing.server_name == "newer"
+
+    # A foreign/corrupt config (missing required fields) is still rejected.
+    cfg_file.write_text(json.dumps({"unrelated": "app"}), encoding="utf-8")
+    with pytest.raises(TypeError):
+        config_module.load(cfg_file)
 
 
 def test_to_server_settings_postgres_backend(tmp_path: Path) -> None:
@@ -405,8 +437,6 @@ def test_purge_raises_and_keeps_config_marker_on_failure(tmp_path: Path) -> None
     keydir = paths.signing_key_path(tmp_path)
     keydir.mkdir()
     (keydir / "x").write_text("x", encoding="utf-8")
-
-    import pytest
 
     with pytest.raises(OSError, match="signing.key"):
         setup.purge_installation(tmp_path)
