@@ -236,6 +236,28 @@ class NeuronServerSettings(BaseSettings):
         description="Use state resolution v2 for inbound federation authorization.",
     )
 
+    # --- VoIP / TURN ----------------------------------------------------------
+    # TURN relay servers advertised to clients via GET /_matrix/client/v3/voip/
+    # turnServer, so Element/FluffyChat calls work across NATs. Credentials use
+    # coturn's REST scheme (`use-auth-secret`): a time-limited username plus an
+    # HMAC-SHA1 password derived from ``turn_shared_secret``. Leave ``turn_uris``
+    # empty (the default) to advertise no TURN servers. The env value is JSON,
+    # e.g. NEURON_SERVER_TURN_URIS='["turn:turn.example.org:3478?transport=udp"]'.
+    turn_uris: list[str] = Field(
+        default_factory=list,
+        description="TURN server URIs advertised to clients (JSON list in the env).",
+    )
+    # Must match coturn's ``static-auth-secret``. If unset, /voip/turnServer
+    # returns no servers even when turn_uris is set.
+    turn_shared_secret: SecretStr | None = Field(
+        default=None,
+        description="Shared secret for coturn's REST credential scheme.",
+    )
+    # How long (seconds) issued TURN credentials stay valid. Default 24 hours.
+    turn_ttl_s: int = Field(
+        default=86400, gt=0, description="Lifetime (seconds) of issued TURN credentials."
+    )
+
     # --- Observability ------------------------------------------------------
     # Expose a Prometheus /metrics endpoint (HTTP request counts + latency, process
     # metrics). Off by default; needs the `metrics` extra (prometheus-client), which

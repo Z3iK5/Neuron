@@ -20,6 +20,7 @@ from neuron_server.api.deps import get_rooms, json_body, require_target_user, re
 from neuron_server.auth.service import Authenticated
 from neuron_server.errors import MatrixError
 from neuron_server.rooms.service import RoomService
+from neuron_server.storage import rooms as rooms_store
 
 router = APIRouter(prefix="/_matrix/client")
 
@@ -153,6 +154,27 @@ async def leave_room(
     who: Authenticated = Depends(require_user),
 ) -> dict[str, Any]:
     await _leave_any(request, room_id, who.user_id)
+    return {}
+
+
+@router.post("/v3/rooms/{room_id}/forget")
+async def forget_room(
+    room_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+) -> dict[str, Any]:
+    """Forget a room the user has left: hide it from /sync and room listings.
+
+    The membership row is flagged rather than deleted, so re-joining (which
+    upserts a fresh membership) clears the flag and the room reappears.
+    """
+    db = request.app.state.db
+    membership = await rooms_store.get_membership(db, room_id, who.user_id)
+    if membership is None:
+        raise MatrixError(404, "M_NOT_FOUND", "No membership in this room to forget")
+    if membership not in ("leave", "ban"):
+        raise MatrixError(400, "M_UNKNOWN", f"User {who.user_id} is still in the room")
+    await rooms_store.set_forgotten(db, room_id, who.user_id)
     return {}
 
 
@@ -303,6 +325,40 @@ async def get_one_event(
     rooms: RoomService = Depends(get_rooms),
 ) -> dict[str, Any]:
     return await rooms.get_event(room_id, event_id)
+
+
+@router.get("/v3/rooms/{room_id}/context/{event_id}")
+async def get_event_context(
+    room_id: str,
+    event_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    rooms: RoomService = Depends(get_rooms),
+) -> dict[str, Any]:
+    limit_param = request.query_params.get("limit", "10")
+    try:
+        limit = int(limit_param)
+    except ValueError as exc:
+        raise MatrixError(400, "M_INVALID_PARAM", "limit must be an integer") from exc
+    return await rooms.get_event_context(room_id, who.user_id, event_id, limit=limit)
+
+
+@router.get("/v3/rooms/{room_id}/members")
+async def get_room_members(
+    room_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+    rooms: RoomService = Depends(get_rooms),
+) -> dict[str, Any]:
+    # The `at` param (members as of a sync token) is accepted but loosely honoured:
+    # the current membership state is returned.
+    chunk = await rooms.get_member_events(
+        room_id,
+        who.user_id,
+        membership=request.query_params.get("membership"),
+        not_membership=request.query_params.get("not_membership"),
+    )
+    return {"chunk": chunk}
 
 
 @router.get("/v3/rooms/{room_id}/joined_members")

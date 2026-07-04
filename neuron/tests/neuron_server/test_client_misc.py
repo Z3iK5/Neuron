@@ -103,6 +103,89 @@ def test_typing_and_receipts_accepted(tmp_path: Path) -> None:
         ).status_code == 200
 
 
+def _create_room_with_message(client: TestClient, token: str) -> tuple[str, str]:
+    room = client.post(f"{_B}/createRoom", headers=_h(token), json={}).json()["room_id"]
+    event_id = client.put(
+        f"{_B}/rooms/{room}/send/m.room.message/t1",
+        headers=_h(token),
+        json={"msgtype": "m.text", "body": "hi"},
+    ).json()["event_id"]
+    return room, event_id
+
+
+def test_read_markers_stores_fully_read_and_receipts(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        token, user_id = _register(client, "alice")
+        room, event_id = _create_room_with_message(client, token)
+
+        resp = client.post(
+            f"{_B}/rooms/{room}/read_markers",
+            headers=_h(token),
+            json={
+                "m.fully_read": event_id,
+                "m.read": event_id,
+                "m.read.private": event_id,
+            },
+        )
+        assert resp.status_code == 200
+
+        # m.fully_read roams as per-room account data.
+        marker = client.get(
+            f"{_B}/user/{user_id}/rooms/{room}/account_data/m.fully_read", headers=_h(token)
+        ).json()
+        assert marker == {"event_id": event_id}
+        sync = client.get(f"{_B}/sync?timeout=0", headers=_h(token)).json()
+        room_account = sync["rooms"]["join"][room]["account_data"]["events"]
+        assert {"type": "m.fully_read", "content": {"event_id": event_id}} in room_account
+
+        # Both receipts are stored and surfaced to the owner in sync ephemeral.
+        receipts = next(
+            e["content"]
+            for e in sync["rooms"]["join"][room]["ephemeral"]["events"]
+            if e["type"] == "m.receipt"
+        )
+        assert user_id in receipts[event_id]["m.read"]
+        assert user_id in receipts[event_id]["m.read.private"]
+
+
+def test_read_markers_with_only_fully_read(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        token, user_id = _register(client, "alice")
+        room, event_id = _create_room_with_message(client, token)
+
+        assert client.post(
+            f"{_B}/rooms/{room}/read_markers",
+            headers=_h(token),
+            json={"m.fully_read": event_id},
+        ).status_code == 200
+        marker = client.get(
+            f"{_B}/user/{user_id}/rooms/{room}/account_data/m.fully_read", headers=_h(token)
+        ).json()
+        assert marker == {"event_id": event_id}
+
+
+def test_receipt_private_persisted_but_unknown_types_ignored(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        token, user_id = _register(client, "alice")
+        room, event_id = _create_room_with_message(client, token)
+
+        assert client.post(
+            f"{_B}/rooms/{room}/receipt/m.read.private/{event_id}", headers=_h(token), json={}
+        ).status_code == 200
+        assert client.post(
+            f"{_B}/rooms/{room}/receipt/m.bogus/{event_id}", headers=_h(token), json={}
+        ).status_code == 200  # accepted but not persisted
+
+        sync = client.get(f"{_B}/sync?timeout=0", headers=_h(token)).json()
+        receipts = next(
+            e["content"]
+            for e in sync["rooms"]["join"][room]["ephemeral"]["events"]
+            if e["type"] == "m.receipt"
+        )
+        assert user_id in receipts[event_id]["m.read.private"]
+        assert "m.bogus" not in receipts[event_id]
+
+
 def test_typing_rejects_non_integer_timeout(tmp_path: Path) -> None:
     """A malformed timeout must produce a spec-shaped 400, not an unhandled 500."""
     with _client(tmp_path) as client:

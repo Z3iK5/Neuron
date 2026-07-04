@@ -21,6 +21,7 @@ from neuron_server.auth.uia import UiaSessionStore
 from neuron_server.clock import now_ms
 from neuron_server.errors import MatrixError
 from neuron_server.storage import accounts
+from neuron_server.storage import admin as admin_store
 from neuron_server.storage.database import Database
 
 
@@ -80,6 +81,55 @@ class AuthService:
             and isinstance(auth.get("session"), str)
             and await self._uia.exists(auth["session"])
         )
+
+    async def uia_password_submitted(self, auth: Any) -> bool:
+        """True if ``auth`` is an m.login.password submission for an open session.
+
+        This only checks the *shape* (stage type + known session); the password
+        itself is verified separately by :meth:`verify_uia_password` so the HTTP
+        layer can charge the login rate limiter between the two steps.
+        """
+        return (
+            isinstance(auth, dict)
+            and auth.get("type") == "m.login.password"
+            and isinstance(auth.get("session"), str)
+            and await self._uia.exists(auth["session"])
+        )
+
+    async def verify_uia_password(self, auth: dict[str, Any], user_id: str) -> None:
+        """Verify the m.login.password UIA stage against ``user_id``'s password.
+
+        The identifier (if supplied) must resolve to the authenticated user —
+        UIA re-authenticates the *current* account, so a cross-user identifier
+        is rejected rather than letting one user's session vouch for another.
+        Raises M_FORBIDDEN on mismatch or wrong password; the UIA session stays
+        open so the client may retry with the same session.
+        """
+        identifier = auth.get("identifier")
+        supplied: Any = None
+        if isinstance(identifier, dict) and identifier.get("type") == "m.id.user":
+            supplied = identifier.get("user")
+        elif "user" in auth:  # deprecated top-level field
+            supplied = auth.get("user")
+        if supplied is not None:
+            if not isinstance(supplied, str) or not supplied:
+                raise MatrixError(400, "M_INVALID_PARAM", "Invalid user identifier")
+            supplied_id = supplied if supplied.startswith("@") else self._user_id(supplied)
+            if supplied_id != user_id:
+                raise MatrixError(
+                    403, "M_FORBIDDEN", "Cannot authenticate as a different user"
+                )
+
+        password = auth.get("password")
+        if not isinstance(password, str) or not password:
+            raise MatrixError(400, "M_MISSING_PARAM", "Missing password")
+        row = await accounts.get_user(self._db, user_id)
+        if (
+            row is None
+            or row.password_hash is None
+            or not verify_password(password, row.password_hash)
+        ):
+            raise MatrixError(403, "M_FORBIDDEN", "Invalid password")
 
     async def complete_uia(self, auth: Any) -> None:
         session = auth.get("session") if isinstance(auth, dict) else None
@@ -207,6 +257,34 @@ class AuthService:
     async def logout_all(self, user_id: str) -> None:
         """Invalidate all of a user's tokens and delete all their devices."""
         async with self._db.transaction():
+            await accounts.delete_tokens_for_user(self._db, user_id)
+            await accounts.delete_all_devices(self._db, user_id)
+
+    # --- self-serve account management --------------------------------------
+
+    async def change_password(
+        self, user_id: str, new_password: str, *, logout_devices: bool, keep_device_id: str
+    ) -> None:
+        """Set a new password; optionally revoke every *other* session.
+
+        With ``logout_devices`` (the spec default) all of the user's devices and
+        access tokens are deleted except the device the request came from, so
+        the caller's session survives its own password change.
+        """
+        async with self._db.transaction():
+            await admin_store.set_user_password(self._db, user_id, hash_password(new_password))
+            if logout_devices:
+                for device in await accounts.list_devices(self._db, user_id):
+                    if device.device_id == keep_device_id:
+                        continue
+                    await accounts.delete_tokens_for_device(self._db, user_id, device.device_id)
+                    await accounts.delete_device(self._db, user_id, device.device_id)
+
+    async def deactivate_account(self, user_id: str) -> None:
+        """Deactivate the account and revoke every session (mirrors admin deactivate,
+        additionally deleting the device rows since no session may remain)."""
+        async with self._db.transaction():
+            await admin_store.set_user_deactivated(self._db, user_id, True)
             await accounts.delete_tokens_for_user(self._db, user_id)
             await accounts.delete_all_devices(self._db, user_id)
 

@@ -366,6 +366,36 @@ async def test_core_flow_on_postgres() -> None:
         assert ver["server_version"].startswith("Neuron ")
 
 
+async def test_account_data_stream_on_postgres() -> None:
+    """Account data roams via /sync on the sequence-backed account_data stream:
+    delivered on initial sync, only-changed on incremental (migration 20)."""
+    async with _pg_app() as c:
+        h = {"Authorization": f"Bearer {await _register(c, 'admin')}"}
+        await c.put(
+            f"{_CS}/user/@admin:pg.test/account_data/m.test",
+            headers=h,
+            json={"colour": "blue"},
+        )
+        initial = (await c.get(f"{_CS}/sync?timeout=0", headers=h)).json()
+        assert {"type": "m.test", "content": {"colour": "blue"}} in initial[
+            "account_data"
+        ]["events"]
+
+        since = initial["next_batch"]
+        empty = (await c.get(f"{_CS}/sync?since={since}&timeout=0", headers=h)).json()
+        assert empty["account_data"]["events"] == []
+
+        await c.put(
+            f"{_CS}/user/@admin:pg.test/account_data/m.test",
+            headers=h,
+            json={"colour": "red"},
+        )
+        inc = (await c.get(f"{_CS}/sync?since={since}&timeout=0", headers=h)).json()
+        assert inc["account_data"]["events"] == [
+            {"type": "m.test", "content": {"colour": "red"}}
+        ]
+
+
 @contextlib.asynccontextmanager
 async def _two_workers(
     pool_size: int = 4,

@@ -438,6 +438,48 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=20,
+        name="account_data_stream",
+        # A stream position on account data so /sync can deliver only rows changed
+        # since a client's token (same pattern as receipts). Existing rows keep
+        # stream_id 0: an initial sync returns everything regardless, and any later
+        # write re-stamps the row with a fresh id.
+        statements=(
+            "ALTER TABLE account_data ADD COLUMN stream_id BIGINT NOT NULL DEFAULT 0",
+        ),
+    ),
+    Migration(
+        version=21,
+        name="push_rules",
+        # Per-user push rules (global scope only — the only scope the spec defines).
+        # One table holds both: custom rules (full definition) and per-rule tweaks
+        # to the server-default `.m.*` rules (only `enabled`/`actions_json` set,
+        # `conditions_json`/`pattern` NULL). The computed spec-default ruleset is
+        # merged with these rows on read; NULL means "no override".
+        statements=(
+            "CREATE TABLE IF NOT EXISTS push_rules ("
+            " user_id TEXT NOT NULL,"
+            " kind TEXT NOT NULL,"
+            " rule_id TEXT NOT NULL,"
+            " ordering BIGINT NOT NULL DEFAULT 0,"
+            " conditions_json TEXT,"
+            " actions_json TEXT,"
+            " pattern TEXT,"
+            " enabled BIGINT,"
+            " PRIMARY KEY (user_id, kind, rule_id)"
+            ")",
+        ),
+    ),
+    Migration(
+        version=22,
+        name="membership_forgotten",
+        # POST /rooms/{id}/forget: a forgotten membership row is hidden from /sync
+        # and room listings but kept (re-joining resets the flag via the upsert).
+        statements=(
+            "ALTER TABLE room_memberships ADD COLUMN forgotten BIGINT NOT NULL DEFAULT 0",
+        ),
+    ),
 )
 
 
