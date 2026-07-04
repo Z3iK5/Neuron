@@ -5,6 +5,28 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.20] — 2026-07-05
+
+Encryption completeness: your encrypted history now survives losing all your
+devices, and encrypted chats work with people on other servers.
+
+### Added
+- **Secure Backup (encrypted message history recovery).** The server now stores
+  an encrypted backup of your room keys (`/room_keys`), so a client that has lost
+  every device can restore its history with your recovery key. Full backup-version
+  lifecycle and per-session key storage, with the spec's "keep the better key"
+  replacement rules and version rotation.
+- **End-to-end encryption across servers.** Encrypted rooms now work between users
+  on different homeservers: device-key lookups, one-time-key claims, and
+  to-device messages (the Olm/Megolm key exchange) all travel over federation, in
+  both directions, and device changes on one server notify the others. Previously
+  encryption only worked between users on the same server.
+
+### Fixed
+- **Federation signature check.** A signed federation request addressed to a
+  different server is no longer accepted — the destination in the signature must
+  match this server.
+
 ## [0.0.19] — 2026-07-04
 
 A full-codebase review release: every package was swept for dead and duplicated
