@@ -5,6 +5,48 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.19] — 2026-07-04
+
+A full-codebase review release: every package was swept for dead and duplicated
+code (~620 lines removed, behavior preserved), 11 bugs found by the review were
+fixed, and the biggest missing pieces of everyday Element usage plus federation
+robustness were built.
+
+### Added
+- **Account data in `/sync`.** Settings saved by your client (direct-chat list,
+  favourites, and anything else stored as account data) now follow you between
+  devices — delivered on initial and incremental sync, waking long-polls on change.
+- **Notifications that behave like Matrix.** The server now serves the spec's
+  default push rules with full editing support (`/pushrules` CRUD, per-rule
+  enable/actions), and every joined room reports unread and highlight counts in
+  `/sync` — so Element's room badges and notification settings work.
+- **Read markers.** `/read_markers` stores your "read up to here" marker and
+  private read receipts (`m.read.private`) are persisted and visible only to you.
+- **More of the everyday client API:** event context (`/context`), full room
+  member list (`/members`), user directory search, TURN credentials for calls
+  (`/voip/turnServer`, new `NEURON_SERVER_TURN_*` settings), self-serve password
+  change and account deactivation (with proper re-authentication), and
+  `/rooms/{id}/forget`.
+- **Federation is hub-capable.** When your server hosts a room, events arriving
+  from one remote server are now relayed to the room's other servers — rooms with
+  three or more servers no longer silently drop cross-server messages. Outbound
+  federation traffic is chunked to the spec's 50-event transaction limit, profile
+  lookups work over federation in both directions, and `.well-known` server
+  delegation is now honored when dialing other servers.
+
+### Fixed
+- Unbanning now requires ban-level power (was kick-level, letting lower-powered
+  moderators undo bans).
+- Deleting a room with both "block" and "purge" no longer forgets the block.
+- A retried federation join no longer errors; malformed to-device messages no
+  longer wedge the audit bot's sync loop.
+- Passkey login rejects deactivated admin accounts; login rate limiting can no
+  longer be dodged by varying the identifier form; one-time keys can no longer be
+  handed to two clients at once under concurrent load on PostgreSQL.
+- The typing endpoint returns a proper 400 (not a 500) on a bad timeout, and the
+  desktop app tolerates config files written by a newer version (downgrades no
+  longer break install detection).
+
 ## [0.0.18] — 2026-06-22
 
 ### Added
