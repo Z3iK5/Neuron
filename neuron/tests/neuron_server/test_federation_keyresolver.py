@@ -11,11 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 
 from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
+from neuron_server.crypto.signing import generate_signing_key
+from neuron_server.federation import client as fed_client
 from neuron_server.federation.auth import sign_request
-from neuron_server.federation.discovery import pick_base_url
+from neuron_server.federation.discovery import fetch_well_known, pick_base_url
 from neuron_server.keys.resolver import parse_and_verify_key_document
 
 
@@ -29,6 +32,40 @@ def test_pick_base_url() -> None:
     assert pick_base_url("hs.test", {"m.server": "delegated:443"}) == "https://delegated:443"
     # No delegation → default federation port.
     assert pick_base_url("hs.test", None) == "https://hs.test:8448"
+
+
+async def test_fetch_well_known_skips_explicit_port() -> None:
+    # An explicit port suppresses delegation, so no lookup (or network) happens.
+    assert await fetch_well_known("hs.test:8449") is None
+
+
+async def test_federation_client_honours_well_known_delegation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_fetch(server_name: str, *, timeout: float = 10.0) -> dict | None:
+        calls.append(server_name)
+        return {"m.server": "delegated.example:8449"}
+
+    monkeypatch.setattr(fed_client, "fetch_well_known", fake_fetch)
+    client = fed_client.FederationClient("a.test", generate_signing_key("test"))
+
+    await client._resolve("remote.test")
+    opened = client._default_open("remote.test")
+    try:
+        assert str(opened.base_url) == "https://delegated.example:8449"
+    finally:
+        await opened.aclose()
+
+    # The delegation is cached: a second resolve does not refetch.
+    await client._resolve("remote.test")
+    assert calls == ["remote.test"]
+
+    # An overridden open_client (the test/deployment seam) skips the lookup.
+    client.open_client = lambda name: httpx.AsyncClient(base_url=f"https://{name}")
+    await client._resolve("other.test")
+    assert calls == ["remote.test"]
 
 
 def _doc(app: object) -> dict:

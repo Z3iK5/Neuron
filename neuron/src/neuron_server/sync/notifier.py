@@ -88,15 +88,12 @@ def build_notifier(settings: NeuronServerSettings, db: Database) -> Notifier:
     - ``inprocess`` (or any SQLite URL under ``auto``) -> :class:`StreamNotifier`.
     - ``pg`` / ``auto`` on a ``postgresql://`` URL -> a ``BroadcastNotifier`` over
       Postgres ``LISTEN/NOTIFY`` (no new dependency — ``asyncpg`` is already used).
-    - ``redis`` -> reserved for a later Redis transport; not yet available.
     """
     backend = settings.notifier_backend
     is_pg = settings.database_url.startswith(("postgresql://", "postgres://"))
 
     if backend == "inprocess":
         return StreamNotifier()
-    if backend == "redis":
-        raise ValueError("notifier_backend='redis' is not yet implemented")
     if backend == "pg" and not is_pg:
         raise ValueError("notifier_backend='pg' requires a postgresql:// database_url")
     if backend not in ("auto", "pg"):

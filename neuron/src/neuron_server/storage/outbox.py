@@ -25,17 +25,6 @@ async def enqueue(db: Database, destination: str, pdu: dict[str, Any]) -> int:
     return stream_id
 
 
-async def get_pending(db: Database, destination: str) -> list[tuple[int, dict[str, Any]]]:
-    """All queued rows for a destination, in order (regardless of lease). Read-only;
-    use :func:`claim_pending` to take ownership before sending."""
-    rows = await db.fetchall(
-        "SELECT stream_id, pdu_json FROM federation_outbox"
-        " WHERE destination = ? ORDER BY stream_id",
-        (destination,),
-    )
-    return [(int(stream_id), json.loads(str(pdu_json))) for stream_id, pdu_json in rows]
-
-
 async def claim_pending(
     db: Database, destination: str, owner: str, *, now_ms: int, lease_until_ms: int
 ) -> list[tuple[int, dict[str, Any]]]:

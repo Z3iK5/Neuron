@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import re
 import secrets
-import time
 from dataclasses import dataclass
 
+from neuron_server.clock import now_ms
 from neuron_server.errors import MatrixError
 from neuron_server.media.store import MediaStore
 from neuron_server.media.thumbnails import make_thumbnail
@@ -34,9 +34,6 @@ class MediaContent:
     content_type: str
     upload_name: str | None
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 class MediaService:
@@ -61,7 +58,7 @@ class MediaService:
         media_id = secrets.token_hex(16)
         await self._store.put(media_id, data)
         await store.create_media(
-            self._db, media_id, content_type, upload_name, len(data), uploader, _now_ms()
+            self._db, media_id, content_type, upload_name, len(data), uploader, now_ms()
         )
         return f"mxc://{self._server_name}/{media_id}"
 

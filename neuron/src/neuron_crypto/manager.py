@@ -18,11 +18,16 @@ crypto state (Olm sessions, received room keys) so a restart keeps it.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+import olm
 
 from neuron_crypto.base import DecryptResult
 from neuron_crypto.megolm import MegolmSessionStore
 from neuron_crypto.olm_device import OLM_ALGORITHM, OlmDevice
+
+log = logging.getLogger(__name__)
 
 
 class E2EEManager:
@@ -59,13 +64,18 @@ class E2EEManager:
             ours = (content.get("ciphertext") or {}).get(self.device.curve25519)
             if not isinstance(sender_key, str) or not isinstance(ours, dict):
                 continue
-            payload = self.device.decrypt_to_device(
-                sender_key, ours.get("type", 0), ours.get("body", "")
-            )
-            touched_device = True  # decrypting may have created an Olm session
-            if payload and payload.get("type") == "m.room_key":
-                if self.store.import_room_key(payload.get("content", {})) is not None:
-                    imported += 1
+            try:
+                payload = self.device.decrypt_to_device(
+                    sender_key, ours.get("type", 0), ours.get("body", "")
+                )
+                touched_device = True  # decrypting may have created an Olm session
+                if payload and payload.get("type") == "m.room_key":
+                    if self.store.import_room_key(payload.get("content", {})) is not None:
+                        imported += 1
+            except (olm.OlmSessionError, olm.OlmGroupSessionError) as exc:
+                # A malformed (or malicious) message must not crash the caller's
+                # sync loop — skip it and keep processing the rest of the batch.
+                log.warning("skipping undecryptable to-device message from %s: %s", sender_key, exc)
         if touched_device:
             self._persist_device()
         if imported:

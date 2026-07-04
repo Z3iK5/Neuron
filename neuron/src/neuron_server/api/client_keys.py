@@ -11,15 +11,13 @@ requires it); server-side key backup (``/room_keys``) is a separate follow-up.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from neuron_server.api.deps import require_user
+from neuron_server.api.deps import json_body, require_user
 from neuron_server.auth.service import Authenticated
 from neuron_server.e2ee.service import E2EEService
-from neuron_server.errors import MatrixError
 
 router = APIRouter(prefix="/_matrix/client")
 
@@ -29,26 +27,13 @@ def get_e2ee(request: Request) -> E2EEService:
     return service
 
 
-async def _json_body(request: Request) -> dict[str, Any]:
-    raw = await request.body()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        raise MatrixError(400, "M_NOT_JSON", "Request body is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise MatrixError(400, "M_BAD_JSON", "Request body must be a JSON object")
-    return data
-
-
 @router.post("/v3/keys/upload")
 async def keys_upload(
     request: Request,
     who: Authenticated = Depends(require_user),
     e2ee: E2EEService = Depends(get_e2ee),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     return await e2ee.upload_keys(who.user_id, who.device_id, body)
 
 
@@ -58,7 +43,7 @@ async def keys_query(
     who: Authenticated = Depends(require_user),
     e2ee: E2EEService = Depends(get_e2ee),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     return await e2ee.query_keys(body)
 
 
@@ -68,7 +53,7 @@ async def keys_claim(
     who: Authenticated = Depends(require_user),
     e2ee: E2EEService = Depends(get_e2ee),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     return await e2ee.claim_keys(body)
 
 
@@ -78,7 +63,7 @@ async def device_signing_upload(
     who: Authenticated = Depends(require_user),
     e2ee: E2EEService = Depends(get_e2ee),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     return await e2ee.upload_cross_signing_keys(who.user_id, body)
 
 
@@ -88,7 +73,7 @@ async def signatures_upload(
     who: Authenticated = Depends(require_user),
     e2ee: E2EEService = Depends(get_e2ee),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     return await e2ee.upload_signatures(body)
 
 
@@ -100,7 +85,7 @@ async def send_to_device(
     who: Authenticated = Depends(require_user),
     e2ee: E2EEService = Depends(get_e2ee),
 ) -> dict[str, Any]:
-    body = await _json_body(request)
+    body = await json_body(request)
     messages = body.get("messages")
     if isinstance(messages, dict):
         await e2ee.send_to_device(who.user_id, event_type, messages)

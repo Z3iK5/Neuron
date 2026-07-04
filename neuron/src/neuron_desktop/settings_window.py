@@ -15,13 +15,16 @@ return ``None`` — callers then fall back to non-interactive defaults.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from neuron_desktop import paths
 from neuron_desktop.config import DesktopConfig, validate_database_url
 
 if TYPE_CHECKING:
+    import tkinter as tk
+    from tkinter import ttk
+
     from neuron_desktop.setup import ExistingInstall
 
 # Server-name rule (mirrors neuron_server.doctor._check_server_name): no spaces/slashes.
@@ -86,6 +89,83 @@ def identity_committed(config: DesktopConfig) -> bool:
     return paths.database_path(config.data_path).exists()
 
 
+@dataclass
+class _Form:
+    """The entry variables of the shared settings form (plus the focus target)."""
+
+    name_var: tk.StringVar
+    host_var: tk.StringVar
+    port_var: tk.StringVar
+    db_var: tk.StringVar
+    pool_var: tk.StringVar
+    name_entry: ttk.Entry
+
+
+def _build_form(
+    parent: ttk.Frame,
+    config: DesktopConfig,
+    *,
+    intro: str,
+    db_note: str,
+    locked: bool = False,
+    db_note_pady: tuple[int, int] = (0, 10),
+) -> _Form:
+    """Lay out the settings form shared by the first-run wizard and the settings
+    window (rows 0-7: intro, server name, bind host/port, database, pool size).
+
+    ``locked`` disables the identity fields (server name and database backend) —
+    once the server has initialized under them they cannot change. Callers add
+    their own buttons (Continue vs Save/Cancel) in the rows below.
+    """
+    import tkinter as tk
+    from tkinter import ttk
+
+    ttk.Label(parent, text=intro, wraplength=380).grid(column=0, row=0, columnspan=2, pady=(0, 12))
+
+    ttk.Label(parent, text="Server name").grid(column=0, row=1, sticky="w")
+    name_var = tk.StringVar(value=config.server_name)
+    name_entry = ttk.Entry(parent, textvariable=name_var, width=32)
+    name_entry.grid(column=1, row=1, sticky="ew", pady=3)
+    if locked:
+        name_entry.state(["disabled"])
+    name_note = (
+        "Locked — the server has already started under this name."
+        if locked
+        else "Permanent once the server starts — it's built into every account, room "
+        "and message."
+    )
+    ttk.Label(parent, text=name_note, wraplength=380, foreground="#7C8896").grid(
+        column=0, row=2, columnspan=2, sticky="w", pady=(0, 10)
+    )
+
+    ttk.Label(parent, text="Bind host").grid(column=0, row=3, sticky="w")
+    host_var = tk.StringVar(value=config.bind_host)
+    ttk.Entry(parent, textvariable=host_var, width=32).grid(column=1, row=3, sticky="ew", pady=3)
+
+    ttk.Label(parent, text="Bind port").grid(column=0, row=4, sticky="w")
+    port_var = tk.StringVar(value=str(config.bind_port))
+    ttk.Entry(parent, textvariable=port_var, width=32).grid(column=1, row=4, sticky="ew", pady=3)
+
+    # Database backend — locked once the server has started under a backend (its data
+    # lives there), just like the server name.
+    ttk.Label(parent, text="Database").grid(column=0, row=5, sticky="w")
+    db_var = tk.StringVar(value=config.database_url)
+    db_entry = ttk.Entry(parent, textvariable=db_var, width=32)
+    db_entry.grid(column=1, row=5, sticky="ew", pady=3)
+    ttk.Label(parent, text="Pool size").grid(column=0, row=6, sticky="w")
+    pool_var = tk.StringVar(value=str(config.db_pool_size))
+    pool_entry = ttk.Entry(parent, textvariable=pool_var, width=32)
+    pool_entry.grid(column=1, row=6, sticky="ew", pady=3)
+    if locked:
+        db_entry.state(["disabled"])
+        pool_entry.state(["disabled"])
+    ttk.Label(parent, text=db_note, wraplength=380, foreground="#7C8896").grid(
+        column=0, row=7, columnspan=2, sticky="w", pady=db_note_pady
+    )
+
+    return _Form(name_var, host_var, port_var, db_var, pool_var, name_entry)
+
+
 def run_first_run_window(
     config: DesktopConfig,
     *,
@@ -113,41 +193,14 @@ def run_first_run_window(
     started = ttk.Frame(outer)
     settings.grid(column=0, row=0, sticky="nsew")
 
-    ttk.Label(
-        settings, text="Welcome to Neuron. Name your server before it starts.", wraplength=380
-    ).grid(column=0, row=0, columnspan=2, pady=(0, 12))
-    ttk.Label(settings, text="Server name").grid(column=0, row=1, sticky="w")
-    name_var = tk.StringVar(value=config.server_name)
-    name_entry = ttk.Entry(settings, textvariable=name_var, width=32)
-    name_entry.grid(column=1, row=1, sticky="ew", pady=3)
-    ttk.Label(
+    form = _build_form(
         settings,
-        text="Permanent once the server starts — it's built into every account, room "
-        "and message.",
-        wraplength=380,
-        foreground="#7C8896",
-    ).grid(column=0, row=2, columnspan=2, sticky="w", pady=(0, 10))
-    ttk.Label(settings, text="Bind host").grid(column=0, row=3, sticky="w")
-    host_var = tk.StringVar(value=config.bind_host)
-    ttk.Entry(settings, textvariable=host_var, width=32).grid(column=1, row=3, sticky="ew", pady=3)
-    ttk.Label(settings, text="Bind port").grid(column=0, row=4, sticky="w")
-    port_var = tk.StringVar(value=str(config.bind_port))
-    ttk.Entry(settings, textvariable=port_var, width=32).grid(column=1, row=4, sticky="ew", pady=3)
-
-    ttk.Label(settings, text="Database").grid(column=0, row=5, sticky="w")
-    db_var = tk.StringVar(value=config.database_url)
-    ttk.Entry(settings, textvariable=db_var, width=32).grid(column=1, row=5, sticky="ew", pady=3)
-    ttk.Label(settings, text="Pool size").grid(column=0, row=6, sticky="w")
-    pool_var = tk.StringVar(value=str(config.db_pool_size))
-    ttk.Entry(settings, textvariable=pool_var, width=32).grid(column=1, row=6, sticky="ew", pady=3)
-    ttk.Label(
-        settings,
-        text="Leave Database blank for the built-in SQLite (personal / small servers). For a "
+        config,
+        intro="Welcome to Neuron. Name your server before it starts.",
+        db_note="Leave Database blank for the built-in SQLite (personal / small servers). For a "
         "medium / large deployment enter a PostgreSQL URL "
         "(postgresql://user:pass@host:5432/neuron) and optionally raise the pool size.",
-        wraplength=380,
-        foreground="#7C8896",
-    ).grid(column=0, row=7, columnspan=2, sticky="w", pady=(0, 10))
+    )
 
     def _show_started(base_url: str) -> None:
         settings.grid_remove()
@@ -178,17 +231,17 @@ def run_first_run_window(
         )
 
     def _continue() -> None:
-        err = validate_server_name(name_var.get()) or validate_database_url(db_var.get())
+        err = validate_server_name(form.name_var.get()) or validate_database_url(form.db_var.get())
         if err:
             messagebox.showerror("Invalid setting", err)
             return
         updated = updated_config(
             config,
-            server_name=name_var.get(),
-            bind_host=host_var.get(),
-            bind_port=port_var.get(),
-            database_url=db_var.get(),
-            db_pool_size=pool_var.get(),
+            server_name=form.name_var.get(),
+            bind_host=form.host_var.get(),
+            bind_port=form.port_var.get(),
+            database_url=form.db_var.get(),
+            db_pool_size=form.pool_var.get(),
         )
         try:
             base_url = on_save(updated)
@@ -202,7 +255,7 @@ def run_first_run_window(
     ttk.Button(buttons, text="Continue", command=_continue).grid(column=0, row=0)
 
     root.protocol("WM_DELETE_WINDOW", root.destroy)
-    name_entry.focus_set()
+    form.name_entry.focus_set()
     root.mainloop()
 
 
@@ -231,53 +284,14 @@ def open_settings_window(
         if first_run
         else "Settings that apply when the server (re)starts."
     )
-    ttk.Label(frame, text=intro, wraplength=380).grid(column=0, row=0, columnspan=2, pady=(0, 12))
-
-    ttk.Label(frame, text="Server name").grid(column=0, row=1, sticky="w")
-    name_var = tk.StringVar(value=config.server_name)
-    name_entry = ttk.Entry(frame, textvariable=name_var, width=32)
-    name_entry.grid(column=1, row=1, sticky="ew", pady=3)
-    if name_locked:
-        name_entry.state(["disabled"])
-    note = (
-        "Permanent once the server starts — it's built into every account, room and "
-        "message."
-        if not name_locked
-        else "Locked — the server has already started under this name."
-    )
-    ttk.Label(frame, text=note, wraplength=380, foreground="#7C8896").grid(
-        column=0, row=2, columnspan=2, sticky="w", pady=(0, 10)
-    )
-
-    ttk.Label(frame, text="Bind host").grid(column=0, row=3, sticky="w")
-    host_var = tk.StringVar(value=config.bind_host)
-    ttk.Entry(frame, textvariable=host_var, width=32).grid(column=1, row=3, sticky="ew", pady=3)
-
-    ttk.Label(frame, text="Bind port").grid(column=0, row=4, sticky="w")
-    port_var = tk.StringVar(value=str(config.bind_port))
-    ttk.Entry(frame, textvariable=port_var, width=32).grid(column=1, row=4, sticky="ew", pady=3)
-
-    # Database backend — locked once the server has started under a backend (its data
-    # lives there), just like the server name.
-    ttk.Label(frame, text="Database").grid(column=0, row=5, sticky="w")
-    db_var = tk.StringVar(value=config.database_url)
-    db_entry = ttk.Entry(frame, textvariable=db_var, width=32)
-    db_entry.grid(column=1, row=5, sticky="ew", pady=3)
-    ttk.Label(frame, text="Pool size").grid(column=0, row=6, sticky="w")
-    pool_var = tk.StringVar(value=str(config.db_pool_size))
-    pool_entry = ttk.Entry(frame, textvariable=pool_var, width=32)
-    pool_entry.grid(column=1, row=6, sticky="ew", pady=3)
-    if name_locked:
-        db_entry.state(["disabled"])
-        pool_entry.state(["disabled"])
     db_note = (
         "Locked — the server has already started under this backend."
         if name_locked
         else "Blank = built-in SQLite (personal / small). PostgreSQL URL "
         "(postgresql://user:pass@host:5432/neuron) = medium / large."
     )
-    ttk.Label(frame, text=db_note, wraplength=380, foreground="#7C8896").grid(
-        column=0, row=7, columnspan=2, sticky="w", pady=(0, 6)
+    form = _build_form(
+        frame, config, intro=intro, db_note=db_note, locked=name_locked, db_note_pady=(0, 6)
     )
 
     ttk.Label(frame, text="Data folder").grid(column=0, row=8, sticky="w")
@@ -287,17 +301,19 @@ def open_settings_window(
 
     def _save() -> None:
         if not name_locked:
-            err = validate_server_name(name_var.get()) or validate_database_url(db_var.get())
+            err = validate_server_name(form.name_var.get()) or validate_database_url(
+                form.db_var.get()
+            )
             if err:
                 messagebox.showerror("Invalid setting", err)
                 return
         result["value"] = updated_config(
             config,
-            server_name=config.server_name if name_locked else name_var.get(),
-            bind_host=host_var.get(),
-            bind_port=port_var.get(),
-            database_url=config.database_url if name_locked else db_var.get(),
-            db_pool_size=config.db_pool_size if name_locked else pool_var.get(),
+            server_name=config.server_name if name_locked else form.name_var.get(),
+            bind_host=form.host_var.get(),
+            bind_port=form.port_var.get(),
+            database_url=config.database_url if name_locked else form.db_var.get(),
+            db_pool_size=config.db_pool_size if name_locked else form.pool_var.get(),
         )
         root.destroy()
 
@@ -311,7 +327,7 @@ def open_settings_window(
     ttk.Button(buttons, text="Save", command=_save).grid(column=1, row=0)
 
     root.protocol("WM_DELETE_WINDOW", _cancel)
-    name_entry.focus_set()
+    form.name_entry.focus_set()
     root.mainloop()
     return result["value"]
 

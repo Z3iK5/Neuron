@@ -519,3 +519,40 @@ async def test_uploader_like_escape_on_postgres() -> None:
         assert await media_store.count_media(db, uploader="%") == 0
     finally:
         await db.disconnect()
+
+
+async def test_concurrent_otk_claims_never_hand_out_same_key() -> None:
+    """claim_one_time_key must be atomic across pool connections: at READ COMMITTED
+    two concurrent claimers could both SELECT the same row with a select-then-delete,
+    handing the same one-time key to two peers. With the single DELETE ... RETURNING
+    claim, each uploaded key is handed out exactly once."""
+    from neuron_server.storage import e2ee as e2ee_store
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=8)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        user, device = "@alice:pg.test", "DEV"
+        n_keys = 5
+        await e2ee_store.store_one_time_keys(
+            db,
+            user,
+            device,
+            {f"signed_curve25519:K{i}": {"key": f"otk{i}"} for i in range(n_keys)},
+        )
+
+        async def claim() -> str | None:
+            # Mirrors the /keys/claim service, which wraps each claim in a
+            # transaction (its own pool connection here).
+            async with db.transaction():
+                key = await e2ee_store.claim_one_time_key(db, user, device, "signed_curve25519")
+            return next(iter(key)) if key else None
+
+        results = await asyncio.gather(*(claim() for _ in range(n_keys * 2)))
+        claimed = [k for k in results if k is not None]
+        # No fallback key uploaded, so every non-None result is an OTK: each key is
+        # handed out exactly once, and the surplus claimers get nothing.
+        assert sorted(claimed) == sorted(f"signed_curve25519:K{i}" for i in range(n_keys))
+    finally:
+        await db.disconnect()

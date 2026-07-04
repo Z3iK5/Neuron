@@ -73,10 +73,6 @@ class NeuronCoreSettings(BaseSettings):
         description="Log output format: 'json' (machine-readable) or 'console' (human).",
     )
 
-    def has_admin_token(self) -> bool:
-        """Return True if a non-empty admin token has been configured."""
-        return bool(self.homeserver_admin_token.get_secret_value())
-
     def mas_enabled(self) -> bool:
         """Return True if the homeserver delegates auth to MAS (MSC3861)."""
         return self.auth_mode.lower() == "mas"

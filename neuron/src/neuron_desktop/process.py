@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Protocol
 
 from neuron_desktop import paths
 from neuron_desktop.config import DesktopConfig
@@ -66,8 +66,6 @@ def config_to_env(config: DesktopConfig) -> dict[str, str]:
 class _Process(Protocol):
     """The subset of ``subprocess.Popen`` the supervisor relies on."""
 
-    pid: int
-
     def poll(self) -> int | None: ...
     def terminate(self) -> None: ...
     def kill(self) -> None: ...
@@ -98,17 +96,12 @@ class ServerProcess:
     def status(self) -> str:
         return "running" if self.is_running() else "stopped"
 
-    @property
-    def pid(self) -> int | None:
-        return self._process.pid if self._process is not None else None
-
     def start(self) -> None:
         """Start the server if it isn't already running."""
         if self.is_running():
             return
         env = {**os.environ, **config_to_env(self._config)}
-        kwargs: dict[str, Any] = {"env": env}
-        self._process = self._popen(self._command, **kwargs)
+        self._process = self._popen(self._command, env=env)
 
     def stop(self, timeout: float = 10.0) -> None:
         """Stop the server, escalating to kill if it doesn't exit in ``timeout``."""

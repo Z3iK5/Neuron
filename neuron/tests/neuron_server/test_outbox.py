@@ -14,6 +14,15 @@ from neuron_server.storage.migrations import run_migrations
 _DEST = "b.test"
 
 
+async def _pending_count(db: Database, destination: str) -> int:
+    """Rows queued for a destination regardless of lease (test-only peek)."""
+    return int(
+        await db.fetchval(
+            "SELECT COUNT(*) FROM federation_outbox WHERE destination = ?", (destination,)
+        )
+    )
+
+
 @pytest_asyncio.fixture
 async def db() -> AsyncIterator[Database]:
     database = connect_database("sqlite:///:memory:")
@@ -49,7 +58,7 @@ async def test_delete_removes_claimed_rows(db: Database) -> None:
         db, _DEST, "o", now_ms=1000, lease_until_ms=61000
     )
     await outbox_store.delete(db, [sid for sid, _ in claimed], "o")
-    assert await outbox_store.get_pending(db, _DEST) == []
+    assert await _pending_count(db, _DEST) == 0
 
 
 async def test_delete_release_are_owner_scoped(db: Database) -> None:
@@ -61,7 +70,7 @@ async def test_delete_release_are_owner_scoped(db: Database) -> None:
     # A stale owner can neither delete nor release a row it no longer holds.
     await outbox_store.delete(db, ids, "stale-owner")
     await outbox_store.release(db, ids, "stale-owner")
-    assert len(await outbox_store.get_pending(db, _DEST)) == 1  # untouched
+    assert await _pending_count(db, _DEST) == 1  # untouched
 
 
 async def test_release_allows_immediate_reclaim(db: Database) -> None:

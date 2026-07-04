@@ -12,11 +12,11 @@ room **we** host (a real leave, or rejecting an invite):
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Request
 
+from neuron_server.api.deps import json_body
 from neuron_server.errors import MatrixError
 from neuron_server.federation.request import authenticate_request
 from neuron_server.federation.validation import domain_of, validate_pdu
@@ -40,13 +40,7 @@ async def make_leave(room_id: str, user_id: str, request: Request) -> dict[str, 
 
 @router.put("/v2/send_leave/{room_id}/{event_id}")
 async def send_leave(room_id: str, event_id: str, request: Request) -> dict[str, Any]:
-    raw = await request.body()
-    try:
-        pdu = json.loads(raw) if raw else {}
-    except ValueError as exc:
-        raise MatrixError(400, "M_NOT_JSON", "Request body is not valid JSON") from exc
-    if not isinstance(pdu, dict):
-        raise MatrixError(400, "M_BAD_JSON", "Leave event must be a JSON object")
+    pdu = await json_body(request, message="Leave event must be a JSON object")
 
     origin = await authenticate_request(request, content=pdu)
     await validate_pdu(pdu, resolver=request.app.state.server_key_resolver)

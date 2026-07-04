@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import json
 import secrets
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from neuron_core import get_logger
+from neuron_server.clock import now_ms
 from neuron_server.crypto.event_hashing import add_hashes_and_signatures, compute_event_id
 from neuron_server.crypto.signing import SigningKey
 from neuron_server.errors import MatrixError
@@ -31,9 +31,6 @@ _logger = get_logger(__name__)
 
 _DEFAULT_HISTORY_VISIBILITY = "shared"
 
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 def _default_power_levels(creator: str) -> dict[str, Any]:
@@ -157,6 +154,13 @@ class RoomService:
         resolved = state_resolution.resolve([state_map], event_map)
         return {key: event_map[eid] for key, eid in resolved.items()}
 
+    async def _dag_position(self, room_id: str) -> tuple[list[str], int]:
+        """The ``prev_events`` and ``depth`` for a new event at the room's tip."""
+        extremity = await store.get_forward_extremity(self._db, room_id)
+        prev_events = [extremity.event_id] if extremity is not None else []
+        depth = (extremity.depth + 1) if extremity is not None else 1
+        return prev_events, depth
+
     async def _append(
         self,
         room_id: str,
@@ -176,9 +180,7 @@ class RoomService:
         reference-hash event ID, and signs the event with the server key.
         """
         stream = await store.next_stream_ordering(self._db)
-        extremity = await store.get_forward_extremity(self._db, room_id)
-        prev_events = [extremity.event_id] if extremity is not None else []
-        depth = (extremity.depth + 1) if extremity is not None else 1
+        prev_events, depth = await self._dag_position(room_id)
 
         state = {} if etype == "m.room.create" else await self._load_state(room_id)
         auth_events = authrules.select_auth_event_ids(etype, state_key, sender, content, state)
@@ -188,7 +190,7 @@ class RoomService:
             "type": etype,
             "sender": sender,
             "content": content,
-            "origin_server_ts": ts if ts is not None else _now_ms(),
+            "origin_server_ts": ts if ts is not None else now_ms(),
             "depth": depth,
             "prev_events": prev_events,
             "auth_events": auth_events,
@@ -252,7 +254,7 @@ class RoomService:
         join_rule = "public" if preset == "public_chat" else "invite"
 
         room_id = generate_room_id(self._server_name)
-        ts = _now_ms()
+        ts = now_ms()
         # A shadow-banned creator still gets their (private) room so they can't tell
         # they are banned, but their invites are dropped — otherwise the createRoom
         # invite list would be an open bypass of the invite shadow-ban.
@@ -335,7 +337,7 @@ class RoomService:
         state = await self._load_state(room_id)
         probe = Event(
             event_id="", room_id=room_id, type=etype, sender=sender, content=content,
-            origin_server_ts=_now_ms(), depth=0, stream_ordering=0,
+            origin_server_ts=now_ms(), depth=0, stream_ordering=0,
         )
         authrules.authorize(probe, state)
 
@@ -356,7 +358,7 @@ class RoomService:
         state = await self._load_state(room_id)
         probe = Event(
             event_id="", room_id=room_id, type=etype, sender=sender, content=content,
-            origin_server_ts=_now_ms(), depth=0, stream_ordering=0, state_key=state_key,
+            origin_server_ts=now_ms(), depth=0, stream_ordering=0, state_key=state_key,
         )
         authrules.authorize(probe, state)
         async with self._db.transaction():
@@ -385,7 +387,7 @@ class RoomService:
         state = await self._load_state(room_id)
         probe = Event(
             event_id="", room_id=room_id, type="m.room.member", sender=sender, content=content,
-            origin_server_ts=_now_ms(), depth=0, stream_ordering=0, state_key=target,
+            origin_server_ts=now_ms(), depth=0, stream_ordering=0, state_key=target,
         )
         authrules.authorize(probe, state)
 
@@ -457,7 +459,7 @@ class RoomService:
             raise MatrixError(403, "M_FORBIDDEN", "User is not in the room")
         # You may always redact your own event; otherwise you need the redact level.
         if sender != target.sender:
-            if authrules.power_level_for(state, sender) < _redact_level(state):
+            if authrules.power_level_for(state, sender) < authrules.named_level(state, "redact"):
                 raise MatrixError(403, "M_FORBIDDEN", "Insufficient power level to redact")
 
         # Room v11 (MSC2174) carries the redaction target inside ``content``.
@@ -502,7 +504,7 @@ class RoomService:
             return False
         if redactor == target.sender:
             return True
-        return authrules.power_level_for(state, redactor) >= _redact_level(state)
+        return authrules.power_level_for(state, redactor) >= authrules.named_level(state, "redact")
 
     # --- reads -------------------------------------------------------------
 
@@ -649,8 +651,10 @@ class RoomService:
         if purge:
             async with self._db.transaction():
                 await store.purge_room(self._db, room_id)
-        elif block:
-            await store.set_room_blocked(self._db, room_id, True, by=by, ts=_now_ms())
+        # Block and purge are independent (Synapse semantics): blocking after the
+        # purge, since purge_room clears the room's blocked_rooms row.
+        if block:
+            await store.set_room_blocked(self._db, room_id, True, by=by, ts=now_ms())
         self._wake_syncs()
         return {"kicked_users": kicked}
 
@@ -693,19 +697,20 @@ class RoomService:
 
     # --- federated membership (resident side: make_join / send_join) --------
 
-    async def make_join_template(self, room_id: str, user_id: str) -> dict[str, Any]:
-        """Build the unsigned join-event template a remote server completes."""
+    async def _membership_template(
+        self, room_id: str, user_id: str, membership: str
+    ) -> dict[str, Any]:
+        """Build the unsigned membership-event template a remote server completes."""
         room = await self._require_room(room_id)
         state = await self._load_state(room_id)
-        join_rules = state.get(("m.room.join_rules", ""))
-        join_rule = join_rules.content.get("join_rule") if join_rules else "invite"
-        if join_rule != "public" and authrules.membership_of(state, user_id) != "invite":
-            raise MatrixError(403, "M_FORBIDDEN", "Not invited and the room is not public")
+        if membership == "join":
+            join_rules = state.get(("m.room.join_rules", ""))
+            join_rule = join_rules.content.get("join_rule") if join_rules else "invite"
+            if join_rule != "public" and authrules.membership_of(state, user_id) != "invite":
+                raise MatrixError(403, "M_FORBIDDEN", "Not invited and the room is not public")
 
-        extremity = await store.get_forward_extremity(self._db, room_id)
-        prev_events = [extremity.event_id] if extremity is not None else []
-        depth = (extremity.depth + 1) if extremity is not None else 1
-        content = {"membership": "join"}
+        prev_events, depth = await self._dag_position(room_id)
+        content = {"membership": membership}
         auth_events = authrules.select_auth_event_ids(
             "m.room.member", user_id, user_id, content, state
         )
@@ -720,9 +725,13 @@ class RoomService:
                 "depth": depth,
                 "prev_events": prev_events,
                 "auth_events": auth_events,
-                "origin_server_ts": _now_ms(),
+                "origin_server_ts": now_ms(),
             },
         }
+
+    async def make_join_template(self, room_id: str, user_id: str) -> dict[str, Any]:
+        """Build the unsigned join-event template a remote server completes."""
+        return await self._membership_template(room_id, user_id, "join")
 
     async def apply_external_join(
         self, room_id: str, pdu: dict[str, Any]
@@ -735,6 +744,7 @@ class RoomService:
         sender = pdu.get("sender")
         if (
             pdu.get("type") != "m.room.member"
+            or pdu.get("room_id") != room_id
             or not isinstance(sender, str)
             or pdu.get("state_key") != sender
             or (pdu.get("content") or {}).get("membership") != "join"
@@ -743,24 +753,14 @@ class RoomService:
 
         event_id = compute_event_id(pdu)
         state = await self._load_state(room_id)
-        probe = Event(
-            event_id=event_id, room_id=room_id, type="m.room.member", sender=sender,
-            content=dict(pdu["content"]), origin_server_ts=int(pdu["origin_server_ts"]),
-            depth=int(pdu["depth"]), stream_ordering=0, state_key=sender,
-        )
-        authrules.authorize(probe, state)
+        authrules.authorize(Event.from_pdu(pdu, event_id, 0), state)
 
+        # A retried send_join re-delivers the same signed event; the insert guard
+        # keeps the endpoint idempotent instead of tripping the primary key.
         async with self._db.transaction():
-            stream = await store.next_stream_ordering(self._db)
-            event = Event(
-                event_id=event_id, room_id=room_id, type="m.room.member", sender=sender,
-                content=dict(pdu["content"]), origin_server_ts=int(pdu["origin_server_ts"]),
-                depth=int(pdu["depth"]), stream_ordering=stream, state_key=sender,
-                auth_events=list(pdu.get("auth_events", [])),
-                prev_events=list(pdu.get("prev_events", [])),
-                hashes=pdu.get("hashes"), signatures=pdu.get("signatures"),
-            )
-            await store.insert_event(self._db, event)
+            if await store.get_event(self._db, room_id, event_id) is None:
+                stream = await store.next_stream_ordering(self._db)
+                await store.insert_event(self._db, Event.from_pdu(pdu, event_id, stream))
             await store.update_current_state(self._db, room_id, "m.room.member", sender, event_id)
             await store.set_membership(self._db, room_id, sender, "join")
         self._wake_syncs()
@@ -774,29 +774,7 @@ class RoomService:
 
     async def make_leave_template(self, room_id: str, user_id: str) -> dict[str, Any]:
         """Build the unsigned leave-event template a remote server completes."""
-        room = await self._require_room(room_id)
-        state = await self._load_state(room_id)
-        extremity = await store.get_forward_extremity(self._db, room_id)
-        prev_events = [extremity.event_id] if extremity is not None else []
-        depth = (extremity.depth + 1) if extremity is not None else 1
-        content = {"membership": "leave"}
-        auth_events = authrules.select_auth_event_ids(
-            "m.room.member", user_id, user_id, content, state
-        )
-        return {
-            "room_version": room.room_version,
-            "event": {
-                "room_id": room_id,
-                "type": "m.room.member",
-                "sender": user_id,
-                "state_key": user_id,
-                "content": content,
-                "depth": depth,
-                "prev_events": prev_events,
-                "auth_events": auth_events,
-                "origin_server_ts": _now_ms(),
-            },
-        }
+        return await self._membership_template(room_id, user_id, "leave")
 
     async def apply_external_leave(self, room_id: str, pdu: dict[str, Any]) -> None:
         """Authorise and persist a remote server's signed leave event."""
@@ -804,6 +782,7 @@ class RoomService:
         sender = pdu.get("sender")
         if (
             pdu.get("type") != "m.room.member"
+            or pdu.get("room_id") != room_id
             or not isinstance(sender, str)
             or pdu.get("state_key") != sender
             or (pdu.get("content") or {}).get("membership") != "leave"
@@ -812,12 +791,7 @@ class RoomService:
 
         event_id = compute_event_id(pdu)
         state = await self._load_state(room_id)
-        probe = Event(
-            event_id=event_id, room_id=room_id, type="m.room.member", sender=sender,
-            content=dict(pdu["content"]), origin_server_ts=int(pdu["origin_server_ts"]),
-            depth=int(pdu["depth"]), stream_ordering=0, state_key=sender,
-        )
-        authrules.authorize(probe, state)
+        authrules.authorize(Event.from_pdu(pdu, event_id, 0), state)
 
         async with self._db.transaction():
             if await store.get_event(self._db, room_id, event_id) is None:
@@ -866,14 +840,12 @@ class RoomService:
         content = {"membership": "invite"}
         probe = Event(
             event_id="", room_id=room_id, type="m.room.member", sender=sender,
-            content=content, origin_server_ts=_now_ms(), depth=0, stream_ordering=0,
+            content=content, origin_server_ts=now_ms(), depth=0, stream_ordering=0,
             state_key=target,
         )
         authrules.authorize(probe, state)
 
-        extremity = await store.get_forward_extremity(self._db, room_id)
-        prev_events = [extremity.event_id] if extremity is not None else []
-        depth = (extremity.depth + 1) if extremity is not None else 1
+        prev_events, depth = await self._dag_position(room_id)
         auth_events = authrules.select_auth_event_ids(
             "m.room.member", target, sender, content, state
         )
@@ -886,7 +858,7 @@ class RoomService:
             "depth": depth,
             "prev_events": prev_events,
             "auth_events": auth_events,
-            "origin_server_ts": _now_ms(),
+            "origin_server_ts": now_ms(),
         }
         pdu = add_hashes_and_signatures(
             pdu, server_name=self._server_name, signing_key=self._signing_key
@@ -960,10 +932,3 @@ class RoomService:
             await store.set_membership(self._db, room_id, target, "invite")
         self._wake_syncs()
         return event_id
-
-
-def _redact_level(state: AuthState) -> int:
-    pl = state.get(("m.room.power_levels", ""))
-    if pl is None or "redact" not in pl.content:
-        return 50
-    return int(pl.content["redact"])

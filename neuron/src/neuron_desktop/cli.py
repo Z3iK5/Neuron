@@ -12,8 +12,6 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -24,19 +22,6 @@ from neuron_desktop import paths, setup, supervisor
 # Internal command used when the (possibly frozen) app re-execs itself to run the
 # homeserver child process. Not part of the public CLI surface.
 _SERVER_COMMAND = "_server"
-
-
-def _reveal(path: Path) -> None:
-    """Best-effort: open a file in the OS default handler. Never raises."""
-    try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
-        elif sys.platform.startswith("win"):
-            os.startfile(str(path))  # type: ignore[attr-defined]
-        else:
-            subprocess.Popen(["xdg-open", str(path)])
-    except Exception:
-        pass
 
 
 def _configured(base: Path) -> config_module.DesktopConfig:
@@ -59,7 +44,7 @@ def _configured(base: Path) -> config_module.DesktopConfig:
     fresh = setup.is_first_run(base)
     config = setup.load_or_create(base)
     if fresh and setup.welcome_path(base).exists():
-        _reveal(setup.welcome_path(base))
+        paths.reveal(setup.welcome_path(base))
     return config
 
 

@@ -52,9 +52,9 @@ def test_build_notifier_pg_backend_requires_postgres() -> None:
         build_notifier(_settings(_SQLITE, backend="pg"), db)
 
 
-def test_build_notifier_rejects_unknown_and_redis() -> None:
+def test_build_notifier_rejects_unknown_backend() -> None:
     db = connect_database(_SQLITE)
-    with pytest.raises(ValueError, match="redis"):
+    with pytest.raises(ValueError, match="unknown notifier_backend"):
         build_notifier(_settings(_SQLITE, backend="redis"), db)
     with pytest.raises(ValueError, match="unknown notifier_backend"):
         build_notifier(_settings(_SQLITE, backend="bogus"), db)

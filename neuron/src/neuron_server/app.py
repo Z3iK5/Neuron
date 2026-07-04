@@ -164,7 +164,6 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         flusher = RetryFlusher(
             app.state.federation_sender.retry_all, settings.federation_retry_interval_s
         )
-        app.state.retry_flusher = flusher
         # Multi-writer stream-position heartbeat (Postgres only): advances an idle
         # worker's stored positions to the committed max so it stops holding the
         # shared /sync floor back. No-op/pointless for SQLite's single instance.

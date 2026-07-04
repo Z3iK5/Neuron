@@ -83,6 +83,66 @@ def test_full_automatic_pipeline() -> None:
     assert result.content == {"body": "now visible"}
 
 
+def test_malformed_to_device_messages_are_skipped_not_raised() -> None:
+    """Garbage to-device events must not raise (regression: a single malformed
+    message would otherwise propagate an olm error and wedge the auditor's sync
+    loop forever, since the /sync token is only saved after handling)."""
+    bot = OlmDevice("@bot:hs", "BOTDEV")
+    bot.account.generate_one_time_keys(1)
+    otk = next(iter(bot.account.one_time_keys["curve25519"].values()))
+    bot.account.mark_keys_as_published()
+    manager = E2EEManager(bot)
+
+    # A pre-key message whose body isn't valid base64 raises deep in olm.
+    garbage_prekey = {
+        "type": "m.room.encrypted",
+        "sender": "@evil:hs",
+        "content": {
+            "algorithm": OLM_ALGORITHM,
+            "sender_key": "SOMESENDERKEY",
+            "ciphertext": {bot.curve25519: {"type": 0, "body": "not base64 !!!"}},
+        },
+    }
+
+    # A well-formed Olm message carrying an m.room_key with a garbage session_key.
+    sender = olm.Account()
+    bad_room_key = {
+        "type": "m.room_key",
+        "content": {
+            "algorithm": MEGOLM_ALGORITHM,
+            "room_id": "!r:hs",
+            "session_id": "whatever",
+            "session_key": "garbage session key !!!",
+        },
+    }
+    bad_key_event = _olm_to_device_event(sender, bot.curve25519, otk, bad_room_key)
+
+    # A good key after the bad ones — the batch must keep being processed.
+    good_sender = olm.Account()
+    bot.account.generate_one_time_keys(1)
+    otk2 = next(iter(bot.account.one_time_keys["curve25519"].values()))
+    bot.account.mark_keys_as_published()
+    group = olm.OutboundGroupSession()
+    good_event = _olm_to_device_event(
+        good_sender,
+        bot.curve25519,
+        otk2,
+        {
+            "type": "m.room_key",
+            "content": {
+                "algorithm": MEGOLM_ALGORITHM,
+                "room_id": "!r:hs",
+                "session_id": group.id,
+                "session_key": group.session_key,
+            },
+        },
+    )
+
+    imported = manager.handle_to_device([garbage_prekey, bad_key_event, good_event])
+    assert imported == 1  # only the good key; the malformed events were skipped
+    assert manager.decrypt(_megolm_room_event(group, "still works")).decrypted is True
+
+
 def test_device_keys_are_signed() -> None:
     bot = OlmDevice("@bot:hs", "BOTDEV")
     keys = bot.device_keys()

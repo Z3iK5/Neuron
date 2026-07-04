@@ -41,16 +41,6 @@ async def test_kick_sends_user_and_reason() -> None:
         await bot.kick(ROOM, "@bad:hs.test", reason="spam")
 
 
-async def test_redact_event_returns_event_id() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "PUT"
-        assert request.url.path.startswith(f"/_matrix/client/v3/rooms/{ROOM}/redact/$evt/")
-        return httpx.Response(200, json={"event_id": "$redaction"})
-
-    async with _client(handler) as bot:
-        assert await bot.redact_event(ROOM, "$evt", reason="cleanup") == "$redaction"
-
-
 async def test_error_raises_matrix_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"errcode": "M_FORBIDDEN", "error": "no"})

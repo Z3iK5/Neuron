@@ -28,7 +28,6 @@ import olm
 from neuron_crypto.signing import canonical_json
 
 _NAMES = ("master", "self_signing", "user_signing")
-_USAGE = {"master": "master", "self_signing": "self_signing", "user_signing": "user_signing"}
 
 
 class CrossSigning:
@@ -47,7 +46,7 @@ class CrossSigning:
         pub = self._public(name)
         return {
             "user_id": self.user_id,
-            "usage": [_USAGE[name]],
+            "usage": [name],
             "keys": {f"ed25519:{pub}": pub},
         }
 

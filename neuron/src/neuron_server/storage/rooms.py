@@ -97,11 +97,6 @@ async def next_depth(db: Database, room_id: str) -> int:
     return int(value)
 
 
-async def get_max_stream_ordering(db: Database) -> int:
-    value = await db.fetchval("SELECT COALESCE(MAX(stream_ordering), 0) FROM events")
-    return int(value)
-
-
 async def get_recent_events(db: Database, room_id: str, limit: int) -> list[Event]:
     """Return the most recent ``limit`` events in a room, ascending by ordering."""
     rows = await db.fetchall(
@@ -110,19 +105,6 @@ async def get_recent_events(db: Database, room_id: str, limit: int) -> list[Even
         (room_id, limit),
     )
     return [_row_to_event(row) for row in reversed(rows)]
-
-
-async def get_events_after(
-    db: Database, room_id: str, after_ordering: int, limit: int
-) -> list[Event]:
-    """Return events with ordering greater than ``after_ordering`` (ascending)."""
-    rows = await db.fetchall(
-        f"SELECT {_EVENT_COLUMNS} FROM events"
-        " WHERE room_id = ? AND stream_ordering > ?"
-        " ORDER BY stream_ordering ASC LIMIT ?",
-        (room_id, after_ordering, limit),
-    )
-    return [_row_to_event(row) for row in rows]
 
 
 async def insert_event(db: Database, event: Event) -> None:

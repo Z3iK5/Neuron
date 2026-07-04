@@ -22,7 +22,6 @@ from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
 from neuron_server.crypto.event_hashing import compute_event_id
 from neuron_server.federation.sender import FederationSender
-from neuron_server.storage import outbox as outbox_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 
@@ -66,6 +65,15 @@ def _auth(token: str) -> dict[str, str]:
 async def _membership(db: Database, room_id: str, user_id: str) -> str | None:
     event = await store.get_state_event(db, room_id, "m.room.member", user_id)
     return event.content.get("membership") if event is not None else None
+
+
+async def _outbox_count(db: Database, destination: str) -> int:
+    """Rows queued for a destination (test-only peek at the outbox table)."""
+    return int(
+        await db.fetchval(
+            "SELECT COUNT(*) FROM federation_outbox WHERE destination = ?", (destination,)
+        )
+    )
 
 
 @dataclass
@@ -327,14 +335,14 @@ async def test_moderation_is_best_effort_then_retried(tmp_path: Path) -> None:
         )
         assert r.status_code == 200, r.text  # local action unaffected
         assert await _membership(net.db_a, room, "@carol:b.test") == "ban"
-        assert await outbox_store.get_pending(net.db_a, "b.test")  # queued
+        assert await _outbox_count(net.db_a, "b.test") > 0  # queued
 
         # B comes back; retry flushes the ban to it.
         net.app_a.state.federation_client.open_client = _opener(net.app_b)
         await net.app_a.state.federation_sender.retry("b.test")
 
         assert await _membership(net.db_b, room, "@carol:b.test") == "ban"
-        assert not await outbox_store.get_pending(net.db_a, "b.test")  # drained
+        assert await _outbox_count(net.db_a, "b.test") == 0  # drained
 
 
 # --- sender unit -----------------------------------------------------------
@@ -511,7 +519,7 @@ async def test_delete_room_with_remote_creator_is_local_only(tmp_path: Path) -> 
         # A's copy is gone; B is untouched (no forged kick reached it).
         assert await store.get_room(net.db_a, room) is None
         assert "@bob:b.test" in await store.get_joined_members(net.db_b, room)
-        assert not await outbox_store.get_pending(net.db_a, "b.test")
+        assert await _outbox_count(net.db_a, "b.test") == 0
 
 
 async def test_apply_remote_event_with_state_res_v2_flag(tmp_path: Path) -> None:

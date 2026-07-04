@@ -12,20 +12,16 @@ device endpoints).
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Any
 
 from neuron_server.auth import ids
 from neuron_server.auth.passwords import hash_password, verify_password
 from neuron_server.auth.uia import UiaSessionStore
+from neuron_server.clock import now_ms
 from neuron_server.errors import MatrixError
 from neuron_server.storage import accounts
 from neuron_server.storage.database import Database
-
-
-def _now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 @dataclass(frozen=True)
@@ -34,7 +30,6 @@ class Authenticated:
 
     user_id: str
     device_id: str
-    token: str
 
 
 @dataclass(frozen=True)
@@ -127,7 +122,7 @@ class AuthService:
             raise MatrixError(400, "M_USER_IN_USE", "Desired user ID is already taken.")
 
         password_hash = hash_password(password)
-        created_ts = _now_ms()
+        created_ts = now_ms()
         new_device_id = device_id or ids.generate_device_id()
         token = ids.generate_access_token()
 
@@ -170,7 +165,7 @@ class AuthService:
         if row.deactivated:
             raise MatrixError(403, "M_USER_DEACTIVATED", "This account has been deactivated")
 
-        created_ts = _now_ms()
+        created_ts = now_ms()
         token = ids.generate_access_token()
 
         reuse = False
@@ -201,7 +196,7 @@ class AuthService:
         row = await accounts.get_token(self._db, token)
         if row is None:
             return None
-        return Authenticated(user_id=row[0], device_id=row[1], token=token)
+        return Authenticated(user_id=row[0], device_id=row[1])
 
     async def logout(self, auth: Authenticated) -> None:
         """Invalidate this token and delete its device (per the spec)."""

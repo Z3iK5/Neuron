@@ -57,7 +57,3 @@ async def get_room_receipts(db: Database, room_id: str) -> list[Receipt]:
         )
         for user_id, receipt_type, event_id, ts, stream_id in rows
     ]
-
-
-async def max_receipt_stream(db: Database) -> int:
-    return int(await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) FROM receipts"))

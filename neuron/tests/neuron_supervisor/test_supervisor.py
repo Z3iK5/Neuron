@@ -33,10 +33,6 @@ class FakeAdmin:
             raise AdminApiError(403, errcode="M_FORBIDDEN", message="nope")
         return {}
 
-    async def redact_user_events(self, user_id: str, *, rooms: Any = None) -> str:
-        self.calls.append(("redact_user_events", user_id, rooms))
-        return "red-1"
-
 
 class FakeBot:
     def __init__(self) -> None:
@@ -86,13 +82,6 @@ async def test_kick_uses_bot() -> None:
     sup = Supervisor(FakeAdmin(), BOT, bot=bot)  # type: ignore[arg-type]
     await sup.kick("!a:hs.test", "@bad:hs.test", reason="spam")
     assert bot.calls == [("kick", "!a:hs.test", "@bad:hs.test", "spam")]
-
-
-async def test_redact_user_uses_admin_api() -> None:
-    admin = FakeAdmin()
-    sup = Supervisor(admin, BOT)  # type: ignore[arg-type]
-    assert await sup.redact_user("@bad:hs.test") == "red-1"
-    assert ("redact_user_events", "@bad:hs.test", None) in admin.calls
 
 
 async def test_promotion_without_bot_user_id_fails() -> None:

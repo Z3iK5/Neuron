@@ -8,8 +8,8 @@ driven two ways:
 - by the **background loop** in ``__main__`` (periodically re-promote the bot so
   it stays admin in newly created rooms — poll-based detection for this phase).
 
-It uses the Admin API client for server-side actions (``make_room_admin``,
-redaction) and the Client-Server API client to act *as the bot* (kick/ban).
+It uses the Admin API client for server-side actions (``make_room_admin``) and
+the Client-Server API client to act *as the bot* (kick/ban).
 """
 
 from __future__ import annotations
@@ -44,10 +44,6 @@ class Supervisor:
         self.admin = admin
         self.bot_user_id = bot_user_id
         self.bot = bot
-
-    @property
-    def bot_configured(self) -> bool:
-        return self.bot is not None
 
     def _require_bot(self) -> MatrixClient:
         if self.bot is None:
@@ -109,7 +105,3 @@ class Supervisor:
     async def ban(self, room_id: str, user_id: str, *, reason: str | None = None) -> dict[str, Any]:
         """Ban a user from a room (acts as the bot; bot must be admin there)."""
         return await self._require_bot().ban(room_id, user_id, reason=reason)
-
-    async def redact_user(self, user_id: str, *, rooms: list[str] | None = None) -> str:
-        """Redact a user's messages (server-side via the Admin API). Returns a redact_id."""
-        return await self.admin.redact_user_events(user_id, rooms=rooms)

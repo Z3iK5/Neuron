@@ -49,20 +49,6 @@ async def store_invite(
     return stream_id
 
 
-async def get_invite(db: Database, user_id: str, room_id: str) -> dict[str, Any] | None:
-    rows = await db.fetchall(
-        "SELECT event_json, invite_state_json FROM federated_invites"
-        " WHERE user_id = ? AND room_id = ?",
-        (user_id, room_id),
-    )
-    if not rows:
-        return None
-    return {
-        "event": json.loads(str(rows[0][0])),
-        "invite_state": json.loads(str(rows[0][1])),
-    }
-
-
 async def list_pending_invites(db: Database, user_id: str) -> list[PendingInvite]:
     rows = await db.fetchall(
         "SELECT room_id, event_json, invite_state_json, stream_id"

@@ -10,8 +10,17 @@ from neuron_server.config import NeuronServerSettings
 from neuron_server.federation.flusher import RetryFlusher
 from neuron_server.federation.sender import FederationSender
 from neuron_server.storage import outbox as outbox_store
-from neuron_server.storage.database import connect_database
+from neuron_server.storage.database import Database, connect_database
 from neuron_server.storage.migrations import run_migrations
+
+
+async def _outbox_count(db: Database, destination: str) -> int:
+    """Rows queued for a destination (test-only peek at the outbox table)."""
+    return int(
+        await db.fetchval(
+            "SELECT COUNT(*) FROM federation_outbox WHERE destination = ?", (destination,)
+        )
+    )
 
 
 async def _wait_until(predicate, timeout: float = 2.0) -> bool:
@@ -79,8 +88,8 @@ async def test_retry_all_drains_every_destination(tmp_path: Path) -> None:
         await sender.retry_all()
 
         assert set(client.sent) == {"b.test", "c.test"}
-        assert not await outbox_store.get_pending(db, "b.test")
-        assert not await outbox_store.get_pending(db, "c.test")
+        assert await _outbox_count(db, "b.test") == 0
+        assert await _outbox_count(db, "c.test") == 0
     finally:
         await db.disconnect()
 

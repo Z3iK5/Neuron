@@ -112,7 +112,8 @@ def power_level_for(state: AuthState, user_id: str) -> int:
     return int(pl.get("users_default", 0))
 
 
-def _named_level(state: AuthState, key: str) -> int:
+def named_level(state: AuthState, key: str) -> int:
+    """The room's action level (e.g. ``kick``/``ban``/``redact``), with spec defaults."""
     pl = _power_levels(state)
     if pl is None or key not in pl:
         return _DEFAULTS[key]
@@ -180,7 +181,7 @@ def _authorize_membership(event: Event, state: AuthState) -> None:
             raise _forbidden("Inviter is not in the room")
         if target_membership in ("join", "ban"):
             raise _forbidden("User is already joined or banned")
-        if power_level_for(state, sender) < _named_level(state, "invite"):
+        if power_level_for(state, sender) < named_level(state, "invite"):
             raise _forbidden("Insufficient power level to invite")
         return
 
@@ -192,7 +193,12 @@ def _authorize_membership(event: Event, state: AuthState) -> None:
         # Kicking another user.
         if sender_membership != "join":
             raise _forbidden("Kicker is not in the room")
-        if power_level_for(state, sender) < _named_level(state, "kick"):
+        # Lifting a ban additionally requires the ban level (room v11 auth rules).
+        if target_membership == "ban" and power_level_for(state, sender) < named_level(
+            state, "ban"
+        ):
+            raise _forbidden("Insufficient power level to unban")
+        if power_level_for(state, sender) < named_level(state, "kick"):
             raise _forbidden("Insufficient power level to kick")
         if power_level_for(state, target) >= power_level_for(state, sender):
             raise _forbidden("Cannot kick a user with an equal or higher power level")
@@ -201,7 +207,7 @@ def _authorize_membership(event: Event, state: AuthState) -> None:
     if membership == "ban":
         if sender_membership != "join":
             raise _forbidden("Banner is not in the room")
-        if power_level_for(state, sender) < _named_level(state, "ban"):
+        if power_level_for(state, sender) < named_level(state, "ban"):
             raise _forbidden("Insufficient power level to ban")
         if power_level_for(state, target) >= power_level_for(state, sender):
             raise _forbidden("Cannot ban a user with an equal or higher power level")
@@ -216,8 +222,8 @@ def _required_level(event: Event, state: AuthState) -> int:
     if event.type in events_map:
         return int(events_map[event.type])
     if event.is_state:
-        return _named_level(state, "state_default")
-    return _named_level(state, "events_default")
+        return named_level(state, "state_default")
+    return named_level(state, "events_default")
 
 
 def _authorize_power_levels(event: Event, state: AuthState) -> None:
@@ -232,10 +238,7 @@ def _authorize_power_levels(event: Event, state: AuthState) -> None:
         _check_level_change(key, old.get(key), new.get(key), sender_level)
 
     _check_mapping_changes(old.get("events", {}), new.get("events", {}), sender_level)
-    _check_mapping_changes(
-        old.get("users", {}), new.get("users", {}), sender_level, is_users=True,
-        sender=event.sender,
-    )
+    _check_mapping_changes(old.get("users", {}), new.get("users", {}), sender_level)
 
 
 def _check_level_change(
@@ -249,12 +252,7 @@ def _check_level_change(
 
 
 def _check_mapping_changes(
-    old_map: dict[str, Any],
-    new_map: dict[str, Any],
-    sender_level: int,
-    *,
-    is_users: bool = False,
-    sender: str | None = None,
+    old_map: dict[str, Any], new_map: dict[str, Any], sender_level: int
 ) -> None:
     for key in set(old_map) | set(new_map):
         old_value = old_map.get(key)

@@ -4,20 +4,12 @@
 from __future__ import annotations
 
 from pydantic import Field, SecretStr
-from pydantic_settings import SettingsConfigDict
 
 from neuron_core.config import NeuronCoreSettings
 
 
 class AuditorSettings(NeuronCoreSettings):
     """Settings for neuron-auditor (inherits homeserver connection + logging)."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="NEURON_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
 
     # The audit bot's own access token (Client-Server API).
     auditor_bot_token: SecretStr = Field(

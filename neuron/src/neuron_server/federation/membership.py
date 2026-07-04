@@ -20,7 +20,12 @@ from neuron_server.crypto.event_hashing import add_hashes_and_signatures, comput
 from neuron_server.crypto.signing import SigningKey
 from neuron_server.errors import MatrixError
 from neuron_server.federation.client import FederationClient
-from neuron_server.federation.validation import KeyResolver, PduValidationError, validate_pdu
+from neuron_server.federation.validation import (
+    KeyResolver,
+    PduValidationError,
+    domain_of,
+    validate_pdu,
+)
 from neuron_server.rooms import versions
 from neuron_server.rooms.events import Event
 from neuron_server.storage import invites as invite_store
@@ -28,10 +33,6 @@ from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 
 _logger = get_logger(__name__)
-
-
-def _domain_of(identifier: str) -> str:
-    return identifier.split(":", 1)[1] if ":" in identifier else identifier
 
 
 class FederatedMembership:
@@ -57,18 +58,28 @@ class FederatedMembership:
 
     async def join(self, room_id: str, user_id: str, via: list[str]) -> str:
         """Join ``user_id`` to a remote ``room_id`` via one of the ``via`` servers."""
-        candidates = via or [_domain_of(room_id)]
+        return await self._attempt_via(room_id, user_id, via, self._join_via, "join")
+
+    async def _attempt_via(
+        self,
+        room_id: str,
+        user_id: str,
+        via: list[str],
+        action: Callable[[str, str, str], Awaitable[str]],
+        verb: str,
+    ) -> str:
+        candidates = via or [domain_of(room_id)]
         last_error: Exception | None = None
         for server in candidates:
             if server == self._server_name:
                 continue
             try:
-                return await self._join_via(server, room_id, user_id)
+                return await action(server, room_id, user_id)
             except Exception as exc:  # try the next resident server
-                _logger.warning("federated join via %s failed: %s", server, exc)
+                _logger.warning("federated %s via %s failed: %s", verb, server, exc)
                 last_error = exc
         raise MatrixError(
-            502, "M_UNKNOWN", f"Could not join {room_id} over federation: {last_error}"
+            502, "M_UNKNOWN", f"Could not {verb} {room_id} over federation: {last_error}"
         )
 
     async def _join_via(self, server: str, room_id: str, user_id: str) -> str:
@@ -135,19 +146,7 @@ class FederatedMembership:
 
     async def leave(self, room_id: str, user_id: str, via: list[str]) -> str:
         """Leave a remote ``room_id`` (via one of the ``via`` servers)."""
-        candidates = via or [_domain_of(room_id)]
-        last_error: Exception | None = None
-        for server in candidates:
-            if server == self._server_name:
-                continue
-            try:
-                return await self._leave_via(server, room_id, user_id)
-            except Exception as exc:
-                _logger.warning("federated leave via %s failed: %s", server, exc)
-                last_error = exc
-        raise MatrixError(
-            502, "M_UNKNOWN", f"Could not leave {room_id} over federation: {last_error}"
-        )
+        return await self._attempt_via(room_id, user_id, via, self._leave_via, "leave")
 
     async def _leave_via(self, server: str, room_id: str, user_id: str) -> str:
         make = await self._client.get_json(

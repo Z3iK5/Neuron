@@ -30,6 +30,38 @@ def test_canonical_json_sorts_keys_without_whitespace() -> None:
     assert canonical_json({"z": {"y": 1, "x": 2}}) == b'{"z":{"x":2,"y":1}}'
 
 
+def test_canonical_json_matches_neuron_crypto_implementation() -> None:
+    """The two canonical-JSON implementations must never silently diverge.
+
+    ``neuron_crypto.signing.canonical_json`` (client-side E2EE) and this module's
+    (federation signing) are deliberately separate — ``neuron_crypto`` has no
+    dependency on ``neuron_server``, strips ``signatures``/``unsigned`` itself and
+    returns ``str`` — but the *encoding* they produce is signature-critical Matrix
+    canonical JSON and must be byte-identical on the shared domain.
+    """
+    from neuron_crypto.signing import canonical_json as crypto_canonical_json
+
+    corpus: list[dict] = [
+        {},
+        {"b": 1, "a": 2},
+        {"z": {"y": [1, 2, {"n": None, "t": True, "f": False}], "x": 2}},
+        {"unicode": "\u65e5\u672c\u8a9e h\u00e9llo \u2713 \u0080 \u07ff", "emoji": "\U0001f510"},
+        {"escapes": "quote \" backslash \\ newline \n tab \t nul \u0000 ctrl \u001f"},
+        {"ints": [0, -1, 9007199254740991, -9007199254740991]},
+        {"empty_str": "", "empty_list": [], "empty_obj": {}},
+        {"1": "digit-key", "A": "upper", "a": "lower", "_": "underscore"},
+    ]
+    for obj in corpus:
+        assert canonical_json(obj) == crypto_canonical_json(obj).encode("utf-8"), obj
+
+    # Documented divergence: neuron_crypto strips signatures/unsigned itself,
+    # neuron_server's callers strip before calling (signature_base) or must NOT
+    # strip at all (PDU size limits, event hashing of redacted events).
+    tagged = {"a": 1, "signatures": {"hs": {"k": "sig"}}, "unsigned": {"age": 5}}
+    assert crypto_canonical_json(tagged) == crypto_canonical_json({"a": 1})
+    assert canonical_json(tagged) != canonical_json({"a": 1})
+
+
 def test_signing_key_serialize_parse_roundtrip() -> None:
     key = generate_signing_key("a_test1")
     restored = parse_signing_key(key.serialize())

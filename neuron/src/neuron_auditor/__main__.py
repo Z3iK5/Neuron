@@ -84,7 +84,13 @@ async def _build_decryptor(client: MatrixClient, settings: AuditorSettings) -> D
         if settings.auditor_e2e_key_file:
             store.import_key_file(settings.auditor_e2e_key_file)
         log.info("e2ee enabled (automatic key receipt)", extra={"device_id": device_id})
-        return E2EEManager(device, store, device_path=device_path, store_path=store_path)
+        return E2EEManager(
+            device,
+            store,
+            device_path=device_path,
+            store_path=store_path,
+            otk_target=settings.auditor_e2e_one_time_keys,
+        )
 
     if settings.auditor_e2e_key_file:
         # Import-only: decrypt rooms whose keys are provided in a key file.

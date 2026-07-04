@@ -101,3 +101,17 @@ def test_typing_and_receipts_accepted(tmp_path: Path) -> None:
         assert client.post(
             f"{_B}/rooms/!r:neuron.local/receipt/m.read/$abc", headers=_h(token), json={}
         ).status_code == 200
+
+
+def test_typing_rejects_non_integer_timeout(tmp_path: Path) -> None:
+    """A malformed timeout must produce a spec-shaped 400, not an unhandled 500."""
+    with _client(tmp_path) as client:
+        token, user_id = _register(client, "alice")
+        for bad_timeout in ("abc", None, [1], {"ms": 5}):
+            resp = client.put(
+                f"{_B}/rooms/!r:neuron.local/typing/{user_id}",
+                headers=_h(token),
+                json={"typing": True, "timeout": bad_timeout},
+            )
+            assert resp.status_code == 400
+            assert resp.json()["errcode"] == "M_INVALID_PARAM"

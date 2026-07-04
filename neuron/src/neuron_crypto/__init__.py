@@ -9,8 +9,8 @@ message if it holds the inbound session for that message's ``session_id``.
 
 This package provides:
 
-- ``Decryptor`` / ``DecryptResult`` / ``NullDecryptor`` (in ``base`` — no libolm
-  dependency), so services can depend on the *interface* without the E2EE extra.
+- ``Decryptor`` / ``DecryptResult`` (in ``base`` — no libolm dependency), so
+  services can depend on the *interface* without the E2EE extra.
 - ``MegolmSessionStore`` / ``MegolmDecryptor`` (in ``megolm`` — requires libolm
   via the ``e2e`` extra), which actually decrypt Megolm events given the keys.
 
@@ -21,6 +21,6 @@ the bot was a trusted member cannot be read unless their keys are imported
 recorded as envelopes, never silently dropped.
 """
 
-from neuron_crypto.base import Decryptor, DecryptResult, NullDecryptor
+from neuron_crypto.base import Decryptor, DecryptResult
 
-__all__ = ["DecryptResult", "Decryptor", "NullDecryptor"]
+__all__ = ["DecryptResult", "Decryptor"]

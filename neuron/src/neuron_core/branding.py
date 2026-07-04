@@ -15,15 +15,7 @@ import urllib.parse
 # --- palette ---------------------------------------------------------------
 NAVY = "#1C3D5F"  # primary
 DEEP = "#0E2740"  # dark background
-PAPER = "#ECEAE4"
-CANVAS = "#E4E2DC"
 WHITE = "#FFFFFF"
-TEXT = "#16324F"
-MUTED = "#5A6B7C"
-MUTED_SOFT = "#7C8896"
-ON_DARK = "#8FA6BC"
-ACCENT = "#7FA8CC"
-BORDER = "#DEDCD6"
 
 # --- identity --------------------------------------------------------------
 NAME = "NEURON"
@@ -42,12 +34,10 @@ FONTS_LINK = (
     '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
     f'<link href="{FONTS_HREF}" rel="stylesheet">'
 )
-SERIF = "'Cinzel', Georgia, 'Times New Roman', serif"
-SANS = "'Jost', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 
 # --- mark geometry (on a 200x200 viewBox) ----------------------------------
 MARK_VIEWBOX = 200.0
-_OUTER_NODES: tuple[tuple[float, float], ...] = (
+OUTER_NODES: tuple[tuple[float, float], ...] = (
     (100.0, 30.0),
     (160.6, 65.0),
     (160.6, 135.0),
@@ -55,42 +45,34 @@ _OUTER_NODES: tuple[tuple[float, float], ...] = (
     (39.4, 135.0),
     (39.4, 65.0),
 )
-_CENTER = (100.0, 100.0)
-_OUTER_R = 14.0
-_CENTER_R = 13.0
-_STROKE = 8.0
-
-# Public, typed view of the geometry so raster renderers (the desktop icon) match
-# the SVG exactly.
-OUTER_NODES: tuple[tuple[float, float], ...] = _OUTER_NODES
-CENTER: tuple[float, float] = _CENTER
-OUTER_RADIUS: float = _OUTER_R
-CENTER_RADIUS: float = _CENTER_R
-STROKE: float = _STROKE
+CENTER: tuple[float, float] = (100.0, 100.0)
+OUTER_RADIUS: float = 14.0
+CENTER_RADIUS: float = 13.0
+STROKE: float = 8.0
 
 
 def _n(value: float) -> str:
     return f"{value:g}"
 
 
-def mark_svg(color: str = "currentColor", *, size: str | None = None) -> str:
+def mark_svg(color: str = "currentColor") -> str:
     """The Neural Shield mark as an SVG string, drawn in ``color``."""
-    dims = f' width="{size}" height="{size}"' if size else ' width="100%" height="100%"'
-    points = " ".join(f"{_n(x)},{_n(y)}" for x, y in _OUTER_NODES)
+    points = " ".join(f"{_n(x)},{_n(y)}" for x, y in OUTER_NODES)
     spokes = "".join(
-        f'<line x1="{_n(_CENTER[0])}" y1="{_n(_CENTER[1])}" x2="{_n(x)}" y2="{_n(y)}"/>'
-        for x, y in _OUTER_NODES
+        f'<line x1="{_n(CENTER[0])}" y1="{_n(CENTER[1])}" x2="{_n(x)}" y2="{_n(y)}"/>'
+        for x, y in OUTER_NODES
     )
     outer = "".join(
-        f'<circle cx="{_n(x)}" cy="{_n(y)}" r="{_n(_OUTER_R)}"/>' for x, y in _OUTER_NODES
+        f'<circle cx="{_n(x)}" cy="{_n(y)}" r="{_n(OUTER_RADIUS)}"/>' for x, y in OUTER_NODES
     )
     return (
-        f'<svg viewBox="0 0 {_n(MARK_VIEWBOX)} {_n(MARK_VIEWBOX)}"{dims} fill="none"'
+        f'<svg viewBox="0 0 {_n(MARK_VIEWBOX)} {_n(MARK_VIEWBOX)}"'
+        ' width="100%" height="100%" fill="none"'
         ' xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NEURON">'
-        f'<g stroke="{color}" stroke-width="{_n(_STROKE)}" stroke-linecap="round"'
+        f'<g stroke="{color}" stroke-width="{_n(STROKE)}" stroke-linecap="round"'
         f' stroke-linejoin="round"><polygon points="{points}"/>{spokes}</g>'
-        f'<g fill="{color}"><circle cx="{_n(_CENTER[0])}" cy="{_n(_CENTER[1])}"'
-        f' r="{_n(_CENTER_R)}"/>{outer}</g></svg>'
+        f'<g fill="{color}"><circle cx="{_n(CENTER[0])}" cy="{_n(CENTER[1])}"'
+        f' r="{_n(CENTER_RADIUS)}"/>{outer}</g></svg>'
     )
 
 
@@ -338,7 +320,6 @@ def login_card_html(
     csrf_token: str,
     error: str | None = None,
     username: str = "",
-    next_url: str = "/console",
     passkey_button: bool = False,
     script: str = "",
 ) -> str:
@@ -361,7 +342,6 @@ def login_card_html(
     body = f"""<h2>Sign in to your homeserver</h2>{err}
   <form method="post" action="/console/login">
     <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
-    <input type="hidden" name="next" value="{html.escape(next_url)}">
     <label for="u">Username</label>
     <input id="u" name="username" value="{html.escape(username)}" placeholder="you"
       autocapitalize="none" autocorrect="off" autofocus required>

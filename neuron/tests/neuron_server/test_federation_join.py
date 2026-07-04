@@ -110,6 +110,14 @@ async def test_remote_user_joins_our_room(tmp_path: Path) -> None:
             assert "m.room.create" in state_types
             assert payload["auth_chain"]
 
+            # 3b) A retried send_join (same signed event) is idempotent: it must
+            # return the room state again, not 500 on the duplicate insert.
+            retry = await as_a.put(
+                send_path, json=join_event, headers={"Authorization": send_header}
+            )
+            assert retry.status_code == 200, retry.text
+            assert "m.room.create" in {e["type"] for e in retry.json()["state"]}
+
             # 4) Make-join for a user not on the origin server is refused.
             bad_path = f"/_matrix/federation/v1/make_join/{room_id}/@x:other.test"
             bad_header = sign_request(

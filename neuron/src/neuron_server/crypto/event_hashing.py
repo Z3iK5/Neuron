@@ -16,7 +16,6 @@ Built from the Matrix spec; the Ed25519 maths is delegated to PyNaCl via
 
 from __future__ import annotations
 
-import base64
 import hashlib
 from typing import Any
 
@@ -24,6 +23,7 @@ from neuron_server.crypto.signing import (
     SigningKey,
     canonical_json,
     decode_unpadded_base64,
+    encode_unpadded_base64,
     encode_unpadded_base64_urlsafe,
     sign_json,
     verify_signed_json,
@@ -55,10 +55,6 @@ _TOP_LEVEL_KEEP = frozenset(
 _CONTENT_HASH_EXCLUDE = frozenset({"signatures", "unsigned", "hashes", "outlier", "destination"})
 
 
-def _encode_standard_unpadded(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii").rstrip("=")
-
-
 def redact_event(
     pdu: dict[str, Any], room_version: str = versions.DEFAULT_ROOM_VERSION
 ) -> dict[str, Any]:
@@ -73,7 +69,7 @@ def redact_event(
 def compute_content_hash(pdu: dict[str, Any]) -> str:
     """The unpadded-standard-base64 SHA-256 content hash stored in ``hashes``."""
     stripped = {k: v for k, v in pdu.items() if k not in _CONTENT_HASH_EXCLUDE}
-    return _encode_standard_unpadded(hashlib.sha256(canonical_json(stripped)).digest())
+    return encode_unpadded_base64(hashlib.sha256(canonical_json(stripped)).digest())
 
 
 def reference_hash(

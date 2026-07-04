@@ -23,9 +23,7 @@ from neuron_supervisor.core import Supervisor
 log = get_logger("neuron_supervisor")
 
 
-def _build_supervisor(
-    settings: SupervisorSettings,
-) -> tuple[Supervisor, AdminClient, MatrixClient | None]:
+def _build_supervisor(settings: SupervisorSettings) -> Supervisor:
     admin = AdminClient(
         settings.homeserver_url,
         settings.homeserver_admin_token.get_secret_value(),
@@ -38,8 +36,7 @@ def _build_supervisor(
             settings.supervisor_bot_token.get_secret_value(),
             timeout=settings.http_timeout_seconds,
         )
-    supervisor = Supervisor(admin, settings.supervisor_bot_user_id, bot=bot)
-    return supervisor, admin, bot
+    return Supervisor(admin, settings.supervisor_bot_user_id, bot=bot)
 
 
 async def _run_once(supervisor: Supervisor) -> None:
@@ -51,7 +48,7 @@ async def _run_once(supervisor: Supervisor) -> None:
 async def _amain(command: str) -> None:
     settings = SupervisorSettings()
     configure_logging(level=settings.log_level, fmt=settings.log_format)
-    supervisor, admin, bot = _build_supervisor(settings)
+    supervisor = _build_supervisor(settings)
     try:
         if command == "sync":
             await _run_once(supervisor)
@@ -64,9 +61,9 @@ async def _amain(command: str) -> None:
                 await _run_once(supervisor)
                 await asyncio.sleep(settings.supervisor_poll_interval_seconds)
     finally:
-        await admin.aclose()
-        if bot is not None:
-            await bot.aclose()
+        await supervisor.admin.aclose()
+        if supervisor.bot is not None:
+            await supervisor.bot.aclose()
 
 
 def main() -> None:

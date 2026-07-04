@@ -13,9 +13,18 @@ import httpx
 
 from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
-from neuron_server.storage import outbox as outbox_store
+from neuron_server.storage.database import Database
 
 _CS = "/_matrix/client/v3"
+
+
+async def _outbox_count(db: Database, destination: str) -> int:
+    """Rows queued for a destination (test-only peek at the outbox table)."""
+    return int(
+        await db.fetchval(
+            "SELECT COUNT(*) FROM federation_outbox WHERE destination = ?", (destination,)
+        )
+    )
 
 
 def _opener(target_app: object):  # noqa: ANN202 - test helper
@@ -97,7 +106,7 @@ async def test_message_is_queued_then_delivered_on_retry(tmp_path: Path) -> None
             assert "while offline" not in _bodies(
                 (await client_b.get(f"{_CS}/sync", headers=bob_h)).json(), room_id
             )
-            assert await outbox_store.get_pending(app_a.state.db, "b.test")  # queued
+            assert await _outbox_count(app_a.state.db, "b.test") > 0  # queued
 
             # B comes back; retry flushes the backlog.
             app_a.state.federation_client.open_client = _opener(app_b)
@@ -106,7 +115,7 @@ async def test_message_is_queued_then_delivered_on_retry(tmp_path: Path) -> None
             assert "while offline" in _bodies(
                 (await client_b.get(f"{_CS}/sync", headers=bob_h)).json(), room_id
             )
-            assert not await outbox_store.get_pending(app_a.state.db, "b.test")  # drained
+            assert await _outbox_count(app_a.state.db, "b.test") == 0  # drained
         finally:
             await client_a.aclose()
             await client_b.aclose()

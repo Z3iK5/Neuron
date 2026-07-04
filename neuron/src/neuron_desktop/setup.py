@@ -16,12 +16,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from getpass import getpass
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
+from neuron_desktop import __version__, paths
 from neuron_desktop import config as config_module
-from neuron_desktop import paths
 from neuron_desktop.config import DesktopConfig
 from neuron_server.auth.passwords import hash_password
 from neuron_server.config import NeuronServerSettings
@@ -57,10 +55,7 @@ class ExistingInstall:
 
 def current_app_version() -> str:
     """The running app's version (from package metadata; '0.0.0' if unavailable)."""
-    try:
-        return _pkg_version("neuron")
-    except PackageNotFoundError:  # pragma: no cover - metadata present when installed
-        return "0.0.0"
+    return __version__
 
 
 def installed_version(base: Path) -> str | None:

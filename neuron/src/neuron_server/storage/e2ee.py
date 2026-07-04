@@ -72,20 +72,35 @@ async def count_one_time_keys(db: Database, user_id: str, device_id: str) -> dic
 async def claim_one_time_key(
     db: Database, user_id: str, device_id: str, algorithm: str
 ) -> dict[str, Any] | None:
-    """Atomically remove and return one OTK ``{key_alg_id: key_obj}`` for the device."""
-    rows = await db.fetchall(
-        "SELECT key_alg_id, key_json FROM one_time_keys"
-        " WHERE user_id = ? AND device_id = ? AND key_alg_id LIKE ?"
-        " ORDER BY key_alg_id LIMIT 1",
-        (user_id, device_id, f"{algorithm}:%"),
-    )
-    if rows:
-        key_alg_id, key_json = str(rows[0][0]), str(rows[0][1])
-        await db.execute(
-            "DELETE FROM one_time_keys WHERE user_id = ? AND device_id = ? AND key_alg_id = ?",
-            (user_id, device_id, key_alg_id),
+    """Atomically remove and return one OTK ``{key_alg_id: key_obj}`` for the device.
+
+    The pick and the delete are one ``DELETE ... RETURNING`` statement, so a key is
+    only returned if *this* claimer removed it. A SELECT-then-DELETE would let two
+    concurrent Postgres transactions (READ COMMITTED, pool > 1) select the same row
+    and both hand it out, breaking Olm's single-use guarantee. A claimer whose
+    DELETE matched no row lost the race for that particular key — not necessarily
+    the last key — so it retries against the remaining rows and only falls through
+    to the fallback key once none are left. (RETURNING needs SQLite >= 3.35,
+    2021 — universal on supported platforms.)
+    """
+    while True:
+        rows = await db.fetchall(
+            "DELETE FROM one_time_keys WHERE user_id = ? AND device_id = ? AND key_alg_id = ("
+            " SELECT key_alg_id FROM one_time_keys"
+            " WHERE user_id = ? AND device_id = ? AND key_alg_id LIKE ?"
+            " ORDER BY key_alg_id LIMIT 1"
+            ") RETURNING key_alg_id, key_json",
+            (user_id, device_id, user_id, device_id, f"{algorithm}:%"),
         )
-        return {key_alg_id: json.loads(key_json)}
+        if rows:
+            return {str(rows[0][0]): json.loads(str(rows[0][1]))}
+        remaining = await db.fetchall(
+            "SELECT 1 FROM one_time_keys"
+            " WHERE user_id = ? AND device_id = ? AND key_alg_id LIKE ? LIMIT 1",
+            (user_id, device_id, f"{algorithm}:%"),
+        )
+        if not remaining:
+            break
 
     # Fall back to the device's unused fallback key (not consumed).
     fallback = await db.fetchall(
@@ -186,10 +201,6 @@ async def delete_to_device_up_to(
     )
 
 
-async def max_to_device_stream(db: Database) -> int:
-    return int(await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) FROM to_device_messages"))
-
-
 # --- device-list change tracking -------------------------------------------
 
 
@@ -208,7 +219,3 @@ async def get_device_list_changes_after(db: Database, after_stream: int) -> list
         (after_stream,),
     )
     return [str(row[0]) for row in rows]
-
-
-async def max_device_list_stream(db: Database) -> int:
-    return int(await db.fetchval("SELECT COALESCE(MAX(stream_id), 0) FROM device_list_changes"))

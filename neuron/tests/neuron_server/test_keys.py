@@ -14,6 +14,9 @@ from fastapi.testclient import TestClient
 
 from neuron_server.app import create_app
 from neuron_server.config import NeuronServerSettings
+from neuron_server.storage import e2ee as e2ee_store
+from neuron_server.storage.database import connect_database
+from neuron_server.storage.migrations import run_migrations
 
 _REG = "/_matrix/client/v3/register"
 _B = "/_matrix/client/v3"
@@ -101,6 +104,32 @@ def test_one_time_key_claim_consumes_keys(tmp_path: Path) -> None:
         # The key is consumed: count is now zero.
         counts = client.post(f"{_B}/keys/upload", headers=_h(a_token), json={}).json()
         assert counts["one_time_key_counts"].get("signed_curve25519", 0) == 0
+
+
+async def test_claim_one_time_key_is_delete_authoritative(tmp_path: Path) -> None:
+    """A key is returned only if this claim actually deleted its row (the pick and
+    the delete are one DELETE ... RETURNING statement), so once it is consumed a
+    later claim gets the reusable fallback key — never the same OTK twice."""
+    db = connect_database(f"sqlite:///{tmp_path / 'hs.db'}")
+    await db.connect()
+    try:
+        await run_migrations(db)
+        user, device = "@alice:neuron.local", "DEV"
+        await e2ee_store.store_one_time_keys(
+            db, user, device, {"signed_curve25519:AAAAAQ": {"key": "otk"}}
+        )
+        await e2ee_store.store_fallback_keys(
+            db, user, device, {"signed_curve25519:FB": {"key": "fb"}}
+        )
+
+        first = await e2ee_store.claim_one_time_key(db, user, device, "signed_curve25519")
+        assert first == {"signed_curve25519:AAAAAQ": {"key": "otk"}}
+        # The OTK row is gone; further claims fall back to the (unconsumed) fallback.
+        second = await e2ee_store.claim_one_time_key(db, user, device, "signed_curve25519")
+        assert second == {"signed_curve25519:FB": {"key": "fb"}}
+        assert await e2ee_store.claim_one_time_key(db, user, device, "signed_curve25519") == second
+    finally:
+        await db.disconnect()
 
 
 def test_cross_signing_upload_and_query(tmp_path: Path) -> None:
