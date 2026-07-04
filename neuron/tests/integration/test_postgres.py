@@ -551,6 +551,52 @@ async def test_uploader_like_escape_on_postgres() -> None:
         await db.disconnect()
 
 
+async def test_room_key_backup_on_postgres() -> None:
+    """Migration 23 + the keybackup storage module on real Postgres/asyncpg:
+    version lifecycle, the replacement algorithm's compare-and-upsert (including
+    RETURNING-based deletes), and etag bumps."""
+    from neuron_server.storage import keybackup
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=2)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        user = "@alice:pg.test"
+        v1 = await keybackup.create_version(db, user, "m.megolm_backup.v1", {"public_key": "pk"})
+        assert v1 == 1
+
+        key = {
+            "first_message_index": 5,
+            "forwarded_count": 0,
+            "is_verified": False,
+            "session_data": {"ciphertext": "original"},
+        }
+        assert await keybackup.put_keys(db, user, v1, {"!r:pg.test": {"sessions": {"s1": key}}})
+        # A worse key (higher first_message_index) is not stored and bumps nothing.
+        worse = dict(key, first_message_index=9, session_data={"ciphertext": "worse"})
+        assert not await keybackup.put_keys(
+            db, user, v1, {"!r:pg.test": {"sessions": {"s1": worse}}}
+        )
+        info = await keybackup.get_version(db, user)
+        assert info is not None and info.etag == 1
+        stored = await keybackup.get_keys(db, user, v1)
+        assert stored["!r:pg.test"]["sessions"]["s1"]["session_data"] == {
+            "ciphertext": "original"
+        }
+
+        # Delete bumps the etag; soft-deleting the version drops its keys but
+        # keeps numbering monotonic.
+        assert await keybackup.delete_keys(db, user, v1, "!r:pg.test", "s1")
+        info = await keybackup.get_version(db, user)
+        assert info is not None and info.etag == 2
+        await keybackup.delete_version(db, user, v1)
+        assert await keybackup.get_version(db, user) is None
+        assert await keybackup.create_version(db, user, "m.megolm_backup.v1", {}) == 2
+    finally:
+        await db.disconnect()
+
+
 async def test_concurrent_otk_claims_never_hand_out_same_key() -> None:
     """claim_one_time_key must be atomic across pool connections: at READ COMMITTED
     two concurrent claimers could both SELECT the same row with a select-then-delete,

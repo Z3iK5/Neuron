@@ -25,8 +25,10 @@ from neuron_server.federation.request import authenticate_request
 from neuron_server.federation.validation import (
     PduValidationError,
     best_effort_event_id,
+    domain_of,
     validate_pdu,
 )
+from neuron_server.storage import e2ee as e2ee_store
 from neuron_server.storage import receipts as receipts_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage import transactions as txn_store
@@ -74,7 +76,7 @@ async def send_transaction(txn_id: str, request: Request) -> dict[str, Any]:
     if not isinstance(edus, list) or len(edus) > _MAX_EDUS:
         raise MatrixError(400, "M_INVALID_PARAM", "Invalid or oversized edus list")
     if edus:
-        await _process_edus(request, edus)
+        await _process_edus(request, origin, edus)
     # Record it so a later retry short-circuits. After processing, so a crash
     # mid-transaction leaves it un-recorded and the retry reprocesses it. Reprocessing
     # is safe: event application skips already-stored events, and the EDUs here
@@ -84,9 +86,10 @@ async def send_transaction(txn_id: str, request: Request) -> dict[str, Any]:
     return {"pdus": results}
 
 
-async def _process_edus(request: Request, edus: list[Any]) -> None:
-    """Apply ephemeral data units (currently read receipts) from a transaction."""
+async def _process_edus(request: Request, origin: str, edus: list[Any]) -> None:
+    """Apply ephemeral data units (receipts, typing, E2EE) from a transaction."""
     db = request.app.state.db
+    server_name = request.app.state.settings.name
     touched = False
     for edu in edus:
         if not isinstance(edu, dict):
@@ -94,6 +97,40 @@ async def _process_edus(request: Request, edus: list[Any]) -> None:
         edu_type = edu.get("edu_type")
         content = edu.get("content")
         if not isinstance(content, dict):
+            continue
+        if edu_type == "m.direct_to_device":
+            # To-device messages (e.g. Olm-encrypted room keys) for local users.
+            # The sender must belong to the origin server; only local recipients
+            # are stored (device_id "*" fans out inside send_to_device). Content
+            # is opaque key material — never logged.
+            sender = content.get("sender")
+            event_type = content.get("type")
+            messages = content.get("messages")
+            if (
+                isinstance(sender, str)
+                and domain_of(sender) == origin
+                and isinstance(event_type, str)
+                and isinstance(messages, dict)
+            ):
+                local = {
+                    user_id: by_device
+                    for user_id, by_device in messages.items()
+                    if domain_of(user_id) == server_name
+                }
+                if local:
+                    # Wakes /sync itself once stored.
+                    await request.app.state.e2ee.send_to_device(sender, event_type, local)
+            continue
+        if edu_type == "m.device_list_update":
+            # A remote user's device set changed. Family-scale approach: record
+            # the change on the shared device-list stream so local users sharing
+            # an encrypted room see the user in /sync device_lists.changed and
+            # re-fetch their keys — /keys/query always goes to the remote server
+            # live, so no remote device cache/resync machinery is needed.
+            user_id = content.get("user_id")
+            if isinstance(user_id, str) and domain_of(user_id) == origin:
+                await e2ee_store.bump_device_list(db, user_id)
+                touched = True
             continue
         if edu_type == "m.typing":
             room_id = content.get("room_id")

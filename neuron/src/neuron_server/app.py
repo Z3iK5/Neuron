@@ -36,9 +36,11 @@ from neuron_server.api.client_keys import router as client_keys_router
 from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_misc import router as client_misc_router
 from neuron_server.api.client_push import router as client_push_router
+from neuron_server.api.client_room_keys import router as client_room_keys_router
 from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
 from neuron_server.api.federation_backfill import router as federation_backfill_router
+from neuron_server.api.federation_e2ee import router as federation_e2ee_router
 from neuron_server.api.federation_invite import router as federation_invite_router
 from neuron_server.api.federation_join import router as federation_join_router
 from neuron_server.api.federation_keys import router as federation_keys_router
@@ -162,7 +164,15 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             settings.name,
             settings.max_upload_bytes,
         )
-        app.state.e2ee = E2EEService(db, notify=notifier.notify)
+        app.state.e2ee = E2EEService(
+            db,
+            notify=notifier.notify,
+            # Announce local device-list changes to servers sharing a room.
+            federation_push=app.state.federation_sender.send_device_list_update,
+        )
+        # Device add/delete (login/logout/delete-device) also changes the device
+        # list, so those paths report into the same E2EE stream + federation push.
+        app.state.auth.on_device_change = app.state.e2ee.notify_device_change
         app.state.admin = AdminService(
             db, settings.name, rooms=app.state.rooms, media=app.state.media
         )
@@ -340,6 +350,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_keys_router)
     app.include_router(client_misc_router)
     app.include_router(client_push_router)
+    app.include_router(client_room_keys_router)
     app.include_router(client_directory_router)
     app.include_router(synapse_admin_router)
     app.include_router(federation_keys_router)
@@ -350,6 +361,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(federation_invite_router)
     app.include_router(federation_backfill_router)
     app.include_router(federation_query_router)
+    app.include_router(federation_e2ee_router)
 
     # The built-in admin console (web UI under /console/*) + its session-auth
     # exception handlers. Backed by the in-process AdminService/AuthService above.

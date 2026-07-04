@@ -12,6 +12,7 @@ device endpoints).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,6 +60,14 @@ class AuthService:
         self._registration_enabled = registration_enabled
         self._first_user_admin = first_user_admin
         self._uia = UiaSessionStore(db, ttl_ms=int(uia_session_ttl_s * 1000))
+        # Called after a device is added/removed: (user_id, device_id, deleted).
+        # Wired by the app to the E2EE service so device-list changes reach /sync
+        # and federation. Optional so tests can build an AuthService standalone.
+        self.on_device_change: Callable[[str, str, bool], Awaitable[None]] | None = None
+
+    async def _device_changed(self, user_id: str, device_id: str, deleted: bool) -> None:
+        if self.on_device_change is not None:
+            await self.on_device_change(user_id, device_id, deleted)
 
     @property
     def registration_enabled(self) -> bool:
@@ -191,6 +200,7 @@ class AuthService:
 
         if inhibit_login:
             return {"user_id": user_id}
+        await self._device_changed(user_id, new_device_id, False)
         return LoginResult(user_id=user_id, device_id=new_device_id, access_token=token)
 
     # --- login -------------------------------------------------------------
@@ -237,6 +247,8 @@ class AuthService:
                 )
             await accounts.create_access_token(self._db, token, user_id, chosen_device, created_ts)
 
+        if not reuse:
+            await self._device_changed(user_id, chosen_device, False)
         return LoginResult(user_id=user_id, device_id=chosen_device, access_token=token)
 
     # --- tokens / logout ---------------------------------------------------
@@ -253,12 +265,16 @@ class AuthService:
         async with self._db.transaction():
             await accounts.delete_tokens_for_device(self._db, auth.user_id, auth.device_id)
             await accounts.delete_device(self._db, auth.user_id, auth.device_id)
+        await self._device_changed(auth.user_id, auth.device_id, True)
 
     async def logout_all(self, user_id: str) -> None:
         """Invalidate all of a user's tokens and delete all their devices."""
+        devices = await accounts.list_devices(self._db, user_id)
         async with self._db.transaction():
             await accounts.delete_tokens_for_user(self._db, user_id)
             await accounts.delete_all_devices(self._db, user_id)
+        for device in devices:
+            await self._device_changed(user_id, device.device_id, True)
 
     # --- self-serve account management --------------------------------------
 
@@ -271,6 +287,7 @@ class AuthService:
         access tokens are deleted except the device the request came from, so
         the caller's session survives its own password change.
         """
+        removed: list[str] = []
         async with self._db.transaction():
             await admin_store.set_user_password(self._db, user_id, hash_password(new_password))
             if logout_devices:
@@ -279,14 +296,20 @@ class AuthService:
                         continue
                     await accounts.delete_tokens_for_device(self._db, user_id, device.device_id)
                     await accounts.delete_device(self._db, user_id, device.device_id)
+                    removed.append(device.device_id)
+        for device_id in removed:
+            await self._device_changed(user_id, device_id, True)
 
     async def deactivate_account(self, user_id: str) -> None:
         """Deactivate the account and revoke every session (mirrors admin deactivate,
         additionally deleting the device rows since no session may remain)."""
+        devices = await accounts.list_devices(self._db, user_id)
         async with self._db.transaction():
             await admin_store.set_user_deactivated(self._db, user_id, True)
             await accounts.delete_tokens_for_user(self._db, user_id)
             await accounts.delete_all_devices(self._db, user_id)
+        for device in devices:
+            await self._device_changed(user_id, device.device_id, True)
 
     # --- device management -------------------------------------------------
 
@@ -311,3 +334,4 @@ class AuthService:
         async with self._db.transaction():
             await accounts.delete_tokens_for_device(self._db, user_id, device_id)
             await accounts.delete_device(self._db, user_id, device_id)
+        await self._device_changed(user_id, device_id, True)
