@@ -10,12 +10,15 @@ reach a recipient). All payloads are opaque to the server.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+from neuron_core import get_logger
 from neuron_server.storage import accounts
 from neuron_server.storage import e2ee as store
 from neuron_server.storage.database import Database
+
+_logger = get_logger(__name__)
 
 _CROSS_SIGNING_TYPES = {
     "master_key": "master",
@@ -23,17 +26,56 @@ _CROSS_SIGNING_TYPES = {
     "user_signing_key": "user_signing",
 }
 
+# Announces a local device-list change over federation:
+# (user_id, device_id, stream_id, deleted).
+FederationPush = Callable[[str, str, int, bool], Awaitable[None]]
+
 
 class E2EEService:
     """Stores and relays E2EE key material for one server."""
 
-    def __init__(self, db: Database, notify: Callable[[], None] | None = None) -> None:
+    def __init__(
+        self,
+        db: Database,
+        notify: Callable[[], None] | None = None,
+        *,
+        federation_push: FederationPush | None = None,
+    ) -> None:
         self._db = db
         self._notify = notify
+        self._federation_push = federation_push
 
     def _wake_syncs(self) -> None:
         if self._notify is not None:
             self._notify()
+
+    async def _push_device_change(
+        self, user_id: str, device_id: str, stream_id: int, deleted: bool
+    ) -> None:
+        """Best-effort federation announcement; never breaks the local action."""
+        if self._federation_push is None:
+            return
+        try:
+            await self._federation_push(user_id, device_id, stream_id, deleted)
+        except Exception:
+            _logger.warning(
+                "failed to send device-list update for %s over federation", user_id
+            )
+
+    async def notify_device_change(
+        self, user_id: str, device_id: str, deleted: bool = False
+    ) -> None:
+        """A local user's device was added/removed: bump the device-list stream
+        (so local users sharing a room see ``device_lists.changed``) and announce
+        it to remote servers sharing a room with the user."""
+        # Allocate the stream id inside a transaction so the Postgres position
+        # tracker advances the /sync floor on commit — a bare allocation moves no
+        # floor, so every incremental /sync would re-report this change forever
+        # (and never park a long-poll). Matches the upload_keys write path.
+        async with self._db.transaction():
+            stream_id = await store.bump_device_list(self._db, user_id)
+        self._wake_syncs()
+        await self._push_device_change(user_id, device_id, stream_id, deleted)
 
     # --- keys/upload -------------------------------------------------------
 
@@ -46,19 +88,21 @@ class E2EEService:
             "org.matrix.msc2732.fallback_keys"
         ) or {}
 
+        stream_id: int | None = None
         async with self._db.transaction():
             if isinstance(device_keys, dict):
                 await store.upsert_device_keys(
                     self._db, user_id, device_id, json.dumps(device_keys)
                 )
-                await store.bump_device_list(self._db, user_id)
+                stream_id = await store.bump_device_list(self._db, user_id)
             if one_time_keys:
                 await store.store_one_time_keys(self._db, user_id, device_id, one_time_keys)
             if fallback_keys:
                 await store.store_fallback_keys(self._db, user_id, device_id, fallback_keys)
 
-        if isinstance(device_keys, dict):
+        if stream_id is not None:
             self._wake_syncs()
+            await self._push_device_change(user_id, device_id, stream_id, False)
         counts = await store.count_one_time_keys(self._db, user_id, device_id)
         return {"one_time_key_counts": counts}
 

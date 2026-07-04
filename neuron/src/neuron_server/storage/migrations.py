@@ -480,6 +480,37 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE room_memberships ADD COLUMN forgotten BIGINT NOT NULL DEFAULT 0",
         ),
     ),
+    Migration(
+        version=23,
+        name="room_key_backup",
+        # Server-side key backup (/room_keys): per-user backup versions plus the
+        # encrypted megolm session keys stored under each version. Versions are
+        # soft-deleted (deleted=1, key rows dropped) so numbers stay monotonic;
+        # etag is an opaque counter bumped whenever a version's keys change.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS room_key_versions ("
+            " user_id TEXT NOT NULL,"
+            " version BIGINT NOT NULL,"
+            " algorithm TEXT NOT NULL,"
+            " auth_data_json TEXT NOT NULL,"
+            " etag BIGINT NOT NULL DEFAULT 0,"
+            " deleted BIGINT NOT NULL DEFAULT 0,"
+            " created_ts BIGINT NOT NULL,"
+            " PRIMARY KEY (user_id, version)"
+            ")",
+            "CREATE TABLE IF NOT EXISTS room_key_backups ("
+            " user_id TEXT NOT NULL,"
+            " version BIGINT NOT NULL,"
+            " room_id TEXT NOT NULL,"
+            " session_id TEXT NOT NULL,"
+            " first_message_index BIGINT NOT NULL,"
+            " forwarded_count BIGINT NOT NULL,"
+            " is_verified BIGINT NOT NULL,"
+            " session_data_json TEXT NOT NULL,"
+            " PRIMARY KEY (user_id, version, room_id, session_id)"
+            ")",
+        ),
+    ),
 )
 
 

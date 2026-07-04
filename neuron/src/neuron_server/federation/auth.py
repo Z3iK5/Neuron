@@ -102,13 +102,16 @@ def verify_request(
     verify_key = verify_keys.get(creds.key_id)
     if verify_key is None:
         return False
-    # A server that sent a destination must have signed it; otherwise assume it
-    # signed our server name (the payload always carries a destination).
+    # A destination in the header names the server the request was signed for.
+    # A signature made for a different destination must not authenticate here —
+    # otherwise a request meant for another server could be replayed at us.
+    if creds.destination is not None and creds.destination != destination:
+        return False
     payload = _signing_payload(
         method=method,
         uri=uri,
         origin=creds.origin,
-        destination=creds.destination if creds.destination is not None else destination,
+        destination=destination,
         content=content,
     )
     payload["signatures"] = {creds.origin: {creds.key_id: creds.signature}}

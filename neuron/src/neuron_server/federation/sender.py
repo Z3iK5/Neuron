@@ -200,3 +200,49 @@ class FederationSender:
             "content": {"room_id": room_id, "user_id": user_id, "typing": typing},
         }
         await self._send_transaction(room_id, pdus=[], edus=[edu])
+
+    # --- E2EE over federation ------------------------------------------------
+
+    async def user_remote_servers(self, user_id: str) -> set[str]:
+        """Every other server sharing at least one joined room with ``user_id``."""
+        sharing = await store.get_users_sharing_room(self._db, user_id)
+        return {domain_of(u) for u in sharing} - {self._server_name}
+
+    async def send_direct_to_device(
+        self,
+        destination: str,
+        *,
+        sender: str,
+        event_type: str,
+        message_id: str,
+        messages: dict[str, Any],
+    ) -> None:
+        """Send to-device messages for ``destination``'s users as one
+        ``m.direct_to_device`` EDU. Best-effort, like the other EDUs — the message
+        payloads are opaque (Olm-encrypted) and never logged."""
+        edu = {
+            "edu_type": "m.direct_to_device",
+            "content": {
+                "sender": sender,
+                "type": event_type,
+                "message_id": message_id,
+                "messages": messages,
+            },
+        }
+        await self._deliver(destination, new_pdus=[], edus=[edu])
+
+    async def send_device_list_update(
+        self, user_id: str, device_id: str, stream_id: int, deleted: bool = False
+    ) -> None:
+        """Tell every server sharing a room with the local ``user_id`` that their
+        device set changed, so remote clients re-query the keys."""
+        content: dict[str, Any] = {
+            "user_id": user_id,
+            "device_id": device_id,
+            "stream_id": stream_id,
+        }
+        if deleted:
+            content["deleted"] = True
+        edu = {"edu_type": "m.device_list_update", "content": content}
+        for server in await self.user_remote_servers(user_id):
+            await self._deliver(server, new_pdus=[], edus=[edu])

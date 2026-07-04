@@ -84,18 +84,31 @@ class FederationClient:
         self, destination: str, path: str, body: dict[str, Any]
     ) -> dict[str, Any]:
         """PUT ``body`` to ``destination`` at ``path``, signed with X-Matrix."""
+        return await self._send_json("PUT", destination, path, body)
+
+    async def post_json(
+        self, destination: str, path: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """POST ``body`` to ``destination`` at ``path``, signed with X-Matrix."""
+        return await self._send_json("POST", destination, path, body)
+
+    async def _send_json(
+        self, method: str, destination: str, path: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
         await self._resolve(destination)
         client = self.open_client(destination)
         try:
             header = sign_request(
-                method="PUT",
+                method=method,
                 uri=path,
                 origin=self._origin,
                 destination=destination,
                 signing_key=self._signing_key,
                 content=body,
             )
-            response = await client.put(path, json=body, headers={"Authorization": header})
+            response = await client.request(
+                method, path, json=body, headers={"Authorization": header}
+            )
             response.raise_for_status()
             data = response.json()
             return data if isinstance(data, dict) else {}

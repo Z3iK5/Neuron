@@ -77,6 +77,19 @@ def test_verify_fails_on_tampered_uri_or_key() -> None:
     )
 
 
+def test_verify_fails_when_signed_for_another_destination() -> None:
+    key = generate_signing_key("a_k")
+    # Signed for hs.c — must not authenticate at hs.b, even with a valid signature.
+    header = sign_request(
+        method="GET", uri="/a", origin="hs.a", destination="hs.c", signing_key=key
+    )
+    creds = parse_authorization_header(header)
+    assert creds is not None
+    assert not verify_request(
+        creds, method="GET", uri="/a", destination="hs.b", verify_keys=_verify_keys(key)
+    )
+
+
 def test_parse_rejects_non_xmatrix() -> None:
     assert parse_authorization_header("Bearer abc") is None
     assert parse_authorization_header("") is None
