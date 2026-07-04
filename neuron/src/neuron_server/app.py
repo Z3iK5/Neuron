@@ -35,6 +35,7 @@ from neuron_server.api.client_directory import router as client_directory_router
 from neuron_server.api.client_keys import router as client_keys_router
 from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_misc import router as client_misc_router
+from neuron_server.api.client_push import router as client_push_router
 from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
 from neuron_server.api.federation_backfill import router as federation_backfill_router
@@ -42,6 +43,7 @@ from neuron_server.api.federation_invite import router as federation_invite_rout
 from neuron_server.api.federation_join import router as federation_join_router
 from neuron_server.api.federation_keys import router as federation_keys_router
 from neuron_server.api.federation_leave import router as federation_leave_router
+from neuron_server.api.federation_query import router as federation_query_router
 from neuron_server.api.federation_read import router as federation_read_router
 from neuron_server.api.federation_transactions import router as federation_transactions_router
 from neuron_server.api.synapse_admin import router as synapse_admin_router
@@ -52,6 +54,7 @@ from neuron_server.errors import MatrixError, unrecognized
 from neuron_server.federation.client import FederationClient
 from neuron_server.federation.flusher import RetryFlusher
 from neuron_server.federation.membership import FederatedMembership
+from neuron_server.federation.profiles import RemoteProfileFetcher
 from neuron_server.federation.sender import FederationSender
 from neuron_server.keys.resolver import ServerKeyResolver
 from neuron_server.keys.service import ServerKeyService
@@ -121,6 +124,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         app.state.federation_client = FederationClient(
             settings.name, app.state.server_keys.signing_key
         )
+        app.state.remote_profiles = RemoteProfileFetcher(app.state.federation_client)
         app.state.server_key_resolver = ServerKeyResolver(
             db, settings.name, app.state.server_keys, app.state.federation_client
         )
@@ -335,6 +339,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_media_router)
     app.include_router(client_keys_router)
     app.include_router(client_misc_router)
+    app.include_router(client_push_router)
     app.include_router(client_directory_router)
     app.include_router(synapse_admin_router)
     app.include_router(federation_keys_router)
@@ -344,6 +349,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(federation_leave_router)
     app.include_router(federation_invite_router)
     app.include_router(federation_backfill_router)
+    app.include_router(federation_query_router)
 
     # The built-in admin console (web UI under /console/*) + its session-auth
     # exception handlers. Backed by the in-process AdminService/AuthService above.

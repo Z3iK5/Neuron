@@ -262,11 +262,29 @@ async def get_state_event(
 
 
 async def set_membership(db: Database, room_id: str, user_id: str, membership: str) -> None:
+    # Any new membership event un-forgets the room: e.g. re-joining (or being
+    # re-invited to) a forgotten room must make it visible again.
     await db.execute(
-        "INSERT INTO room_memberships (room_id, user_id, membership)"
-        " VALUES (?, ?, ?)"
-        " ON CONFLICT(room_id, user_id) DO UPDATE SET membership = excluded.membership",
+        "INSERT INTO room_memberships (room_id, user_id, membership, forgotten)"
+        " VALUES (?, ?, ?, 0)"
+        " ON CONFLICT(room_id, user_id) DO UPDATE SET"
+        " membership = excluded.membership, forgotten = 0",
         (room_id, user_id, membership),
+    )
+
+
+async def get_membership(db: Database, room_id: str, user_id: str) -> str | None:
+    value = await db.fetchval(
+        "SELECT membership FROM room_memberships WHERE room_id = ? AND user_id = ?",
+        (room_id, user_id),
+    )
+    return None if value is None else str(value)
+
+
+async def set_forgotten(db: Database, room_id: str, user_id: str) -> None:
+    await db.execute(
+        "UPDATE room_memberships SET forgotten = 1 WHERE room_id = ? AND user_id = ?",
+        (room_id, user_id),
     )
 
 
@@ -280,9 +298,14 @@ async def get_joined_rooms(db: Database, user_id: str) -> list[str]:
 
 
 async def get_user_memberships(db: Database, user_id: str) -> list[tuple[str, str]]:
-    """Return ``(room_id, membership)`` for every room the user has a membership in."""
+    """Return ``(room_id, membership)`` for every room the user has a membership in.
+
+    Forgotten rooms are excluded — that is the whole point of /forget: they stop
+    appearing in /sync's leave section and in room listings.
+    """
     rows = await db.fetchall(
-        "SELECT room_id, membership FROM room_memberships WHERE user_id = ?",
+        "SELECT room_id, membership FROM room_memberships"
+        " WHERE user_id = ? AND forgotten = 0",
         (user_id,),
     )
     return [(str(row[0]), str(row[1])) for row in rows]
