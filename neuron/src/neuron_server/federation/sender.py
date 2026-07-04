@@ -27,6 +27,11 @@ _logger = get_logger(__name__)
 # how long a crashed worker's in-flight batch waits before another worker retries it.
 _LEASE_MS = 5 * 60 * 1000
 
+# The spec's transaction limits: at most 50 PDUs and 100 EDUs per transaction.
+# A larger backlog is split into sequential transactions in stream order.
+_MAX_PDUS_PER_TXN = 50
+_MAX_EDUS_PER_TXN = 100
+
 
 class FederationSender:
     """Sends locally-created events to the rooms' remote participants."""
@@ -52,6 +57,7 @@ class FederationSender:
         pdus: list[dict[str, Any]],
         edus: list[dict[str, Any]],
         extra_destinations: set[str] | None = None,
+        exclude: set[str] | None = None,
     ) -> None:
         destinations = await self.remote_destinations(room_id)
         if extra_destinations:
@@ -59,6 +65,10 @@ class FederationSender:
             # the room's joined members, so the caller passes a pre-change snapshot
             # to make sure that server still receives the event.
             destinations |= {d for d in extra_destinations if d != self._server_name}
+        if exclude:
+            # Hub fanout: a relayed PDU must never go back to the server it came
+            # from (or to ourselves) — that is what keeps relaying loop-free.
+            destinations -= exclude
         for server in destinations:
             await self._deliver(server, new_pdus=pdus, edus=edus)
 
@@ -92,32 +102,59 @@ class FederationSender:
         edus: list[dict[str, Any]],
     ) -> None:
         """Send ``server``'s queued PDUs (claimed under a lease so no other worker
-        double-sends them) plus the new ones, in order. On success the claimed rows
-        are deleted; on failure they're released (immediate retry) and the new PDUs
-        queued. EDUs are best-effort and never queued."""
+        double-sends them) plus the new ones, in order, split into sequential
+        transactions of at most 50 PDUs / 100 EDUs each (the spec's limits).
+
+        Delivered claimed rows are deleted batch-by-batch; the first failed batch
+        stops the send (preserving per-destination ordering), releases the claimed
+        remainder for immediate retry, and queues the still-unsent new PDUs behind
+        it. EDUs are best-effort and never queued."""
         owner = secrets.token_hex(8)
         now = int(time.time() * 1000)
         claimed = await outbox_store.claim_pending(
             self._db, server, owner, now_ms=now, lease_until_ms=now + _LEASE_MS
         )
-        claimed_ids = [stream_id for stream_id, _ in claimed]
-        all_pdus = [pdu for _, pdu in claimed] + new_pdus
-        if not all_pdus and not edus:
+        # (stream_id, pdu) for the claimed backlog; (None, pdu) for the new PDUs,
+        # which sort behind it (they'd get higher stream ids if queued).
+        items: list[tuple[int | None, dict[str, Any]]] = [
+            *claimed, *((None, pdu) for pdu in new_pdus)
+        ]
+        pending_edus = list(edus)
+        if not items and not pending_edus:
             return
+        index = 0  # first undelivered item
         try:
-            sent = await self._send_now(server, pdus=all_pdus, edus=edus)
+            while index < len(items) or pending_edus:
+                batch = items[index : index + _MAX_PDUS_PER_TXN]
+                batch_edus = pending_edus[:_MAX_EDUS_PER_TXN]
+                if not await self._send_now(
+                    server, pdus=[pdu for _, pdu in batch], edus=batch_edus
+                ):
+                    break
+                # Delete delivered rows per batch, so a crash between batches never
+                # re-sends what the destination has already accepted.
+                await outbox_store.delete(
+                    self._db, [sid for sid, _ in batch if sid is not None], owner
+                )
+                index += len(batch)
+                pending_edus = pending_edus[len(batch_edus):]
+            else:
+                return  # everything delivered
         except BaseException:
             # Cancellation (e.g. shutdown) or any error mid-send: hand the lease back
             # immediately so the backlog isn't stuck until the lease expires.
-            await outbox_store.release(self._db, claimed_ids, owner)
+            await outbox_store.release(
+                self._db, [sid for sid, _ in items[index:] if sid is not None], owner
+            )
             raise
-        if sent:
-            await outbox_store.delete(self._db, claimed_ids, owner)
-            return
-        # Failure: hand the claimed backlog back for immediate retry, queue the new.
-        await outbox_store.release(self._db, claimed_ids, owner)
-        for pdu in new_pdus:
-            await outbox_store.enqueue(self._db, server, pdu)
+        # Failure: hand the claimed remainder back for immediate retry (in order),
+        # and queue the unsent new PDUs behind it.
+        await outbox_store.release(
+            self._db, [sid for sid, _ in items[index:] if sid is not None], owner
+        )
+        for sid, pdu in items[index:]:
+            if sid is None:
+                await outbox_store.enqueue(self._db, server, pdu)
 
     async def retry(self, server: str) -> None:
         """Attempt to flush any queued events for one destination server."""
@@ -130,10 +167,16 @@ class FederationSender:
             await self.retry(server)
 
     async def send_event(
-        self, room_id: str, pdu: dict[str, Any], *, extra_destinations: set[str] | None = None
+        self,
+        room_id: str,
+        pdu: dict[str, Any],
+        *,
+        extra_destinations: set[str] | None = None,
+        exclude: set[str] | None = None,
     ) -> None:
         await self._send_transaction(
-            room_id, pdus=[pdu], edus=[], extra_destinations=extra_destinations
+            room_id, pdus=[pdu], edus=[], extra_destinations=extra_destinations,
+            exclude=exclude,
         )
 
     async def send_receipt(

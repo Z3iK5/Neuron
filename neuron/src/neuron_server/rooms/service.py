@@ -77,21 +77,59 @@ class RoomService:
         self._federation_sender = federation_sender
         self._state_res_v2 = state_res_v2
 
+    def _is_resident(self, room_id: str) -> bool:
+        """Whether we are the room's resident (hub) server — the room-id domain."""
+        return domain_of(room_id) == self._server_name
+
+    async def _fanout_remote_pdu(
+        self, room_id: str, pdu: dict[str, Any], *, origin: str
+    ) -> None:
+        """Hub fanout: relay an accepted, already-signed PDU to the room's other
+        remote servers.
+
+        Only the room's *resident* server (the room-id domain) relays, so a
+        non-hub participant never re-broadcasts and two servers can never
+        ping-pong an event between each other. The PDU already carries its
+        origin's valid signature, so it is relayed verbatim — never re-signed —
+        and the origin server (and ourselves) are excluded from the fanout.
+        Best-effort, like all propagation.
+        """
+        if self._federation_sender is None or not self._is_resident(room_id):
+            return
+        try:
+            await self._federation_sender(
+                room_id, pdu, exclude={origin, self._server_name}
+            )
+        except Exception as exc:  # noqa: BLE001 - propagation is best-effort
+            _logger.warning("federation relay failed for room %s: %s", room_id, exc)
+
     async def _propagate(
-        self, room_id: str, event: Event, *, extra_destinations: set[str] | None = None
+        self,
+        room_id: str,
+        event: Event,
+        *,
+        extra_destinations: set[str] | None = None,
+        remote_pdu: dict[str, Any] | None = None,
     ) -> None:
         """Send a locally-created event to the room's remote participants.
 
         Best-effort: federation propagation must never break the local action, so a
         failure here is logged and swallowed. We can only sign events as our own
         server, so an event whose sender is on another server (e.g. a self-leave we
-        forced on a remote user) is kept local — a remote peer would reject its
-        signature anyway. ``extra_destinations`` lets a membership-removal caller
-        reach a server that has just dropped out of the room's joined members.
+        forced on a remote user) is normally kept local — a remote peer would reject
+        our signature on it. The exception is a PDU that *arrived over federation*
+        (``remote_pdu``): it already carries the origin server's valid signature, so
+        the hub relays it verbatim via :meth:`_fanout_remote_pdu` instead.
+        ``extra_destinations`` lets a membership-removal caller reach a server that
+        has just dropped out of the room's joined members.
         """
         if self._federation_sender is None:
             return
         if domain_of(event.sender) != self._server_name:
+            if remote_pdu is not None:
+                await self._fanout_remote_pdu(
+                    room_id, remote_pdu, origin=domain_of(event.sender)
+                )
             return
         try:
             await self._federation_sender(
@@ -836,12 +874,17 @@ class RoomService:
         # A retried send_join re-delivers the same signed event; the insert guard
         # keeps the endpoint idempotent instead of tripping the primary key.
         async with self._db.transaction():
-            if await store.get_event(self._db, room_id, event_id) is None:
+            is_new = await store.get_event(self._db, room_id, event_id) is None
+            if is_new:
                 stream = await store.next_stream_ordering(self._db)
                 await store.insert_event(self._db, Event.from_pdu(pdu, event_id, stream))
             await store.update_current_state(self._db, room_id, "m.room.member", sender, event_id)
             await store.set_membership(self._db, room_id, sender, "join")
         self._wake_syncs()
+        if is_new:
+            # Hub fanout: tell the room's other remote servers about the join (the
+            # joining server itself is the origin and is excluded).
+            await self._fanout_remote_pdu(room_id, pdu, origin=domain_of(sender))
 
         current_state = await store.get_current_state(self._db, room_id)
         auth_seed: list[str] = []
@@ -872,12 +915,17 @@ class RoomService:
         authrules.authorize(Event.from_pdu(pdu, event_id, 0), state)
 
         async with self._db.transaction():
-            if await store.get_event(self._db, room_id, event_id) is None:
+            is_new = await store.get_event(self._db, room_id, event_id) is None
+            if is_new:
                 stream = await store.next_stream_ordering(self._db)
                 await store.insert_event(self._db, Event.from_pdu(pdu, event_id, stream))
             await store.update_current_state(self._db, room_id, "m.room.member", sender, event_id)
             await store.set_membership(self._db, room_id, sender, "leave")
         self._wake_syncs()
+        if is_new:
+            # Hub fanout: tell the room's other remote servers about the leave (the
+            # departing server itself is the origin and is excluded).
+            await self._fanout_remote_pdu(room_id, pdu, origin=domain_of(sender))
 
     # State types shared with an invited user's server so it can render the room.
     _INVITE_STATE_KEYS = (
@@ -956,6 +1004,8 @@ class RoomService:
             return False
         event_id = compute_event_id(pdu)
         if await store.get_event(self._db, room_id, event_id) is not None:
+            # Already stored (a redelivery): deliberately no relay, so a duplicate
+            # coming back to the hub can never cause a fanout loop.
             return True
 
         state = await self._load_state(room_id)
@@ -995,6 +1045,10 @@ class RoomService:
                 ):
                     await self._apply_redaction(event, pending.event_id)
         self._wake_syncs()
+        # Hub fanout: when we are the room's resident server, relay the newly
+        # accepted PDU verbatim to the room's other remote servers (never back to
+        # its origin) so a 3-server room sees cross-server traffic.
+        await self._propagate(room_id, event, remote_pdu=pdu)
         return True
 
     async def apply_invite(self, room_id: str, pdu: dict[str, Any]) -> str:
@@ -1003,10 +1057,16 @@ class RoomService:
         event_id = compute_event_id(pdu)
         target = str(pdu["state_key"])
         async with self._db.transaction():
-            if await store.get_event(self._db, room_id, event_id) is None:
+            is_new = await store.get_event(self._db, room_id, event_id) is None
+            if is_new:
                 stream = await store.next_stream_ordering(self._db)
                 await store.insert_event(self._db, Event.from_pdu(pdu, event_id, stream))
             await store.update_current_state(self._db, room_id, "m.room.member", target, event_id)
             await store.set_membership(self._db, room_id, target, "invite")
         self._wake_syncs()
+        if is_new:
+            # Hub fanout: share the (co-signed) invite with the room's other remote
+            # servers so their member lists stay current. The invited user's server
+            # already holds it (it co-signed the event), so it is the excluded origin.
+            await self._fanout_remote_pdu(room_id, pdu, origin=domain_of(target))
         return event_id

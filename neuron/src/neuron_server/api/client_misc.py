@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Client-Server API: profile, account data, capabilities, filters, and the
-typing/receipt/presence/push-rule surfaces (HS-6).
+typing/receipt/presence surfaces (HS-6).
 
 These round out the everyday client API. Presence is accepted but not distributed;
-push rules return a minimal empty ruleset. Profile, account data, filters, typing,
-read receipts and read markers are fully stored (and surfaced via /sync).
+push rules live in :mod:`neuron_server.api.client_push`. Profile, account data,
+filters, typing, read receipts and read markers are fully stored (and surfaced
+via /sync).
 """
 
 from __future__ import annotations
@@ -38,14 +39,25 @@ def _require_self(who: Authenticated, user_id: str) -> None:
 # --- profile ---------------------------------------------------------------
 
 
-@router.get("/v3/profile/{user_id}")
-async def get_profile(user_id: str, db: Database = Depends(get_db)) -> dict[str, Any]:
+async def _profile_any(request: Request, db: Database, user_id: str) -> dict[str, Any]:
+    """A local user's stored profile, or a remote user's fetched over federation."""
+    if user_id.split(":", 1)[-1] != request.app.state.settings.name:
+        return await request.app.state.remote_profiles.fetch(user_id)
     return await userdata.get_profile(db, user_id)
 
 
+@router.get("/v3/profile/{user_id}")
+async def get_profile(
+    user_id: str, request: Request, db: Database = Depends(get_db)
+) -> dict[str, Any]:
+    return await _profile_any(request, db, user_id)
+
+
 @router.get("/v3/profile/{user_id}/displayname")
-async def get_displayname(user_id: str, db: Database = Depends(get_db)) -> dict[str, Any]:
-    profile = await userdata.get_profile(db, user_id)
+async def get_displayname(
+    user_id: str, request: Request, db: Database = Depends(get_db)
+) -> dict[str, Any]:
+    profile = await _profile_any(request, db, user_id)
     return {"displayname": profile.get("displayname")}
 
 
@@ -63,8 +75,10 @@ async def set_displayname(
 
 
 @router.get("/v3/profile/{user_id}/avatar_url")
-async def get_avatar_url(user_id: str, db: Database = Depends(get_db)) -> dict[str, Any]:
-    profile = await userdata.get_profile(db, user_id)
+async def get_avatar_url(
+    user_id: str, request: Request, db: Database = Depends(get_db)
+) -> dict[str, Any]:
+    profile = await _profile_any(request, db, user_id)
     return {"avatar_url": profile.get("avatar_url")}
 
 
@@ -172,7 +186,7 @@ async def get_filter(
     return definition
 
 
-# --- capabilities & push rules --------------------------------------------
+# --- capabilities -----------------------------------------------------------
 
 
 @router.get("/v3/capabilities")
@@ -186,18 +200,6 @@ async def capabilities(who: Authenticated = Depends(require_user)) -> dict[str, 
             },
         }
     }
-
-
-@router.get("/v3/pushrules/")
-async def push_rules(who: Authenticated = Depends(require_user)) -> dict[str, Any]:
-    empty: dict[str, list[Any]] = {
-        "content": [],
-        "override": [],
-        "room": [],
-        "sender": [],
-        "underride": [],
-    }
-    return {"global": empty}
 
 
 # --- presence / typing / receipts (accepted, not yet distributed) ----------

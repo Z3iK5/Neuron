@@ -20,6 +20,7 @@ from neuron_server.api.deps import get_rooms, json_body, require_target_user, re
 from neuron_server.auth.service import Authenticated
 from neuron_server.errors import MatrixError
 from neuron_server.rooms.service import RoomService
+from neuron_server.storage import rooms as rooms_store
 
 router = APIRouter(prefix="/_matrix/client")
 
@@ -153,6 +154,27 @@ async def leave_room(
     who: Authenticated = Depends(require_user),
 ) -> dict[str, Any]:
     await _leave_any(request, room_id, who.user_id)
+    return {}
+
+
+@router.post("/v3/rooms/{room_id}/forget")
+async def forget_room(
+    room_id: str,
+    request: Request,
+    who: Authenticated = Depends(require_user),
+) -> dict[str, Any]:
+    """Forget a room the user has left: hide it from /sync and room listings.
+
+    The membership row is flagged rather than deleted, so re-joining (which
+    upserts a fresh membership) clears the flag and the room reappears.
+    """
+    db = request.app.state.db
+    membership = await rooms_store.get_membership(db, room_id, who.user_id)
+    if membership is None:
+        raise MatrixError(404, "M_NOT_FOUND", "No membership in this room to forget")
+    if membership not in ("leave", "ban"):
+        raise MatrixError(400, "M_UNKNOWN", f"User {who.user_id} is still in the room")
+    await rooms_store.set_forgotten(db, room_id, who.user_id)
     return {}
 
 
