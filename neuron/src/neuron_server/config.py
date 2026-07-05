@@ -175,6 +175,15 @@ class NeuronServerSettings(BaseSettings):
         gt=0,
         description="Maximum media upload size in bytes.",
     )
+    # Maximum size (bytes) of a single remote media file fetched over federation and
+    # cached locally (default 100 MiB). The cap is enforced while streaming, before
+    # anything is stored, so an oversized or lying origin can't fill our disk. Set it
+    # at or above ``max_upload_bytes`` so media a peer accepted can still be mirrored.
+    max_remote_media_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        gt=0,
+        description="Maximum size in bytes of remote media fetched+cached over federation.",
+    )
     # Media blob backend: 'filesystem' (the default — a local directory, right for
     # the desktop / a single host) or 's3' (an S3-compatible bucket, so multiple
     # workers/hosts share media — required for multi-host scale-out). For 's3',

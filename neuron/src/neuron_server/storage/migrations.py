@@ -511,6 +511,27 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=24,
+        name="remote_media_cache",
+        # Locally-cached copies of media fetched from other servers over federation,
+        # so a repeated download is served from our own store instead of re-fetching.
+        # cache_key is the namespaced MediaStore blob key (see media/service.py); it is
+        # derived from a hash and prefixed so a remote server can never target a local
+        # media id's blob.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS remote_media_cache ("
+            " origin_server TEXT NOT NULL,"
+            " origin_media_id TEXT NOT NULL,"
+            " cache_key TEXT NOT NULL,"
+            " content_type TEXT NOT NULL,"
+            " upload_name TEXT,"
+            " size BIGINT NOT NULL,"
+            " fetched_ts BIGINT NOT NULL,"
+            " PRIMARY KEY (origin_server, origin_media_id)"
+            ")",
+        ),
+    ),
 )
 
 

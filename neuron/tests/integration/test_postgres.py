@@ -597,6 +597,33 @@ async def test_room_key_backup_on_postgres() -> None:
         await db.disconnect()
 
 
+async def test_remote_media_cache_on_postgres() -> None:
+    """Migration 24 + the remote_media storage module on real Postgres/asyncpg:
+    round-trip a cache row and confirm the INSERT ... ON CONFLICT DO NOTHING keeps a
+    concurrent duplicate fetch idempotent (the first write wins, the second no-ops)."""
+    from neuron_server.storage import remote_media
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=2)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        assert await remote_media.get_remote_media(db, "a.test", "m1") is None
+        await remote_media.create_remote_media(
+            db, "a.test", "m1", "remote_abc", "image/png", "pic.png", 42, 1000
+        )
+        row = await remote_media.get_remote_media(db, "a.test", "m1")
+        assert row is not None and row.cache_key == "remote_abc" and row.size == 42
+        # A duplicate (origin_server, origin_media_id) is a no-op, not an error.
+        await remote_media.create_remote_media(
+            db, "a.test", "m1", "remote_xyz", "image/png", None, 99, 2000
+        )
+        row = await remote_media.get_remote_media(db, "a.test", "m1")
+        assert row is not None and row.cache_key == "remote_abc"  # unchanged
+    finally:
+        await db.disconnect()
+
+
 async def test_concurrent_otk_claims_never_hand_out_same_key() -> None:
     """claim_one_time_key must be atomic across pool connections: at READ COMMITTED
     two concurrent claimers could both SELECT the same row with a select-then-delete,
