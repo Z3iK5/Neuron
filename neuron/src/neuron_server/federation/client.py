@@ -22,6 +22,10 @@ from neuron_server.federation.discovery import fetch_well_known, pick_base_url
 OpenClient = Callable[[str], httpx.AsyncClient]
 
 
+class RemoteMediaTooLarge(Exception):
+    """A fetched remote media file exceeded the caller's size cap mid-stream."""
+
+
 class FederationClient:
     """Signs and sends outbound federation requests."""
 
@@ -77,6 +81,45 @@ class FederationClient:
             response.raise_for_status()
             data = response.json()
             return data if isinstance(data, dict) else {}
+        finally:
+            await client.aclose()
+
+    async def get_media(
+        self, destination: str, path: str, *, max_bytes: int
+    ) -> tuple[str, bytes]:
+        """GET binary media from ``destination`` (X-Matrix signed).
+
+        Returns ``(content_type, body)`` without any JSON parsing — the body is a
+        raw ``multipart/mixed`` payload the caller parses. The response is streamed
+        and rejected the moment it exceeds ``max_bytes``, so an oversized (or lying)
+        origin never buffers unbounded memory. Raises :class:`RemoteMediaTooLarge`
+        on the cap, or an ``httpx`` error on transport/HTTP failure.
+        """
+        await self._resolve(destination)
+        client = self.open_client(destination)
+        try:
+            headers = {
+                "Authorization": sign_request(
+                    method="GET",
+                    uri=path,
+                    origin=self._origin,
+                    destination=destination,
+                    signing_key=self._signing_key,
+                )
+            }
+            async with client.stream("GET", path, headers=headers) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise RemoteMediaTooLarge(
+                            f"remote media from {destination} exceeds {max_bytes} bytes"
+                        )
+                    chunks.append(chunk)
+                return content_type, b"".join(chunks)
         finally:
             await client.aclose()
 

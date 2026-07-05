@@ -45,6 +45,7 @@ from neuron_server.api.federation_invite import router as federation_invite_rout
 from neuron_server.api.federation_join import router as federation_join_router
 from neuron_server.api.federation_keys import router as federation_keys_router
 from neuron_server.api.federation_leave import router as federation_leave_router
+from neuron_server.api.federation_media import router as federation_media_router
 from neuron_server.api.federation_query import router as federation_query_router
 from neuron_server.api.federation_read import router as federation_read_router
 from neuron_server.api.federation_transactions import router as federation_transactions_router
@@ -163,6 +164,8 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             db,
             settings.name,
             settings.max_upload_bytes,
+            federation_client=app.state.federation_client,
+            max_remote_media_bytes=settings.max_remote_media_bytes,
         )
         app.state.e2ee = E2EEService(
             db,
@@ -362,6 +365,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(federation_backfill_router)
     app.include_router(federation_query_router)
     app.include_router(federation_e2ee_router)
+    app.include_router(federation_media_router)
 
     # The built-in admin console (web UI under /console/*) + its session-auth
     # exception handlers. Backed by the in-process AdminService/AuthService above.
