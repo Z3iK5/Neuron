@@ -5,6 +5,16 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.21] — 2026-07-05
+
+### Added
+- **Images and files from other servers now show up.** In rooms shared with people
+  on other homeservers (including encrypted ones), media they send is fetched over
+  federation and cached locally, so it displays like any local attachment — where
+  before it appeared broken. Your server also serves your media to other servers
+  the same way. A new `NEURON_SERVER_MAX_REMOTE_MEDIA_BYTES` setting (default
+  100 MiB) caps how large a remote file will be fetched.
+
 ## [0.0.20] — 2026-07-05
 
 Encryption completeness: your encrypted history now survives losing all your
