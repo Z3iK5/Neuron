@@ -24,6 +24,7 @@ from neuron_server.rooms import authrules, state_resolution, versions
 from neuron_server.rooms.authrules import AuthState
 from neuron_server.rooms.events import Event, generate_room_id
 from neuron_server.storage import accounts
+from neuron_server.storage import directory as directory_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
 
@@ -291,6 +292,18 @@ class RoomService:
         )
         join_rule = "public" if preset == "public_chat" else "invite"
 
+        # An optional room_alias_name (localpart) publishes #localpart:server as a
+        # local alias and sets the room's canonical alias. Reject a taken alias up
+        # front (M_ROOM_IN_USE) so we never create a half-aliased room.
+        alias_localpart = body.get("room_alias_name")
+        alias: str | None = None
+        if alias_localpart is not None:
+            alias = f"#{alias_localpart}:{self._server_name}"
+            if not directory_store.is_valid_alias(alias):
+                raise MatrixError(400, "M_INVALID_PARAM", "Invalid room_alias_name")
+            if await directory_store.resolve_alias(self._db, alias) is not None:
+                raise MatrixError(409, "M_ROOM_IN_USE", "Room alias already exists")
+
         room_id = generate_room_id(self._server_name)
         ts = now_ms()
         # A shadow-banned creator still gets their (private) room so they can't tell
@@ -345,6 +358,18 @@ class RoomService:
                     content={"topic": body["topic"]}, state_key="", ts=ts,
                 )
 
+            if alias is not None:
+                await self._append(
+                    room_id, etype="m.room.canonical_alias", sender=creator,
+                    content={"alias": alias}, state_key="", ts=ts,
+                )
+                await directory_store.create_alias(self._db, alias, room_id, creator, ts)
+
+            # The CS `visibility` param controls whether the room is listed in the
+            # public directory; default "private" is not listed.
+            if visibility == "public":
+                await directory_store.set_visibility(self._db, room_id, "public")
+
             for invitee in invitees:
                 await self._append(
                     room_id, etype="m.room.member", sender=creator,
@@ -353,6 +378,141 @@ class RoomService:
 
         self._wake_syncs()
         return room_id
+
+    # --- room directory & aliases ------------------------------------------
+
+    async def resident_servers(self, room_id: str) -> list[str]:
+        """Candidate servers for a room: us, the room's own domain, and the
+        domains of its other joined members."""
+        servers = {self._server_name, domain_of(room_id)}
+        for member in await store.get_joined_members(self._db, room_id):
+            servers.add(domain_of(member))
+        return sorted(servers)
+
+    async def resolve_local_alias(self, alias: str) -> tuple[str, list[str]] | None:
+        """Resolve one of our local aliases to ``(room_id, candidate servers)``."""
+        room_id = await directory_store.resolve_alias(self._db, alias)
+        if room_id is None:
+            return None
+        return room_id, await self.resident_servers(room_id)
+
+    async def _can_manage_directory(self, room_id: str, user_id: str) -> bool:
+        """Whether ``user_id`` may manage the room's aliases / directory listing.
+
+        Gated on the power level to send ``m.room.canonical_alias`` (default 50).
+        """
+        state = await self._load_state(room_id)
+        level = authrules.event_level(state, "m.room.canonical_alias", is_state=True)
+        return authrules.power_level_for(state, user_id) >= level
+
+    async def create_room_alias(self, alias: str, room_id: str, creator: str) -> None:
+        """Create a local alias → room mapping (any authenticated local user)."""
+        if not directory_store.is_valid_alias(alias):
+            raise MatrixError(400, "M_INVALID_PARAM", "Invalid room alias")
+        if directory_store.alias_server(alias) != self._server_name:
+            raise MatrixError(400, "M_INVALID_PARAM", "Alias is for another server")
+        if not room_id.startswith("!") or ":" not in room_id:
+            raise MatrixError(400, "M_INVALID_PARAM", "Invalid room_id")
+        if not await directory_store.create_alias(
+            self._db, alias, room_id, creator, now_ms()
+        ):
+            raise MatrixError(409, "M_UNKNOWN", "Room alias already exists")
+
+    async def delete_room_alias(self, alias: str, user_id: str) -> None:
+        """Delete a local alias (its creator, or a room admin, only)."""
+        room_id = await directory_store.resolve_alias(self._db, alias)
+        if room_id is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Room alias not found")
+        allowed = user_id == await directory_store.get_alias_creator(self._db, alias)
+        if not allowed and await store.get_room(self._db, room_id) is not None:
+            allowed = await self._can_manage_directory(room_id, user_id)
+        if not allowed:
+            raise MatrixError(403, "M_FORBIDDEN", "You may not delete this alias")
+        # A stale m.room.canonical_alias pointing at the removed alias is left as-is
+        # (harmless; clients treat an unresolvable canonical alias as absent).
+        await directory_store.delete_alias(self._db, alias)
+
+    async def set_directory_visibility(
+        self, room_id: str, user_id: str, visibility: str
+    ) -> None:
+        """Publish/unpublish a room in the public directory (room admin only)."""
+        await self._require_room(room_id)
+        if visibility not in ("public", "private"):
+            raise MatrixError(400, "M_INVALID_PARAM", "visibility must be public or private")
+        if not await self._can_manage_directory(room_id, user_id):
+            raise MatrixError(403, "M_FORBIDDEN", "Insufficient power level")
+        await directory_store.set_visibility(self._db, room_id, visibility)
+
+    async def get_directory_visibility(self, room_id: str) -> str:
+        await self._require_room(room_id)
+        return await directory_store.get_visibility(self._db, room_id)
+
+    async def build_public_chunk(self, room_id: str) -> dict[str, Any] | None:
+        """Build the spec ``PublicRoomsChunk`` for a room from its current state."""
+        state = {
+            (e.type, e.state_key or ""): e
+            for e in await store.get_current_state(self._db, room_id)
+        }
+        if not state:  # purged/unknown room still flagged public: skip it
+            return None
+
+        def content(etype: str) -> dict[str, Any]:
+            event = state.get((etype, ""))
+            return event.content if event else {}
+
+        history = content("m.room.history_visibility").get("history_visibility")
+        chunk: dict[str, Any] = {
+            "room_id": room_id,
+            "num_joined_members": await store.count_joined_members(self._db, room_id),
+            "world_readable": history == "world_readable",
+            "guest_can_join": content("m.room.guest_access").get("guest_access") == "can_join",
+            "join_rule": content("m.room.join_rules").get("join_rule", "invite"),
+        }
+        optional = {
+            "name": content("m.room.name").get("name"),
+            "topic": content("m.room.topic").get("topic"),
+            "canonical_alias": content("m.room.canonical_alias").get("alias"),
+            "avatar_url": content("m.room.avatar").get("url"),
+            "room_type": content("m.room.create").get("type"),
+        }
+        for key, value in optional.items():
+            if value is not None:
+                chunk[key] = value
+        return chunk
+
+    async def public_rooms(
+        self, *, term: str | None = None, limit: int | None = None, since: str | None = None
+    ) -> dict[str, Any]:
+        """Serve the public room directory (our own published rooms only)."""
+        chunks: list[dict[str, Any]] = []
+        for room_id in await directory_store.published_room_ids(self._db):
+            chunk = await self.build_public_chunk(room_id)
+            if chunk is not None:
+                chunks.append(chunk)
+        if term:
+            needle = term.lower()
+            fields = ("name", "topic", "canonical_alias")
+            chunks = [
+                c for c in chunks
+                if any(needle in str(c.get(f, "")).lower() for f in fields)
+            ]
+
+        total = len(chunks)
+        offset = 0
+        if since:
+            try:
+                offset = max(0, int(since))
+            except ValueError as exc:
+                raise MatrixError(400, "M_INVALID_PARAM", "Invalid pagination token") from exc
+        page_size = 100 if limit is None else max(1, min(limit, 1000))
+        page = chunks[offset : offset + page_size]
+
+        result: dict[str, Any] = {"chunk": page, "total_room_count_estimate": total}
+        if offset + page_size < total:
+            result["next_batch"] = str(offset + page_size)
+        if offset > 0:
+            result["prev_batch"] = str(max(0, offset - page_size))
+        return result
 
     # --- sending events ----------------------------------------------------
 

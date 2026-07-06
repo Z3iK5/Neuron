@@ -532,6 +532,26 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=25,
+        name="room_directory",
+        # Local room aliases (#localpart:server_name -> room_id) and the per-room
+        # "published in the public directory" flag. Aliases are local-only mappings
+        # this server owns; the published flag defaults to private (absent row).
+        statements=(
+            "CREATE TABLE IF NOT EXISTS room_aliases ("
+            " alias TEXT PRIMARY KEY,"
+            " room_id TEXT NOT NULL,"
+            " creator TEXT NOT NULL,"
+            " created_ts BIGINT NOT NULL"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_room_aliases_room ON room_aliases (room_id)",
+            "CREATE TABLE IF NOT EXISTS room_directory ("
+            " room_id TEXT PRIMARY KEY,"
+            " visibility TEXT NOT NULL"
+            ")",
+        ),
+    ),
 )
 
 
