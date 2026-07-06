@@ -120,6 +120,22 @@ def named_level(state: AuthState, key: str) -> int:
     return int(pl[key])
 
 
+def event_level(state: AuthState, etype: str, *, is_state: bool) -> int:
+    """The power level required to send an event of ``etype`` (spec ``events`` map).
+
+    Falls back to ``state_default`` for state events and ``events_default`` for
+    message events when the type has no explicit entry.
+    """
+    default_key = "state_default" if is_state else "events_default"
+    pl = _power_levels(state)
+    if pl is None:
+        return _DEFAULTS[default_key]
+    events = pl.get("events", {})
+    if etype in events:
+        return int(events[etype])
+    return int(pl.get(default_key, _DEFAULTS[default_key]))
+
+
 def membership_of(state: AuthState, user_id: str) -> str | None:
     event = state.get(("m.room.member", user_id))
     return event.content.get("membership") if event else None

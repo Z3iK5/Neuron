@@ -624,6 +624,39 @@ async def test_remote_media_cache_on_postgres() -> None:
         await db.disconnect()
 
 
+async def test_room_directory_on_postgres() -> None:
+    """Migration 25 + the directory storage module on real Postgres/asyncpg: alias
+    create is unique (a duplicate does not overwrite), resolve/delete round-trip, and
+    the published-flag upsert / list-public query behave the same as on SQLite."""
+    from neuron_server.storage import directory
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=2)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        alias = "#general:pg.test"
+        assert await directory.resolve_alias(db, alias) is None
+        assert await directory.create_alias(db, alias, "!r1:pg.test", "@a:pg.test", 1000)
+        # A duplicate alias is refused and does not overwrite the mapping.
+        assert not await directory.create_alias(db, alias, "!r2:pg.test", "@b:pg.test", 2000)
+        assert await directory.resolve_alias(db, alias) == "!r1:pg.test"
+        assert await directory.get_alias_creator(db, alias) == "@a:pg.test"
+        assert await directory.aliases_for_room(db, "!r1:pg.test") == [alias]
+
+        # Published flag: default private, upsert to public, then list.
+        assert await directory.get_visibility(db, "!r1:pg.test") == "private"
+        await directory.set_visibility(db, "!r1:pg.test", "public")
+        await directory.set_visibility(db, "!r1:pg.test", "public")  # upsert is idempotent
+        assert await directory.get_visibility(db, "!r1:pg.test") == "public"
+        assert await directory.published_room_ids(db) == ["!r1:pg.test"]
+
+        await directory.delete_alias(db, alias)
+        assert await directory.resolve_alias(db, alias) is None
+    finally:
+        await db.disconnect()
+
+
 async def test_concurrent_otk_claims_never_hand_out_same_key() -> None:
     """claim_one_time_key must be atomic across pool connections: at READ COMMITTED
     two concurrent claimers could both SELECT the same row with a select-then-delete,

@@ -439,6 +439,8 @@ async def purge_room(db: Database, room_id: str) -> None:
         "receipts",
         "federated_invites",
         "blocked_rooms",
+        "room_aliases",
+        "room_directory",
         "rooms",
     ):
         await db.execute(f"DELETE FROM {table} WHERE room_id = ?", (room_id,))

@@ -36,10 +36,12 @@ from neuron_server.api.client_keys import router as client_keys_router
 from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_misc import router as client_misc_router
 from neuron_server.api.client_push import router as client_push_router
+from neuron_server.api.client_room_directory import router as client_room_directory_router
 from neuron_server.api.client_room_keys import router as client_room_keys_router
 from neuron_server.api.client_rooms import router as client_rooms_router
 from neuron_server.api.client_sync import router as client_sync_router
 from neuron_server.api.federation_backfill import router as federation_backfill_router
+from neuron_server.api.federation_directory import router as federation_directory_router
 from neuron_server.api.federation_e2ee import router as federation_e2ee_router
 from neuron_server.api.federation_invite import router as federation_invite_router
 from neuron_server.api.federation_join import router as federation_join_router
@@ -355,6 +357,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_push_router)
     app.include_router(client_room_keys_router)
     app.include_router(client_directory_router)
+    app.include_router(client_room_directory_router)
     app.include_router(synapse_admin_router)
     app.include_router(federation_keys_router)
     app.include_router(federation_read_router)
@@ -364,6 +367,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(federation_invite_router)
     app.include_router(federation_backfill_router)
     app.include_router(federation_query_router)
+    app.include_router(federation_directory_router)
     app.include_router(federation_e2ee_router)
     app.include_router(federation_media_router)
 

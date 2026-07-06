@@ -248,10 +248,18 @@ async def force_join(
 ) -> dict[str, Any]:
     body = await json_body(request, strict=False)
     target = require_target_user(body)
-    if not room_id_or_alias.startswith("!"):
-        raise MatrixError(400, "M_INVALID_PARAM", "Room aliases are not supported yet")
-    await rooms.admin_force_join(room_id_or_alias, target)
-    return {"room_id": room_id_or_alias}
+    room_id = room_id_or_alias
+    if room_id_or_alias.startswith("#"):
+        # Admin force-join resolves *local* aliases only (there is no local room to
+        # force a membership into for a remote alias).
+        resolved = await rooms.resolve_local_alias(room_id_or_alias)
+        if resolved is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Room alias not found")
+        room_id = resolved[0]
+    elif not room_id_or_alias.startswith("!"):
+        raise MatrixError(400, "M_INVALID_PARAM", "Not a valid room ID or alias")
+    await rooms.admin_force_join(room_id, target)
+    return {"room_id": room_id}
 
 
 # --- registration tokens / reports ----------------------------------------

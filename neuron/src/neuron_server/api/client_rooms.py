@@ -5,8 +5,10 @@ Implements room creation, sending message/state events, membership changes,
 redactions, and reading state/events/history. Authorization is enforced by
 :mod:`neuron_server.rooms.authrules`.
 
-Not yet covered (honest scope): room aliases/directory, knock/restricted joins,
-guests, third-party invites, room upgrades, and event filtering on /messages.
+Not yet covered (honest scope): knock/restricted joins, guests, third-party
+invites, room upgrades, and event filtering on /messages. Room aliases and the
+public directory live in :mod:`neuron_server.api.client_room_directory`; joining
+by ``#alias`` is handled here.
 """
 
 from __future__ import annotations
@@ -19,7 +21,9 @@ from starlette.responses import JSONResponse
 from neuron_server.api.deps import get_rooms, json_body, require_target_user, require_user
 from neuron_server.auth.service import Authenticated
 from neuron_server.errors import MatrixError
+from neuron_server.federation.directory import resolve_remote_alias
 from neuron_server.rooms.service import RoomService
+from neuron_server.storage import directory as directory_store
 from neuron_server.storage import rooms as rooms_store
 
 router = APIRouter(prefix="/_matrix/client")
@@ -35,6 +39,33 @@ async def _join_any(request: Request, room_id: str, user_id: str) -> str:
     # Unknown locally → join over federation via the requested servers (or the
     # room's own domain as a fallback).
     via = request.query_params.getlist("server_name")
+    return await request.app.state.fed_membership.join(room_id, user_id, via)
+
+
+async def _resolve_alias(request: Request, alias: str) -> tuple[str, list[str]]:
+    """Resolve a room ``#alias`` to ``(room_id, candidate servers)``.
+
+    A local alias is looked up in our directory; a remote one is resolved over
+    federation via the alias's server.
+    """
+    if not directory_store.is_valid_alias(alias):
+        raise MatrixError(400, "M_INVALID_PARAM", "Invalid room alias")
+    rooms: RoomService = request.app.state.rooms
+    if directory_store.alias_server(alias) == request.app.state.settings.name:
+        resolved = await rooms.resolve_local_alias(alias)
+        if resolved is None:
+            raise MatrixError(404, "M_NOT_FOUND", "Room alias not found")
+        return resolved
+    return await resolve_remote_alias(request.app.state.federation_client, alias)
+
+
+async def _join_via(request: Request, room_id: str, servers: list[str], user_id: str) -> str:
+    """Join ``room_id``, locally if we host it, else over federation via ``servers``."""
+    if await request.app.state.db.fetchval(
+        "SELECT 1 FROM rooms WHERE room_id = ?", (room_id,)
+    ):
+        return await request.app.state.rooms.join(room_id, user_id)
+    via = [s for s in servers if s != request.app.state.settings.name]
     return await request.app.state.fed_membership.join(room_id, user_id, via)
 
 
@@ -127,15 +158,18 @@ async def send_state_no_key(
 # --- membership ------------------------------------------------------------
 
 
-@router.post("/v3/join/{room_id}")
+@router.post("/v3/join/{room_id_or_alias}")
 async def join_by_id(
-    room_id: str,
+    room_id_or_alias: str,
     request: Request,
     who: Authenticated = Depends(require_user),
 ) -> dict[str, Any]:
-    if not room_id.startswith("!"):
-        raise MatrixError(400, "M_INVALID_PARAM", "Room aliases are not supported yet")
-    return {"room_id": await _join_any(request, room_id, who.user_id)}
+    if room_id_or_alias.startswith("#"):
+        room_id, servers = await _resolve_alias(request, room_id_or_alias)
+        return {"room_id": await _join_via(request, room_id, servers, who.user_id)}
+    if not room_id_or_alias.startswith("!"):
+        raise MatrixError(400, "M_INVALID_PARAM", "Not a valid room ID or alias")
+    return {"room_id": await _join_any(request, room_id_or_alias, who.user_id)}
 
 
 @router.post("/v3/rooms/{room_id}/join")
