@@ -5,6 +5,16 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.22] — 2026-07-06
+
+### Added
+- **Rooms have names you can share.** Create a room with a human-readable address
+  like `#general:yourserver` and join by typing it, instead of pasting an opaque
+  room ID. Aliases resolve across servers too, so `#room:friendserver` works.
+- **A public room directory.** Rooms created as "public" are listed in a browsable,
+  searchable directory (`/publicRooms`), and you can toggle whether a room is listed
+  from its settings. Other servers can query your directory over federation.
+
 ## [0.0.21] — 2026-07-05
 
 ### Added
