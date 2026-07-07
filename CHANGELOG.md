@@ -5,6 +5,15 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.26] — 2026-07-08
+
+### Added
+- **Federation health in the admin console.** A new **Federation** page lists every
+  server yours delivers to, with a status (healthy / delayed / failing), how many
+  events are still pending, when delivery last succeeded, and the most recent error —
+  worst-first, with a one-click **Retry now** per server. Makes it obvious when
+  another server is unreachable and whether messages are backing up.
+
 ## [0.0.25] — 2026-07-08
 
 ### Fixed
