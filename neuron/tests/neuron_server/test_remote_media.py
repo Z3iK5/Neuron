@@ -136,12 +136,12 @@ async def test_remote_media_fetch_cache_and_inbound(two_apps: dict[str, FastAPI]
 
             # --- Remote thumbnail works (thumbnailed locally from the cached bytes) ---
             thumb = await client_b.get(
-                f"{_CS1}/media/thumbnail/a.test/{media_id}?width=16&height=16&method=scale",
+                f"{_CS1}/media/thumbnail/a.test/{media_id}?width=32&height=32&method=crop",
                 headers=bob_h,
             )
             assert thumb.status_code == 200
             assert thumb.headers["content-type"] == "image/png"
-            assert Image.open(BytesIO(thumb.content)).size[0] <= 16
+            assert Image.open(BytesIO(thumb.content)).size[0] <= 32
             assert calls["n"] == 1  # still served from cache
 
             # --- Inbound: the federation media endpoint returns multipart/mixed ---

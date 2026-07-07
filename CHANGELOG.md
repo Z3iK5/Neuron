@@ -5,6 +5,20 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [Unreleased]
+
+### Added
+- **Server-side thumbnail caching.** Generated thumbnails are now cached persistently
+  (a new `media_thumbnails` table plus the thumbnail bytes in the same media store),
+  so repeatedly shown avatars/images are served from the cache instead of decoding and
+  re-encoding the original on every request. Applies to both local and remote (cached
+  federated) media. To keep the cache bounded, arbitrary requested sizes snap to a
+  small allowlist of standard Matrix thumbnail sizes (32×32 and 96×96 crop; 320×240,
+  640×480, 800×600 scale) — a non-standard size is served from the nearest cached
+  variant of at least that size, as the spec permits. Caching is best-effort (a cache
+  write failure never breaks serving), and a media item's thumbnails are dropped when
+  it is deleted.
+
 ## [0.0.26] — 2026-07-08
 
 ### Added

@@ -21,10 +21,43 @@ from neuron_server.media.multipart import parse_multipart
 from neuron_server.media.store import MediaStore
 from neuron_server.media.thumbnails import make_thumbnail
 from neuron_server.storage import media as store
+from neuron_server.storage import media_thumbnails as thumb_store
 from neuron_server.storage import remote_media as remote_store
 from neuron_server.storage.database import Database
 
 _MEDIA_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# Bounded set of thumbnail variants we persistently cache, matching the standard
+# Matrix thumbnail sizes. Clients may request arbitrary width/height, but caching
+# every distinct size would let a caller create unbounded rows/blobs per media, so a
+# non-standard request is SNAPPED to the smallest allowlisted variant of the same
+# method that is >= the request (falling back to the largest). The spec permits
+# returning a thumbnail of at least the requested size, so we serve the snapped
+# variant. All sizes are well under thumbnails._MAX_DIMENSION, so the key computed
+# here matches what make_thumbnail actually produces.
+_THUMBNAIL_SIZES: tuple[tuple[int, int, str], ...] = (
+    (32, 32, "crop"),
+    (96, 96, "crop"),
+    (320, 240, "scale"),
+    (640, 480, "scale"),
+    (800, 600, "scale"),
+)
+
+
+def _snap_thumbnail_size(width: int, height: int, method: str) -> tuple[int, int, str] | None:
+    """Snap a requested thumbnail size to a cacheable allowlisted variant.
+
+    Returns the (width, height, method) to generate/cache, or ``None`` if nothing
+    sensible matches (then the caller generates and serves without caching).
+    """
+    norm = "crop" if method == "crop" else "scale"
+    candidates = sorted(s for s in _THUMBNAIL_SIZES if s[2] == norm)
+    if not candidates:
+        return None
+    for cand in candidates:
+        if cand[0] >= width and cand[1] >= height:
+            return cand
+    return candidates[-1]  # request exceeds every variant: serve the largest
 
 # Blob-store key for cached remote media. The "remote_" prefix + a hash of
 # (server_name, media_id) means (a) it can never collide with a LOCAL media id
@@ -34,6 +67,16 @@ _MEDIA_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 def _remote_cache_key(server_name: str, media_id: str) -> str:
     digest = hashlib.sha256(f"{server_name}\x00{media_id}".encode()).hexdigest()
     return f"remote_{digest}"
+
+
+# Blob-store key for a cached thumbnail. The "thumb_" prefix + a hash of
+# (origin_server, media_id, width, height, method) means it can never collide with a
+# local media id (unprefixed 32-hex), a "remote_" cache key, or another variant.
+def _thumbnail_cache_key(
+    server_name: str, media_id: str, width: int, height: int, method: str
+) -> str:
+    raw = f"{server_name}\x00{media_id}\x00{width}\x00{height}\x00{method}"
+    return f"thumb_{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
 def _media_part(parts: list[tuple[dict[str, str], bytes]]) -> tuple[str, bytes] | None:
@@ -172,18 +215,75 @@ class MediaService:
             return False
         await store.delete_media(self._db, media_id)
         await self._store.delete(media_id)
+        # Drop any cached thumbnails of this local media (best-effort; a failure here
+        # only leaves stray cache rows/blobs, it must not fail the delete).
+        await self._invalidate_thumbnails(self._server_name, media_id)
         return True
 
     async def thumbnail(
         self, server_name: str, media_id: str, width: int, height: int, method: str
     ) -> MediaContent:
+        if not _MEDIA_ID_RE.match(media_id):
+            raise MatrixError(404, "M_NOT_FOUND", "Invalid media ID")
+        # The origin for the cache key is the media's home server: our name for local
+        # media, the remote server for federated media (whose original bytes are
+        # themselves cached in remote_media_cache).
+        origin = self._server_name if server_name == self._server_name else server_name
+        variant = _snap_thumbnail_size(width, height, method)
+
+        if variant is not None:
+            vw, vh, vmethod = variant
+            row = await thumb_store.get_thumbnail(self._db, origin, media_id, vw, vh, vmethod)
+            if row is not None:
+                data = await self._store.get(row.cache_key)
+                if data is not None:
+                    # Cache HIT: serve stored bytes without re-decoding the original.
+                    return MediaContent(
+                        data=data, content_type=row.content_type, upload_name=None
+                    )
+                # Row present but blob gone (store wiped): regenerate & overwrite below.
+
         original = await self.download(server_name, media_id)
-        thumb = make_thumbnail(original.data, width, height, method)
+        gen_w, gen_h, gen_method = variant if variant is not None else (width, height, method)
+        thumb = make_thumbnail(original.data, gen_w, gen_h, gen_method)
         if thumb is None:
-            # Not an image we can resize — fall back to the original content.
+            # Not an image we can resize — fall back to the original, cache nothing.
             return original
         data, content_type = thumb
+        if variant is not None:
+            await self._cache_thumbnail(origin, media_id, variant, data, content_type)
         return MediaContent(data=data, content_type=content_type, upload_name=None)
+
+    async def _cache_thumbnail(
+        self,
+        origin: str,
+        media_id: str,
+        variant: tuple[int, int, str],
+        data: bytes,
+        content_type: str,
+    ) -> None:
+        """Store a generated thumbnail blob + row. Best-effort: a store/db failure on
+        the cache path never breaks serving the freshly-generated thumbnail."""
+        vw, vh, vmethod = variant
+        cache_key = _thumbnail_cache_key(origin, media_id, vw, vh, vmethod)
+        try:
+            await self._store.put(cache_key, data)
+            await thumb_store.create_thumbnail(
+                self._db, origin, media_id, vw, vh, vmethod,
+                cache_key, content_type, len(data), now_ms(),
+            )
+        except Exception:
+            pass
+
+    async def _invalidate_thumbnails(self, origin: str, media_id: str) -> None:
+        """Drop a media's cached thumbnail rows + blobs. Best-effort."""
+        try:
+            keys = await thumb_store.list_thumbnail_keys(self._db, origin, media_id)
+            await thumb_store.delete_thumbnails(self._db, origin, media_id)
+            for key in keys:
+                await self._store.delete(key)
+        except Exception:
+            pass
 
     @staticmethod
     def disposition_type(content_type: str) -> str:
