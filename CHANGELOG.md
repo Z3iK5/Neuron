@@ -5,6 +5,19 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [Unreleased]
+
+### Fixed
+- **Cross-server encryption no longer drops key exchanges.** Reliability-critical
+  federation EDUs — the `m.direct_to_device` messages that carry Olm/Megolm keys,
+  and `m.device_list_update` — are now durably queued (a new `federation_edu_outbox`,
+  same lease/retry model as the event outbox) instead of best-effort. If the
+  recipient's server is offline they survive and are re-sent on the next retry,
+  instead of being dropped and leaving the recipient "unable to decrypt". Inbound
+  to-device messages are de-duplicated on `(origin, message_id)` so a re-sent Olm
+  message is applied exactly once. Typing and read receipts stay ephemeral (a stale
+  one is never re-sent).
+
 ## [0.0.24] — 2026-07-07
 
 ### Added

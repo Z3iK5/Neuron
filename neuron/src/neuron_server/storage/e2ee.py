@@ -219,3 +219,29 @@ async def get_device_list_changes_after(db: Database, after_stream: int) -> list
         (after_stream,),
     )
     return [str(row[0]) for row in rows]
+
+
+# --- inbound to-device dedup -----------------------------------------------
+
+
+async def was_to_device_seen(db: Database, origin: str, message_id: str) -> bool:
+    """Whether this inbound ``(origin, message_id)`` to-device EDU was already applied.
+
+    Durable federation retry sends each attempt in a fresh transaction (new txn_id),
+    so transaction-level dedup can't catch a redelivered Olm message — this
+    message-level record makes applying it exactly-once. ``message_id`` is opaque
+    and never logged."""
+    row = await db.fetchval(
+        "SELECT 1 FROM received_to_device WHERE origin = ? AND message_id = ?",
+        (origin, message_id),
+    )
+    return row is not None
+
+
+async def mark_to_device_seen(db: Database, origin: str, message_id: str, ts: int) -> None:
+    """Record an applied to-device EDU (idempotent on a concurrent double-process)."""
+    await db.execute(
+        "INSERT INTO received_to_device (origin, message_id, received_ts)"
+        " VALUES (?, ?, ?) ON CONFLICT (origin, message_id) DO NOTHING",
+        (origin, message_id, ts),
+    )

@@ -70,7 +70,7 @@ class FederationSender:
             # from (or to ourselves) — that is what keeps relaying loop-free.
             destinations -= exclude
         for server in destinations:
-            await self._deliver(server, new_pdus=pdus, edus=edus)
+            await self._deliver(server, new_pdus=pdus, transient_edus=edus)
 
     async def _send_now(
         self, server: str, *, pdus: list[dict[str, Any]], edus: list[dict[str, Any]]
@@ -99,66 +99,93 @@ class FederationSender:
         server: str,
         *,
         new_pdus: list[dict[str, Any]],
-        edus: list[dict[str, Any]],
+        transient_edus: list[dict[str, Any]],
     ) -> None:
-        """Send ``server``'s queued PDUs (claimed under a lease so no other worker
-        double-sends them) plus the new ones, in order, split into sequential
-        transactions of at most 50 PDUs / 100 EDUs each (the spec's limits).
+        """Send ``server``'s queued PDUs and queued (durable) EDUs — both claimed
+        under a lease so no other worker double-sends them — plus the new PDUs and
+        any ``transient_edus``, in order, split into sequential transactions of at
+        most 50 PDUs / 100 EDUs each (the spec's limits).
 
         Delivered claimed rows are deleted batch-by-batch; the first failed batch
         stops the send (preserving per-destination ordering), releases the claimed
-        remainder for immediate retry, and queues the still-unsent new PDUs behind
-        it. EDUs are best-effort and never queued."""
+        remainder (PDUs and EDUs) for immediate retry, and queues the still-unsent
+        new PDUs behind it. ``transient_edus`` are best-effort (typing/receipts):
+        sent if the destination is reachable now, dropped on failure — never queued."""
         owner = secrets.token_hex(8)
         now = int(time.time() * 1000)
         claimed = await outbox_store.claim_pending(
             self._db, server, owner, now_ms=now, lease_until_ms=now + _LEASE_MS
         )
-        # (stream_id, pdu) for the claimed backlog; (None, pdu) for the new PDUs,
-        # which sort behind it (they'd get higher stream ids if queued).
-        items: list[tuple[int | None, dict[str, Any]]] = [
+        claimed_edus = await outbox_store.claim_pending_edus(
+            self._db, server, owner, now_ms=now, lease_until_ms=now + _LEASE_MS
+        )
+        # (stream_id, unit) for the claimed backlog; (None, unit) for the new units,
+        # which sort behind it (they'd get higher stream ids if queued). Transient
+        # EDUs carry no stream id and are simply dropped if their batch fails.
+        pdu_items: list[tuple[int | None, dict[str, Any]]] = [
             *claimed, *((None, pdu) for pdu in new_pdus)
         ]
-        pending_edus = list(edus)
-        if not items and not pending_edus:
+        edu_items: list[tuple[int | None, dict[str, Any]]] = [
+            *claimed_edus, *((None, edu) for edu in transient_edus)
+        ]
+        if not pdu_items and not edu_items:
             return
-        index = 0  # first undelivered item
+        p_index = 0  # first undelivered PDU
+        e_index = 0  # first undelivered EDU
         try:
-            while index < len(items) or pending_edus:
-                batch = items[index : index + _MAX_PDUS_PER_TXN]
-                batch_edus = pending_edus[:_MAX_EDUS_PER_TXN]
+            while p_index < len(pdu_items) or e_index < len(edu_items):
+                pdu_batch = pdu_items[p_index : p_index + _MAX_PDUS_PER_TXN]
+                edu_batch = edu_items[e_index : e_index + _MAX_EDUS_PER_TXN]
                 if not await self._send_now(
-                    server, pdus=[pdu for _, pdu in batch], edus=batch_edus
+                    server,
+                    pdus=[pdu for _, pdu in pdu_batch],
+                    edus=[edu for _, edu in edu_batch],
                 ):
                     break
                 # Delete delivered rows per batch, so a crash between batches never
                 # re-sends what the destination has already accepted.
                 await outbox_store.delete(
-                    self._db, [sid for sid, _ in batch if sid is not None], owner
+                    self._db, [sid for sid, _ in pdu_batch if sid is not None], owner
                 )
-                index += len(batch)
-                pending_edus = pending_edus[len(batch_edus):]
+                await outbox_store.delete_edus(
+                    self._db, [sid for sid, _ in edu_batch if sid is not None], owner
+                )
+                p_index += len(pdu_batch)
+                e_index += len(edu_batch)
             else:
                 return  # everything delivered
         except BaseException:
-            # Cancellation (e.g. shutdown) or any error mid-send: hand the lease back
+            # Cancellation (e.g. shutdown) or any error mid-send: hand the leases back
             # immediately so the backlog isn't stuck until the lease expires.
-            await outbox_store.release(
-                self._db, [sid for sid, _ in items[index:] if sid is not None], owner
-            )
+            await self._release_remainder(server, pdu_items, edu_items, p_index, e_index, owner)
             raise
         # Failure: hand the claimed remainder back for immediate retry (in order),
         # and queue the unsent new PDUs behind it.
-        await outbox_store.release(
-            self._db, [sid for sid, _ in items[index:] if sid is not None], owner
-        )
-        for sid, pdu in items[index:]:
+        await self._release_remainder(server, pdu_items, edu_items, p_index, e_index, owner)
+        for sid, pdu in pdu_items[p_index:]:
             if sid is None:
                 await outbox_store.enqueue(self._db, server, pdu)
 
+    async def _release_remainder(
+        self,
+        server: str,
+        pdu_items: list[tuple[int | None, dict[str, Any]]],
+        edu_items: list[tuple[int | None, dict[str, Any]]],
+        p_index: int,
+        e_index: int,
+        owner: str,
+    ) -> None:
+        """Release the still-leased PDU and EDU rows from the undelivered remainder."""
+        await outbox_store.release(
+            self._db, [sid for sid, _ in pdu_items[p_index:] if sid is not None], owner
+        )
+        await outbox_store.release_edus(
+            self._db, [sid for sid, _ in edu_items[e_index:] if sid is not None], owner
+        )
+
     async def retry(self, server: str) -> None:
-        """Attempt to flush any queued events for one destination server."""
-        await self._deliver(server, new_pdus=[], edus=[])
+        """Attempt to flush any queued PDUs and EDUs for one destination server."""
+        await self._deliver(server, new_pdus=[], transient_edus=[])
 
     async def retry_all(self) -> None:
         """Attempt to flush queued events for every destination with a backlog."""
@@ -218,8 +245,10 @@ class FederationSender:
         messages: dict[str, Any],
     ) -> None:
         """Send to-device messages for ``destination``'s users as one
-        ``m.direct_to_device`` EDU. Best-effort, like the other EDUs — the message
-        payloads are opaque (Olm-encrypted) and never logged."""
+        ``m.direct_to_device`` EDU. Durably queued (not best-effort): a dropped Olm
+        message means the recipient can't decrypt, so it must survive an offline
+        peer and be retried. The payloads are opaque (Olm-encrypted) and never
+        logged; the recipient dedups on ``message_id`` so a retry applies once."""
         edu = {
             "edu_type": "m.direct_to_device",
             "content": {
@@ -229,13 +258,16 @@ class FederationSender:
                 "messages": messages,
             },
         }
-        await self._deliver(destination, new_pdus=[], edus=[edu])
+        await outbox_store.enqueue_edu(self._db, destination, edu)
+        await self._deliver(destination, new_pdus=[], transient_edus=[])
 
     async def send_device_list_update(
         self, user_id: str, device_id: str, stream_id: int, deleted: bool = False
     ) -> None:
         """Tell every server sharing a room with the local ``user_id`` that their
-        device set changed, so remote clients re-query the keys."""
+        device set changed, so remote clients re-query the keys. Durably queued: a
+        dropped update leaves remote users with a stale key set, so it must survive
+        an offline peer (re-querying keys is idempotent, so redelivery is harmless)."""
         content: dict[str, Any] = {
             "user_id": user_id,
             "device_id": device_id,
@@ -245,4 +277,5 @@ class FederationSender:
             content["deleted"] = True
         edu = {"edu_type": "m.device_list_update", "content": content}
         for server in await self.user_remote_servers(user_id):
-            await self._deliver(server, new_pdus=[], edus=[edu])
+            await outbox_store.enqueue_edu(self._db, server, edu)
+            await self._deliver(server, new_pdus=[], transient_edus=[])

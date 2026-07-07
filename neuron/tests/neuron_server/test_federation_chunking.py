@@ -109,7 +109,7 @@ async def test_new_pdus_behind_failed_backlog_are_queued(db: Database) -> None:
     for n in range(3):
         await outbox_store.enqueue(db, _DEST, {"n": n})
 
-    await sender._deliver(_DEST, new_pdus=[{"n": 3}], edus=[])  # noqa: SLF001
+    await sender._deliver(_DEST, new_pdus=[{"n": 3}], transient_edus=[])  # noqa: SLF001
 
     assert client.transactions == []
     assert await _queued(db) == [0, 1, 2, 3]
@@ -124,6 +124,6 @@ async def test_edus_are_chunked_at_100(db: Database) -> None:
     sender = FederationSender(db, "a.test", client)  # type: ignore[arg-type]
     edus = [{"edu_type": "m.typing", "content": {"n": n}} for n in range(250)]
 
-    await sender._deliver(_DEST, new_pdus=[], edus=edus)  # noqa: SLF001
+    await sender._deliver(_DEST, new_pdus=[], transient_edus=edus)  # noqa: SLF001
 
     assert [len(t["edus"]) for t in client.transactions] == [100, 100, 50]

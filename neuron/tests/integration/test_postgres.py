@@ -732,6 +732,62 @@ async def test_concurrent_otk_claims_never_hand_out_same_key() -> None:
         await db.disconnect()
 
 
+async def test_edu_queue_on_postgres() -> None:
+    """Migration 28 + the durable EDU outbox on real Postgres/asyncpg: an EDU
+    round-trips through enqueue/claim/delete, the lease is exclusive, release hands
+    it back, destinations_with_pending unions both outboxes, and the inbound
+    (origin, message_id) to-device dedup short-circuits a redelivery."""
+    from neuron_server.storage import e2ee as e2ee_store
+    from neuron_server.storage import outbox as outbox_store
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=4)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        await db.ensure_stream_sequences()  # the edu_outbox stream uses a sequence
+        dest = "b.test"
+
+        # Enqueue + exclusive lease + delete round-trip.
+        await outbox_store.enqueue_edu(db, dest, {"edu_type": "m.direct_to_device", "n": 1})
+        await outbox_store.enqueue_edu(db, dest, {"edu_type": "m.device_list_update", "n": 2})
+        claimed = await outbox_store.claim_pending_edus(
+            db, dest, "owner-a", now_ms=1000, lease_until_ms=61000
+        )
+        assert [e["n"] for _, e in claimed] == [1, 2]
+        # A concurrent worker sees them leased and claims nothing.
+        assert await outbox_store.claim_pending_edus(
+            db, dest, "owner-b", now_ms=2000, lease_until_ms=62000
+        ) == []
+
+        # Union with the PDU outbox: a PDU-only destination is still offered.
+        await outbox_store.enqueue(db, "c.test", {"type": "m.room.message"})
+        assert set(await outbox_store.destinations_with_pending(db, 2000)) == {"c.test"}
+
+        # Release hands the EDUs back; delete removes them.
+        await outbox_store.release_edus(db, [sid for sid, _ in claimed], "owner-a")
+        again = await outbox_store.claim_pending_edus(
+            db, dest, "owner-c", now_ms=3000, lease_until_ms=63000
+        )
+        assert len(again) == 2
+        await outbox_store.delete_edus(db, [sid for sid, _ in again], "owner-c")
+        assert (
+            await db.fetchval(
+                "SELECT COUNT(*) FROM federation_edu_outbox WHERE destination = ?", (dest,)
+            )
+            == 0
+        )
+
+        # Inbound to-device dedup: first sighting is new, second short-circuits.
+        assert not await e2ee_store.was_to_device_seen(db, "a.test", "msg-1")
+        await e2ee_store.mark_to_device_seen(db, "a.test", "msg-1", 1000)
+        assert await e2ee_store.was_to_device_seen(db, "a.test", "msg-1")
+        # Idempotent re-mark (ON CONFLICT DO NOTHING) does not raise.
+        await e2ee_store.mark_to_device_seen(db, "a.test", "msg-1", 2000)
+    finally:
+        await db.disconnect()
+
+
 async def test_pushers_and_notifications_on_postgres() -> None:
     """Migration 26 + the pushers/notifications storage on real Postgres/asyncpg:
     pusher upsert is unique per (user, app_id, pushkey), append=false clears the

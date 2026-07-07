@@ -609,6 +609,38 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id)",
         ),
     ),
+    Migration(
+        version=28,
+        name="federation_edu_outbox",
+        # Durable queue for reliability-critical EDUs (m.direct_to_device carrying
+        # Olm/Megolm key material, m.device_list_update). Mirrors federation_outbox
+        # exactly — same lease model (owner + leased_until) so a worker claims a
+        # destination's rows before sending and a crashed worker's lease expires.
+        # A dropped to-device EDU means "unable to decrypt", so unlike receipts/typing
+        # these must survive an offline peer. Ephemeral EDUs are never queued here.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS federation_edu_outbox ("
+            " stream_id BIGINT PRIMARY KEY,"
+            " destination TEXT NOT NULL,"
+            " edu_json TEXT NOT NULL,"
+            " leased_until BIGINT NOT NULL DEFAULT 0,"
+            " owner TEXT"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_edu_outbox_destination"
+            " ON federation_edu_outbox (destination, stream_id)",
+            # Message-level dedup for inbound m.direct_to_device. Durable retry uses a
+            # fresh txn_id per attempt, so a redelivered to-device EDU bypasses
+            # transaction dedup; recording (origin, message_id) makes applying an Olm
+            # message exactly-once (a redelivery short-circuits). message_id is opaque
+            # and never logged.
+            "CREATE TABLE IF NOT EXISTS received_to_device ("
+            " origin TEXT NOT NULL,"
+            " message_id TEXT NOT NULL,"
+            " received_ts BIGINT NOT NULL,"
+            " PRIMARY KEY (origin, message_id)"
+            ")",
+        ),
+    ),
 )
 
 
