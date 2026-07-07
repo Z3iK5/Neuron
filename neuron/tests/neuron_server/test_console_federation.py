@@ -57,17 +57,14 @@ async def test_failure_increments_then_success_resets(db: Database) -> None:
 
 
 async def test_pending_backlog_combines_pdu_and_edu(db: Database) -> None:
-    first = await outbox_store.enqueue(db, "b.test", {"n": 1})
+    await outbox_store.enqueue(db, "b.test", {"n": 1})
     await outbox_store.enqueue(db, "b.test", {"n": 2})
     await outbox_store.enqueue_edu(db, "b.test", {"edu_type": "m.receipt"})
     await outbox_store.enqueue(db, "c.test", {"n": 1})
 
     backlog = await destinations_store.pending_backlog(db)
-    assert backlog["b.test"].pdu_pending == 2
-    assert backlog["b.test"].edu_pending == 1
-    assert backlog["b.test"].oldest_stream_id == first
-    assert backlog["c.test"].pdu_pending == 1
-    assert backlog["c.test"].edu_pending == 0
+    assert backlog["b.test"] == (2, 1)
+    assert backlog["c.test"] == (1, 0)
 
 
 # --- console page -----------------------------------------------------------

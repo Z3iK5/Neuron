@@ -1595,6 +1595,11 @@ def _fed_status(consecutive_failures: int, pending: int) -> str:
     return "healthy"
 
 
+def _sort_rank(failures: int, pending: int) -> tuple[int, int, int]:
+    """Sort key putting the worst-health servers first."""
+    return (_FED_STATUS[_fed_status(failures, pending)][1], -failures, -pending)
+
+
 @router.get("/console/federation", include_in_schema=False)
 async def federation_page(
     request: Request, _: str = Depends(require_console_admin)
@@ -1604,22 +1609,18 @@ async def federation_page(
     backlog = await destinations_store.pending_backlog(db)
 
     # Union: every server we've recorded health for, plus any with a live backlog.
-    names = {h.destination for h in health} | set(backlog)
     by_name = {h.destination: h for h in health}
+    names = set(by_name) | set(backlog)
 
-    entries = []
-    for name in names:
+    def _row(name: str) -> tuple[int, int]:
         h = by_name.get(name)
-        b = backlog.get(name)
-        failures = h.consecutive_failures if h else 0
-        pending = (b.pdu_pending + b.edu_pending) if b else 0
-        status = _fed_status(failures, pending)
-        _, rank = _FED_STATUS[status]
-        entries.append((rank, -failures, -pending, name, h, b, status, pending, failures))
-    entries.sort(key=lambda e: (e[0], e[1], e[2], e[3]))
+        return (h.consecutive_failures if h else 0, sum(backlog.get(name, (0, 0))))
 
     rows = ""
-    for _rank, _f, _p, name, h, _b, status, pending, failures in entries:
+    for name in sorted(names, key=lambda n: (*_sort_rank(*_row(n)), n)):
+        h = by_name.get(name)
+        failures, pending = _row(name)
+        status = _fed_status(failures, pending)
         pill_cls = _FED_STATUS[status][0]
         last_success = _fmt_ts(int(h.last_success_ts)) if h and h.last_success_ts else "—"
         last_error = _e(h.last_error) if h and h.last_error else ""

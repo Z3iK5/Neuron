@@ -815,12 +815,10 @@ async def test_federation_destinations_on_postgres() -> None:
         assert rows["down.test"].last_error is None
 
         # Combined backlog across both outboxes, grouped per destination.
-        first = await outbox_store.enqueue(db, "down.test", {"n": 1})
+        await outbox_store.enqueue(db, "down.test", {"n": 1})
         await outbox_store.enqueue_edu(db, "down.test", {"edu_type": "m.receipt"})
         backlog = await destinations_store.pending_backlog(db)
-        assert backlog["down.test"].pdu_pending == 1
-        assert backlog["down.test"].edu_pending == 1
-        assert backlog["down.test"].oldest_stream_id == first
+        assert backlog["down.test"] == (1, 1)
     finally:
         await db.disconnect()
 

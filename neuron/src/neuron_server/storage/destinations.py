@@ -31,15 +31,6 @@ class DestinationHealth:
     last_error: str | None
 
 
-@dataclass(frozen=True)
-class DestinationBacklog:
-    """Pending outbox rows for a destination (PDUs + EDUs)."""
-
-    pdu_pending: int
-    edu_pending: int
-    oldest_stream_id: int | None
-
-
 async def record_success(db: Database, destination: str, now_ms: int) -> None:
     """Mark a successful transaction: set ``last_success_ts``, reset the failure run
     to 0 and clear ``last_error`` (upsert)."""
@@ -88,26 +79,14 @@ async def list_destinations(db: Database) -> list[DestinationHealth]:
     ]
 
 
-async def pending_backlog(db: Database) -> dict[str, DestinationBacklog]:
-    """Per-destination pending backlog across both outboxes: PDU count, EDU count
-    and the oldest (lowest) pending ``stream_id``."""
-    combined: dict[str, tuple[int, int, int | None]] = {}
+async def pending_backlog(db: Database) -> dict[str, tuple[int, int]]:
+    """Per-destination pending backlog as ``{destination: (pdu_count, edu_count)}``."""
+    combined: dict[str, tuple[int, int]] = {}
     for table, is_edu in (("federation_outbox", False), ("federation_edu_outbox", True)):
         rows = await db.fetchall(
-            f"SELECT destination, COUNT(*), MIN(stream_id) FROM {table} GROUP BY destination"
+            f"SELECT destination, COUNT(*) FROM {table} GROUP BY destination"
         )
-        for dest, count, oldest in rows:
-            dest = str(dest)
-            pdu, edu, cur_oldest = combined.get(dest, (0, 0, None))
-            oldest_int = None if oldest is None else int(oldest)
-            merged_oldest = min(
-                x for x in (cur_oldest, oldest_int) if x is not None
-            ) if (cur_oldest is not None or oldest_int is not None) else None
-            if is_edu:
-                combined[dest] = (pdu, int(count), merged_oldest)
-            else:
-                combined[dest] = (int(count), edu, merged_oldest)
-    return {
-        dest: DestinationBacklog(pdu_pending=pdu, edu_pending=edu, oldest_stream_id=oldest)
-        for dest, (pdu, edu, oldest) in combined.items()
-    }
+        for dest, count in rows:
+            pdu, edu = combined.get(str(dest), (0, 0))
+            combined[str(dest)] = (pdu, int(count)) if is_edu else (int(count), edu)
+    return combined
