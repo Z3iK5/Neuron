@@ -153,6 +153,53 @@ class NeuronServerSettings(BaseSettings):
         description="Comma-separated localparts/user IDs treated as server admins.",
     )
 
+    # --- Refresh tokens (CS API v1.3 / Element X) --------------------------
+    # How long (ms) an access token issued alongside a refresh token stays valid.
+    # Only tokens from a login/register that opted in with `refresh_token: true`
+    # get an expiry; classic logins issue a non-expiring token as before. Default
+    # 1 hour — the client silently refreshes (soft_logout) once it lapses.
+    access_token_lifetime_ms: int = Field(
+        default=3_600_000,
+        gt=0,
+        description="Lifetime (ms) of a refreshable access token before it expires.",
+    )
+
+    # --- OIDC / MSC3861 delegated auth (OFF by default) --------------------
+    # When enabled, Neuron stops handling passwords itself and becomes an OAuth2
+    # resource server: bearer tokens are validated against an external OIDC
+    # provider (MAS / Keycloak / Dex) via RFC 7662 token introspection, and the
+    # local password/registration/refresh endpoints return M_UNRECOGNIZED so
+    # clients use the provider's flow (Element X discovers it via MSC2965). Leave
+    # this False (the default) for the standard password/passkey/UIA experience.
+    oidc_enabled: bool = Field(
+        default=False,
+        description="Delegate authentication to an external OIDC provider (MSC3861).",
+    )
+    oidc_issuer: str = Field(
+        default="",
+        description="OIDC provider issuer URL (its /.well-known/openid-configuration).",
+    )
+    # Explicit introspection endpoint. If empty it is discovered from the issuer's
+    # OpenID configuration document.
+    oidc_introspection_endpoint: str = Field(
+        default="",
+        description="RFC 7662 introspection endpoint (else discovered from the issuer).",
+    )
+    oidc_client_id: str = Field(
+        default="",
+        description="OAuth2 client id Neuron uses to authenticate introspection calls.",
+    )
+    oidc_client_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description="OAuth2 client secret for introspection (HTTP basic auth).",
+    )
+    # Advertised to clients (via auth_metadata) as where a user manages their
+    # account at the provider. Optional.
+    oidc_account_management_url: str = Field(
+        default="",
+        description="Account-management URL advertised to clients (MSC2965).",
+    )
+
     def admin_user_ids(self) -> set[str]:
         """Resolve ``admin_users`` to a set of full Matrix IDs."""
         result: set[str] = set()

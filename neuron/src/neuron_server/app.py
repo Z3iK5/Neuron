@@ -40,6 +40,7 @@ from neuron_server.api.client_pushers import router as client_pushers_router
 from neuron_server.api.client_room_directory import router as client_room_directory_router
 from neuron_server.api.client_room_keys import router as client_room_keys_router
 from neuron_server.api.client_rooms import router as client_rooms_router
+from neuron_server.api.client_sliding_sync import router as client_sliding_sync_router
 from neuron_server.api.client_sync import router as client_sync_router
 from neuron_server.api.federation_backfill import router as federation_backfill_router
 from neuron_server.api.federation_directory import router as federation_directory_router
@@ -53,6 +54,7 @@ from neuron_server.api.federation_query import router as federation_query_router
 from neuron_server.api.federation_read import router as federation_read_router
 from neuron_server.api.federation_transactions import router as federation_transactions_router
 from neuron_server.api.synapse_admin import router as synapse_admin_router
+from neuron_server.auth.oidc import OidcAuth
 from neuron_server.auth.service import AuthService
 from neuron_server.config import NeuronServerSettings
 from neuron_server.e2ee.service import E2EEService
@@ -77,6 +79,7 @@ from neuron_server.storage.metadata import get_metadata, set_metadata
 from neuron_server.storage.migrations import run_migrations
 from neuron_server.sync.notifier import build_notifier
 from neuron_server.sync.service import SyncService
+from neuron_server.sync.sliding import SlidingSyncService
 from neuron_server.typing_state import TypingHandler
 
 log = get_logger(__name__)
@@ -141,7 +144,16 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             settings.registration_enabled,
             first_user_admin=settings.first_user_admin,
             uia_session_ttl_s=settings.uia_session_ttl_s,
+            access_token_lifetime_ms=settings.access_token_lifetime_ms,
         )
+        # OIDC / MSC3861 delegated auth (off by default). When enabled, token
+        # validation is routed through provider introspection and the MSC2965
+        # discovery endpoints are served; otherwise app.state.oidc stays None and
+        # nothing about the local password/refresh path changes.
+        app.state.oidc = None
+        if settings.oidc_enabled:
+            app.state.oidc = OidcAuth(db, settings.name, settings)
+            app.state.auth.oidc = app.state.oidc
         app.state.federation_sender = FederationSender(
             db, settings.name, app.state.federation_client
         )
@@ -167,6 +179,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             apply_event=app.state.rooms.apply_remote_event,
         )
         app.state.sync = SyncService(db, notifier, typing=app.state.typing)
+        app.state.sliding_sync = SlidingSyncService(db, notifier, typing=app.state.typing)
         app.state.media = MediaService(
             build_media_store(settings),
             db,
@@ -266,14 +279,35 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
 
     @app.get("/_matrix/client/versions")
     async def versions() -> dict[str, Any]:
+        features = dict(UNSTABLE_FEATURES)
+        # MSC3861 delegated auth is only real when an OIDC provider is configured,
+        # so only advertise it then — clients read this to switch to the OIDC flow.
+        if settings.oidc_enabled:
+            features["org.matrix.msc3861"] = True
         return {
             "versions": list(SUPPORTED_SPEC_VERSIONS),
-            "unstable_features": dict(UNSTABLE_FEATURES),
+            "unstable_features": features,
         }
 
     @app.get("/.well-known/matrix/client")
     async def well_known_client() -> dict[str, Any]:
         return {"m.homeserver": {"base_url": settings.public_base_url}}
+
+    # MSC2965 OIDC discovery: only present when delegated auth is enabled, so
+    # Element X can find the provider. Absent (404 M_UNRECOGNIZED) by default.
+    @app.get("/_matrix/client/unstable/org.matrix.msc2965/auth_metadata")
+    async def auth_metadata() -> dict[str, Any]:
+        oidc: OidcAuth | None = app.state.oidc
+        if oidc is None:
+            raise unrecognized()
+        return await oidc.auth_metadata()
+
+    @app.get("/_matrix/client/unstable/org.matrix.msc2965/auth_issuer")
+    async def auth_issuer() -> dict[str, Any]:
+        oidc: OidcAuth | None = app.state.oidc
+        if oidc is None:
+            raise unrecognized()
+        return {"issuer": await oidc.issuer()}
 
     @app.get("/health")
     async def health() -> PlainTextResponse:
@@ -357,6 +391,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_auth_router)
     app.include_router(client_rooms_router)
     app.include_router(client_sync_router)
+    app.include_router(client_sliding_sync_router)
     app.include_router(client_media_router)
     app.include_router(client_keys_router)
     app.include_router(client_misc_router)

@@ -624,6 +624,44 @@ async def test_remote_media_cache_on_postgres() -> None:
         await db.disconnect()
 
 
+async def test_refresh_tokens_on_postgres() -> None:
+    """Migration 27 + the refresh-token storage on real Postgres/asyncpg: an access
+    token with a set `expires_at_ms` round-trips, and the single-use refresh-token
+    rotation (consume marks it used + links the successor) behaves as on SQLite."""
+    from neuron_server.storage import accounts
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=2)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        user, device = "@alice:pg.test", "DEV"
+        await accounts.create_user(db, user, None, False, 1000)
+        await accounts.create_device(db, user, device, "phone", 1000)
+
+        # Access token with an expiry round-trips (NULL vs set both exercised).
+        await accounts.create_access_token(db, "at-exp", user, device, 1000, 5000)
+        await accounts.create_access_token(db, "at-classic", user, device, 1000, None)
+        assert await accounts.get_token(db, "at-exp") == (user, device, 5000)
+        assert await accounts.get_token(db, "at-classic") == (user, device, None)
+
+        # Refresh token: create -> get -> consume(rotate) -> replay is used.
+        await accounts.create_refresh_token(db, "rt-1", user, device, 1000)
+        row = await accounts.get_refresh_token(db, "rt-1")
+        assert row is not None and row.user_id == user and row.used is False
+        await accounts.consume_refresh_token(db, "rt-1", "rt-2")
+        spent = await accounts.get_refresh_token(db, "rt-1")
+        assert spent is not None and spent.used is True and spent.next_token == "rt-2"
+
+        # delete_tokens_for_device clears both access and refresh tokens.
+        await accounts.create_refresh_token(db, "rt-2", user, device, 2000)
+        await accounts.delete_tokens_for_device(db, user, device)
+        assert await accounts.get_token(db, "at-exp") is None
+        assert await accounts.get_refresh_token(db, "rt-2") is None
+    finally:
+        await db.disconnect()
+
+
 async def test_room_directory_on_postgres() -> None:
     """Migration 25 + the directory storage module on real Postgres/asyncpg: alias
     create is unique (a duplicate does not overwrite), resolve/delete round-trip, and

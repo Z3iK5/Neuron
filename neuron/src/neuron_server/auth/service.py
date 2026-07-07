@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from neuron_server.auth import ids
 from neuron_server.auth.passwords import hash_password, verify_password
@@ -24,6 +24,9 @@ from neuron_server.errors import MatrixError
 from neuron_server.storage import accounts
 from neuron_server.storage import admin as admin_store
 from neuron_server.storage.database import Database
+
+if TYPE_CHECKING:
+    from neuron_server.auth.oidc import OidcAuth
 
 
 @dataclass(frozen=True)
@@ -36,11 +39,18 @@ class Authenticated:
 
 @dataclass(frozen=True)
 class LoginResult:
-    """A freshly-issued login (from register or login)."""
+    """A freshly-issued login (from register or login).
+
+    ``refresh_token``/``expires_in_ms`` are set only when the client opted in with
+    ``refresh_token: true``; otherwise the access token never expires (classic
+    behaviour) and both stay ``None``.
+    """
 
     user_id: str
     device_id: str
     access_token: str
+    refresh_token: str | None = None
+    expires_in_ms: int | None = None
 
 
 class AuthService:
@@ -54,12 +64,17 @@ class AuthService:
         *,
         first_user_admin: bool = False,
         uia_session_ttl_s: float = 3600.0,
+        access_token_lifetime_ms: int = 3_600_000,
     ) -> None:
         self._db = db
         self._server_name = server_name
         self._registration_enabled = registration_enabled
         self._first_user_admin = first_user_admin
+        self._access_token_lifetime_ms = access_token_lifetime_ms
         self._uia = UiaSessionStore(db, ttl_ms=int(uia_session_ttl_s * 1000))
+        # Set by the app when OIDC delegated auth is enabled: token validation then
+        # goes through provider introspection instead of the local token table.
+        self.oidc: OidcAuth | None = None
         # Called after a device is added/removed: (user_id, device_id, deleted).
         # Wired by the app to the E2EE service so device-list changes reach /sync
         # and federation. Optional so tests can build an AuthService standalone.
@@ -165,6 +180,7 @@ class AuthService:
         device_id: str | None,
         initial_device_display_name: str | None,
         inhibit_login: bool,
+        with_refresh: bool = False,
     ) -> LoginResult | dict[str, Any]:
         """Create a new local account. Returns a login unless ``inhibit_login``."""
         if not password:
@@ -183,25 +199,51 @@ class AuthService:
         password_hash = hash_password(password)
         created_ts = now_ms()
         new_device_id = device_id or ids.generate_device_id()
-        token = ids.generate_access_token()
 
         async with self._db.transaction():
             # The very first account may be made a server admin (the desktop
             # first-run flow uses this so the user who signs up owns the server).
             is_admin = self._first_user_admin and not await accounts.any_users(self._db)
             await accounts.create_user(self._db, user_id, password_hash, is_admin, created_ts)
-            if not inhibit_login:
-                await accounts.create_device(
-                    self._db, user_id, new_device_id, initial_device_display_name, created_ts
-                )
-                await accounts.create_access_token(
-                    self._db, token, user_id, new_device_id, created_ts
-                )
+            if inhibit_login:
+                return {"user_id": user_id}
+            await accounts.create_device(
+                self._db, user_id, new_device_id, initial_device_display_name, created_ts
+            )
+            result = await self._issue_session(
+                user_id, new_device_id, created_ts, with_refresh
+            )
 
-        if inhibit_login:
-            return {"user_id": user_id}
         await self._device_changed(user_id, new_device_id, False)
-        return LoginResult(user_id=user_id, device_id=new_device_id, access_token=token)
+        return result
+
+    async def _issue_session(
+        self, user_id: str, device_id: str, created_ts: int, with_refresh: bool
+    ) -> LoginResult:
+        """Issue an access token (+ optional refresh token) for a (user, device).
+
+        Must be called inside a transaction. With ``with_refresh`` the access token
+        gets an expiry and a long-lived refresh token is stored; otherwise the
+        token never expires (classic behaviour).
+        """
+        access_token = ids.generate_access_token()
+        expires_at = created_ts + self._access_token_lifetime_ms if with_refresh else None
+        await accounts.create_access_token(
+            self._db, access_token, user_id, device_id, created_ts, expires_at
+        )
+        refresh_token: str | None = None
+        if with_refresh:
+            refresh_token = ids.generate_access_token()
+            await accounts.create_refresh_token(
+                self._db, refresh_token, user_id, device_id, created_ts
+            )
+        return LoginResult(
+            user_id=user_id,
+            device_id=device_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in_ms=self._access_token_lifetime_ms if with_refresh else None,
+        )
 
     # --- login -------------------------------------------------------------
 
@@ -212,6 +254,7 @@ class AuthService:
         password: str,
         device_id: str | None,
         initial_device_display_name: str | None,
+        with_refresh: bool = False,
     ) -> LoginResult:
         """Authenticate a password login and issue a new access token."""
         user_id = user if user.startswith("@") else self._user_id(user)
@@ -226,7 +269,6 @@ class AuthService:
             raise MatrixError(403, "M_USER_DEACTIVATED", "This account has been deactivated")
 
         created_ts = now_ms()
-        token = ids.generate_access_token()
 
         reuse = False
         if device_id:
@@ -245,20 +287,83 @@ class AuthService:
                 await accounts.create_device(
                     self._db, user_id, chosen_device, initial_device_display_name, created_ts
                 )
-            await accounts.create_access_token(self._db, token, user_id, chosen_device, created_ts)
+            result = await self._issue_session(
+                user_id, chosen_device, created_ts, with_refresh
+            )
 
         if not reuse:
             await self._device_changed(user_id, chosen_device, False)
-        return LoginResult(user_id=user_id, device_id=chosen_device, access_token=token)
+        return result
 
     # --- tokens / logout ---------------------------------------------------
 
     async def lookup_token(self, token: str) -> Authenticated | None:
-        """Resolve an access token to its identity, or ``None`` if unknown."""
+        """Resolve an access token to its identity, or ``None`` if invalid.
+
+        The single token-validation chokepoint. With OIDC delegated auth the token
+        is validated by provider introspection; otherwise it is looked up in the
+        local table and an expired token is treated as invalid (``None``).
+        """
+        if self.oidc is not None:
+            return await self.oidc.validate(token)
         row = await accounts.get_token(self._db, token)
         if row is None:
             return None
-        return Authenticated(user_id=row[0], device_id=row[1])
+        user_id, device_id, expires_at_ms = row
+        if expires_at_ms is not None and expires_at_ms <= now_ms():
+            return None
+        return Authenticated(user_id=user_id, device_id=device_id)
+
+    async def token_is_expired(self, token: str) -> bool:
+        """True if ``token`` is a known local access token whose expiry has passed.
+
+        Lets the HTTP layer distinguish a soft-logout (silently refreshable) from a
+        truly-unknown token. Never true under OIDC (no local expiry semantics).
+        """
+        if self.oidc is not None:
+            return False
+        row = await accounts.get_token(self._db, token)
+        if row is None:
+            return False
+        expires_at_ms = row[2]
+        return expires_at_ms is not None and expires_at_ms <= now_ms()
+
+    async def refresh(self, refresh_token: str) -> LoginResult:
+        """Rotate a refresh token: issue a fresh access + refresh token pair.
+
+        The presented refresh token is single-use — once consumed it (and any
+        access token on its device) is invalid. An unknown or already-used token
+        raises 401 M_UNKNOWN_TOKEN so the client re-authenticates.
+        """
+        row = await accounts.get_refresh_token(self._db, refresh_token)
+        if row is None or row.used:
+            raise MatrixError(401, "M_UNKNOWN_TOKEN", "Invalid refresh token")
+
+        created_ts = now_ms()
+        new_access = ids.generate_access_token()
+        new_refresh = ids.generate_access_token()
+        expires_at = created_ts + self._access_token_lifetime_ms
+        async with self._db.transaction():
+            # Retire the device's current access token (the client switches to the
+            # new one); mark the presented refresh token spent and link it to its
+            # successor so a replay is rejected but the chain stays auditable.
+            await accounts.delete_access_tokens_for_device(
+                self._db, row.user_id, row.device_id
+            )
+            await accounts.create_access_token(
+                self._db, new_access, row.user_id, row.device_id, created_ts, expires_at
+            )
+            await accounts.create_refresh_token(
+                self._db, new_refresh, row.user_id, row.device_id, created_ts
+            )
+            await accounts.consume_refresh_token(self._db, refresh_token, new_refresh)
+        return LoginResult(
+            user_id=row.user_id,
+            device_id=row.device_id,
+            access_token=new_access,
+            refresh_token=new_refresh,
+            expires_in_ms=self._access_token_lifetime_ms,
+        )
 
     async def logout(self, auth: Authenticated) -> None:
         """Invalidate this token and delete its device (per the spec)."""
