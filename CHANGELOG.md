@@ -5,6 +5,17 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.23] — 2026-07-07
+
+### Added
+- **Push notifications reach your phone.** The homeserver now delivers notifications
+  to mobile push gateways: register a device (`/pushers`), and new messages, mentions,
+  and invites are pushed to it according to your notification rules. A
+  `GET /notifications` endpoint lists what has fired, and encrypted rooms send a
+  count-only push (no message content leaves your server). Delivery runs in the
+  background, so a slow or unreachable push gateway never delays sending a message.
+  The push timeout is configurable via `NEURON_SERVER_PUSH_GATEWAY_TIMEOUT_S`.
+
 ## [0.0.22] — 2026-07-06
 
 ### Added
