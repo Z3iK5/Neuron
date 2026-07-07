@@ -27,7 +27,7 @@ APIs and the Admin API.
 
 | Package | Role |
 |---------|------|
-| **`neuron_server`** | The Matrix homeserver. Identity & auth (registration, login, devices, access tokens), rooms with the spec's room-v11 authorization rules, `GET /sync` long-polling, a media repository, E2EE key upload/relay (the server never decrypts), the everyday Client-Server API, a Synapse-compatible `/_synapse/admin/...` Admin API, and server-to-server federation (signed events, key publishing/resolution, join/leave/invite, transactions, backfill, receipts, typing). |
+| **`neuron_server`** | The Matrix homeserver. Identity & auth (registration, login, devices, access tokens), rooms with the spec's room-v11 authorization rules, `GET /sync` long-polling, a media repository, E2EE key upload/relay (the server never decrypts), mobile push notifications (pushers, rule evaluation, and Sygnal push-gateway delivery), the everyday Client-Server API, a Synapse-compatible `/_synapse/admin/...` Admin API, and server-to-server federation (signed events, key publishing/resolution, join/leave/invite, transactions, backfill, receipts, typing). |
 | **`neuron_core`** | Shared library used by the console and bots: a typed homeserver Admin API client, a lightweight Client-Server client, `pydantic-settings` config, logging, error types, and the **brand** single-source-of-truth (`branding.py` — palette, type, the mark, and the server's HTML pages). |
 | **`neuron_console`** | FastAPI + Jinja web admin console over the Admin API. Operator login with a signed session cookie; the admin token never reaches the browser. |
 | **`neuron_supervisor`** | A privileged bot that promotes itself to room admin and moderates (kick/ban/redact). |

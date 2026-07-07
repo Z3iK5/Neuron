@@ -588,6 +588,27 @@ MIGRATIONS: tuple[Migration, ...] = (
             " ON notifications (user_id, ts)",
         ),
     ),
+    Migration(
+        version=27,
+        name="refresh_tokens",
+        # Refreshable sessions (CS API v1.3 / Element X). Access tokens issued with
+        # refresh support carry an expiry (`expires_at_ms`); classic tokens leave it
+        # NULL and never expire. `refresh_tokens` are long-lived and single-use: on
+        # refresh the old row is marked `used` and linked to its successor via
+        # `next_token`, so a replayed (already-rotated) refresh token is rejected.
+        statements=(
+            "ALTER TABLE access_tokens ADD COLUMN expires_at_ms BIGINT",
+            "CREATE TABLE IF NOT EXISTS refresh_tokens ("
+            " token TEXT PRIMARY KEY,"
+            " user_id TEXT NOT NULL,"
+            " device_id TEXT NOT NULL,"
+            " created_ts BIGINT NOT NULL,"
+            " used BIGINT NOT NULL DEFAULT 0,"
+            " next_token TEXT"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens (user_id)",
+        ),
+    ),
 )
 
 

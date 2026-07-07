@@ -28,5 +28,12 @@ SUPPORTED_SPEC_VERSIONS: tuple[str, ...] = (
     "v1.11",
 )
 
-# Unstable feature flags (MSC opt-ins) we expose. Empty until we implement any.
-UNSTABLE_FEATURES: dict[str, bool] = {}
+# Unstable feature flags (MSC opt-ins) we expose. Config-dependent flags (e.g.
+# MSC3861 delegated auth, only advertised when OIDC is enabled) are added at
+# request time in the /versions handler; the ones here are always on.
+UNSTABLE_FEATURES: dict[str, bool] = {
+    # Native Simplified Sliding Sync — the /sync variant Element X uses.
+    "org.matrix.msc3575": True,
+    "org.matrix.simplified_msc3575": True,
+    "org.matrix.msc4186": True,
+}

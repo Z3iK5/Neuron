@@ -19,18 +19,36 @@ from starlette.responses import JSONResponse
 
 from neuron_server.api.deps import get_auth, json_body, require_user
 from neuron_server.auth.service import Authenticated, AuthService, LoginResult
-from neuron_server.errors import MatrixError
+from neuron_server.errors import MatrixError, unrecognized
 from neuron_server.proxy import client_ip
 
 router = APIRouter(prefix="/_matrix/client")
 
 
 def _login_payload(result: LoginResult) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "user_id": result.user_id,
         "access_token": result.access_token,
         "device_id": result.device_id,
     }
+    # Present only when the client opted in with refresh_token: true (CS API v1.3).
+    if result.refresh_token is not None:
+        payload["refresh_token"] = result.refresh_token
+    if result.expires_in_ms is not None:
+        payload["expires_in_ms"] = result.expires_in_ms
+    return payload
+
+
+def _reject_if_oidc(request: Request) -> None:
+    """Local auth endpoints are gone when auth is delegated to OIDC (MSC3861).
+
+    The client must use the provider's flow (discovered via MSC2965), so these
+    routes answer 404 M_UNRECOGNIZED rather than a half-working local login. Used
+    as a route dependency on the UIA-gated endpoints so it runs *before* the
+    access-token check (otherwise a tokenless request would 401 instead of 404).
+    """
+    if request.app.state.settings.oidc_enabled:
+        raise unrecognized()
 
 
 # --- registration ----------------------------------------------------------
@@ -38,6 +56,7 @@ def _login_payload(result: LoginResult) -> dict[str, Any]:
 
 @router.post("/v3/register")
 async def register(request: Request, auth: AuthService = Depends(get_auth)) -> Any:
+    _reject_if_oidc(request)
     if request.query_params.get("kind", "user") == "guest":
         raise MatrixError(403, "M_FORBIDDEN", "Guest registration is not supported")
     if not auth.registration_enabled:
@@ -68,6 +87,7 @@ async def register(request: Request, auth: AuthService = Depends(get_auth)) -> A
         device_id=body.get("device_id"),
         initial_device_display_name=body.get("initial_device_display_name"),
         inhibit_login=bool(body.get("inhibit_login", False)),
+        with_refresh=bool(body.get("refresh_token", False)),
     )
     await auth.complete_uia(auth_data)
 
@@ -92,7 +112,10 @@ async def register_available(
 
 
 @router.get("/v3/login")
-async def login_flows() -> dict[str, Any]:
+async def login_flows(request: Request) -> dict[str, Any]:
+    # Under OIDC there is no local password flow to advertise; clients discover the
+    # provider via the MSC2965 endpoints instead, so this answers 404.
+    _reject_if_oidc(request)
     return {"flows": [{"type": "m.login.password"}]}
 
 
@@ -107,6 +130,7 @@ def _extract_login_user(body: dict[str, Any]) -> str | None:
 
 @router.post("/v3/login")
 async def login(request: Request, auth: AuthService = Depends(get_auth)) -> dict[str, Any]:
+    _reject_if_oidc(request)
     body = await json_body(request)
     if body.get("type") != "m.login.password":
         raise MatrixError(400, "M_UNKNOWN", "Unsupported login type")
@@ -132,8 +156,28 @@ async def login(request: Request, auth: AuthService = Depends(get_auth)) -> dict
         password=password,
         device_id=body.get("device_id"),
         initial_device_display_name=body.get("initial_device_display_name"),
+        with_refresh=bool(body.get("refresh_token", False)),
     )
     return _login_payload(result)
+
+
+# --- token refresh (CS API v1.3) -------------------------------------------
+
+
+@router.post("/v3/refresh")
+async def refresh(request: Request, auth: AuthService = Depends(get_auth)) -> dict[str, Any]:
+    _reject_if_oidc(request)
+    body = await json_body(request)
+    refresh_token = body.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token:
+        raise MatrixError(400, "M_MISSING_PARAM", "Missing refresh_token")
+    result = await auth.refresh(refresh_token)
+    payload: dict[str, Any] = {"access_token": result.access_token}
+    if result.refresh_token is not None:
+        payload["refresh_token"] = result.refresh_token
+    if result.expires_in_ms is not None:
+        payload["expires_in_ms"] = result.expires_in_ms
+    return payload
 
 
 # --- logout / whoami -------------------------------------------------------
@@ -196,7 +240,7 @@ async def _password_uia_gate(
     return None
 
 
-@router.post("/v3/account/password")
+@router.post("/v3/account/password", dependencies=[Depends(_reject_if_oidc)])
 async def change_password(
     request: Request,
     who: Authenticated = Depends(require_user),
@@ -220,7 +264,7 @@ async def change_password(
     return {}
 
 
-@router.post("/v3/account/deactivate")
+@router.post("/v3/account/deactivate", dependencies=[Depends(_reject_if_oidc)])
 async def deactivate_account(
     request: Request,
     who: Authenticated = Depends(require_user),

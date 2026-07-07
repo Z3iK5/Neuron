@@ -72,10 +72,20 @@ async def require_user(request: Request) -> Authenticated:
     token = _extract_token(request)
     if not token:
         raise MatrixError(401, "M_MISSING_TOKEN", "Missing access token")
-    who = await get_auth(request).lookup_token(token)
-    if who is None:
-        raise MatrixError(401, "M_UNKNOWN_TOKEN", "Invalid access token")
-    return who
+    auth = get_auth(request)
+    who = await auth.lookup_token(token)
+    if who is not None:
+        return who
+    # A known-but-expired token is a soft logout: tell the client so it silently
+    # refreshes instead of hard-logging-out. A genuinely unknown token is not.
+    if await auth.token_is_expired(token):
+        raise MatrixError(
+            401,
+            "M_UNKNOWN_TOKEN",
+            "Access token has expired",
+            extra={"soft_logout": True},
+        )
+    raise MatrixError(401, "M_UNKNOWN_TOKEN", "Invalid access token")
 
 
 async def require_admin(request: Request) -> Authenticated:

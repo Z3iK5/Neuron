@@ -175,35 +175,113 @@ async def delete_all_devices(db: Database, user_id: str) -> None:
 
 
 async def create_access_token(
-    db: Database, token: str, user_id: str, device_id: str, created_ts: int
+    db: Database,
+    token: str,
+    user_id: str,
+    device_id: str,
+    created_ts: int,
+    expires_at_ms: int | None = None,
 ) -> None:
+    """Store a bearer access token. ``expires_at_ms`` NULL = never expires."""
     await db.execute(
-        "INSERT INTO access_tokens (token, user_id, device_id, created_ts)"
-        " VALUES (?, ?, ?, ?)",
-        (token, user_id, device_id, created_ts),
+        "INSERT INTO access_tokens (token, user_id, device_id, created_ts, expires_at_ms)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (token, user_id, device_id, created_ts, expires_at_ms),
     )
 
 
-async def get_token(db: Database, token: str) -> tuple[str, str] | None:
+async def get_token(db: Database, token: str) -> tuple[str, str, int | None] | None:
+    """Return ``(user_id, device_id, expires_at_ms)`` for a token, or ``None``.
+
+    ``expires_at_ms`` is NULL (``None``) for a classic, non-expiring token; the
+    caller decides whether a set expiry is in the past.
+    """
     rows = await db.fetchall(
-        "SELECT user_id, device_id FROM access_tokens WHERE token = ?",
+        "SELECT user_id, device_id, expires_at_ms FROM access_tokens WHERE token = ?",
         (token,),
     )
     if not rows:
         return None
-    return (rows[0][0], rows[0][1])
+    row = rows[0]
+    return (row[0], row[1], None if row[2] is None else int(row[2]))
 
 
 async def delete_token(db: Database, token: str) -> None:
     await db.execute("DELETE FROM access_tokens WHERE token = ?", (token,))
 
 
-async def delete_tokens_for_device(db: Database, user_id: str, device_id: str) -> None:
+async def delete_access_tokens_for_device(db: Database, user_id: str, device_id: str) -> None:
+    """Invalidate a device's access tokens only (its refresh token is left intact).
+
+    Used by the refresh rotation, which replaces the access token but keeps the
+    refresh-token chain (marking the spent one used) rather than deleting it.
+    """
     await db.execute(
         "DELETE FROM access_tokens WHERE user_id = ? AND device_id = ?",
         (user_id, device_id),
     )
 
 
+async def delete_tokens_for_device(db: Database, user_id: str, device_id: str) -> None:
+    """Invalidate all of a device's sessions — both access and refresh tokens."""
+    await db.execute(
+        "DELETE FROM access_tokens WHERE user_id = ? AND device_id = ?",
+        (user_id, device_id),
+    )
+    await db.execute(
+        "DELETE FROM refresh_tokens WHERE user_id = ? AND device_id = ?",
+        (user_id, device_id),
+    )
+
+
 async def delete_tokens_for_user(db: Database, user_id: str) -> None:
+    """Invalidate all of a user's sessions — both access and refresh tokens."""
     await db.execute("DELETE FROM access_tokens WHERE user_id = ?", (user_id,))
+    await db.execute("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,))
+
+
+# --- refresh tokens --------------------------------------------------------
+
+
+@dataclass
+class RefreshTokenRow:
+    """A row from the ``refresh_tokens`` table."""
+
+    user_id: str
+    device_id: str
+    used: bool
+    next_token: str | None
+
+
+async def create_refresh_token(
+    db: Database, token: str, user_id: str, device_id: str, created_ts: int
+) -> None:
+    await db.execute(
+        "INSERT INTO refresh_tokens (token, user_id, device_id, created_ts)"
+        " VALUES (?, ?, ?, ?)",
+        (token, user_id, device_id, created_ts),
+    )
+
+
+async def get_refresh_token(db: Database, token: str) -> RefreshTokenRow | None:
+    rows = await db.fetchall(
+        "SELECT user_id, device_id, used, next_token FROM refresh_tokens WHERE token = ?",
+        (token,),
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    return RefreshTokenRow(
+        user_id=row[0],
+        device_id=row[1],
+        used=bool(row[2]),
+        next_token=None if row[3] is None else str(row[3]),
+    )
+
+
+async def consume_refresh_token(db: Database, token: str, next_token: str) -> None:
+    """Mark a refresh token used and link it to its rotated successor."""
+    await db.execute(
+        "UPDATE refresh_tokens SET used = 1, next_token = ? WHERE token = ?",
+        (next_token, token),
+    )
