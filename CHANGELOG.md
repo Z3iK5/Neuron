@@ -5,6 +5,21 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
+## [0.0.24] — 2026-07-07
+
+### Added
+- **Element X support.** The modern Element X mobile app now works with Neuron,
+  via native sliding sync (MSC4186) — an efficient sync designed for phones that
+  loads your room list in windows and streams only what changed.
+- **Refresh tokens.** Clients can request refreshable, expiring access tokens
+  (`/refresh`); an expired token prompts a silent refresh instead of logging you
+  out. Existing sessions are unaffected.
+- **Delegated login via an external identity provider (OIDC / MSC3861), optional
+  and off by default.** Point Neuron at an OpenID Connect provider
+  (`NEURON_SERVER_OIDC_ENABLED` + the `NEURON_SERVER_OIDC_*` settings) and it
+  validates tokens against that provider instead of its own login. Left disabled,
+  the built-in password and passkey login work exactly as before.
+
 ## [0.0.23] — 2026-07-07
 
 ### Added
