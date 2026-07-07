@@ -9,7 +9,7 @@
 ; Output: Neuron-Setup-x64.exe. Code signing is a follow-up (see docs/desktop.md).
 
 #define MyAppName "Neuron"
-#define MyAppVersion "0.0.25"
+#define MyAppVersion "0.0.26"
 #define MyAppPublisher "Neuron"
 #define MyAppExeName "Neuron.exe"
 
