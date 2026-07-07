@@ -552,6 +552,42 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=26,
+        name="pushers_and_notifications",
+        # Mobile push delivery. `pushers` holds each user's registered push
+        # targets (a phone's device token via a push gateway); uniqueness is
+        # (user_id, app_id, pushkey) per the spec. `notifications` records every
+        # event a user's push rules said to notify about, for GET /notifications
+        # and unread bookkeeping (highlight flag stored so only=highlight filters).
+        statements=(
+            "CREATE TABLE IF NOT EXISTS pushers ("
+            " user_id TEXT NOT NULL,"
+            " app_id TEXT NOT NULL,"
+            " pushkey TEXT NOT NULL,"
+            " kind TEXT NOT NULL,"
+            " app_display_name TEXT,"
+            " device_display_name TEXT,"
+            " profile_tag TEXT,"
+            " lang TEXT,"
+            " data_json TEXT NOT NULL,"
+            " ts BIGINT NOT NULL,"
+            " PRIMARY KEY (user_id, app_id, pushkey)"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_pushers_pushkey ON pushers (app_id, pushkey)",
+            "CREATE TABLE IF NOT EXISTS notifications ("
+            " user_id TEXT NOT NULL,"
+            " event_id TEXT NOT NULL,"
+            " room_id TEXT NOT NULL,"
+            " actions_json TEXT NOT NULL,"
+            " ts BIGINT NOT NULL,"
+            " highlight BIGINT NOT NULL DEFAULT 0,"
+            " PRIMARY KEY (user_id, event_id)"
+            ")",
+            "CREATE INDEX IF NOT EXISTS idx_notifications_user_ts"
+            " ON notifications (user_id, ts)",
+        ),
+    ),
 )
 
 

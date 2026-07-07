@@ -245,6 +245,16 @@ class NeuronServerSettings(BaseSettings):
         description="Use state resolution v2 for inbound federation authorization.",
     )
 
+    # --- Push notifications --------------------------------------------------
+    # HTTP timeout (seconds) for a POST to a mobile push gateway (Sygnal). Delivery
+    # runs off the request path as a best-effort background task, so this only
+    # bounds how long a single gateway call waits before being abandoned. Default 10.
+    push_gateway_timeout_s: float = Field(
+        default=10.0,
+        gt=0,
+        description="HTTP timeout (seconds) for a push-gateway POST.",
+    )
+
     # --- VoIP / TURN ----------------------------------------------------------
     # TURN relay servers advertised to clients via GET /_matrix/client/v3/voip/
     # turnServer, so Element/FluffyChat calls work across NATs. Credentials use
