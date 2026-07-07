@@ -289,6 +289,10 @@ _CONSOLE_NAV: tuple[tuple[str, str, str], ...] = (
         '<path d="M16 3.13a4 4 0 0 1 0 7.75"/>')),
     ("/console/rooms", "Rooms", _icon(
         '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>')),
+    ("/console/federation", "Federation", _icon(
+        '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>'
+        '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 '
+        '15.3 15.3 0 0 1 4-10z"/>')),
     ("/console/invites", "Invites", _icon(
         '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>')),
     ("/console/media", "Media", _icon(
