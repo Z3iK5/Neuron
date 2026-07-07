@@ -5,7 +5,7 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
-## [Unreleased]
+## [0.0.27] — 2026-07-08
 
 ### Added
 - **Server-side thumbnail caching.** Generated thumbnails are now cached persistently
