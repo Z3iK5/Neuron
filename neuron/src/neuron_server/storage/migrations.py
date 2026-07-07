@@ -660,6 +660,31 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=30,
+        name="media_thumbnails",
+        # Persistently cached generated thumbnails, so a repeated thumbnail request
+        # (avatars/images in a timeline) is served from our store instead of
+        # re-decoding and re-encoding the original every time. One row per bounded
+        # (origin_server, media_id, width, height, method) variant. cache_key is the
+        # namespaced MediaStore blob key (see media/service.py); it is hashed and
+        # "thumb_"-prefixed so it can never collide with a local media id or a
+        # remote_ cache key. Applies to both local and remote media.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS media_thumbnails ("
+            " origin_server TEXT NOT NULL,"
+            " media_id TEXT NOT NULL,"
+            " width BIGINT NOT NULL,"
+            " height BIGINT NOT NULL,"
+            " method TEXT NOT NULL,"
+            " cache_key TEXT NOT NULL,"
+            " content_type TEXT NOT NULL,"
+            " size BIGINT NOT NULL,"
+            " created_ts BIGINT NOT NULL,"
+            " PRIMARY KEY (origin_server, media_id, width, height, method)"
+            ")",
+        ),
+    ),
 )
 
 

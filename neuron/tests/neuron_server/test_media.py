@@ -109,12 +109,15 @@ def test_thumbnail_returns_smaller_image(tmp_path: Path) -> None:
         resp = client.get(
             f"/_matrix/client/v1/media/thumbnail/neuron.local/{media_id}",
             headers=_h(token),
-            params={"width": 16, "height": 16, "method": "scale"},
+            # A standard allowlisted variant (32x32 crop) so it's cached and produced
+            # at the requested size; non-allowlisted sizes snap UP to the nearest
+            # cacheable variant (a thumbnail of at least the requested size).
+            params={"width": 32, "height": 32, "method": "crop"},
         )
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("image/png")
         thumb = Image.open(BytesIO(resp.content))
-        assert thumb.width <= 16 and thumb.height <= 16
+        assert thumb.width <= 32 and thumb.height <= 32
 
 
 def test_unknown_media_is_not_found(tmp_path: Path) -> None:

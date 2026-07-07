@@ -894,3 +894,43 @@ async def test_pushers_and_notifications_on_postgres() -> None:
         assert entries[0][1] is True
     finally:
         await db.disconnect()
+
+
+async def test_migration_30_thumbnail_cache_roundtrip() -> None:
+    """migration-30 (media_thumbnails) applies on real Postgres and its data-access
+    round-trips: create -> get -> list -> delete, with ON CONFLICT DO NOTHING."""
+    from neuron_server.storage import media_thumbnails as thumb_store
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=4)
+    await db.connect()
+    try:
+        await _migrate(db)
+
+        await thumb_store.create_thumbnail(
+            db, "a.test", "mediaX", 96, 96, "crop", "thumb_abc", "image/png", 123, 1000
+        )
+        # A concurrent duplicate is a no-op (ON CONFLICT DO NOTHING).
+        await thumb_store.create_thumbnail(
+            db, "a.test", "mediaX", 96, 96, "crop", "thumb_abc", "image/png", 123, 2000
+        )
+
+        row = await thumb_store.get_thumbnail(db, "a.test", "mediaX", 96, 96, "crop")
+        assert row is not None
+        assert row.cache_key == "thumb_abc"
+        assert row.content_type == "image/png"
+        assert row.size == 123
+        assert row.created_ts == 1000  # the first write won
+
+        # A different variant is a distinct row.
+        await thumb_store.create_thumbnail(
+            db, "a.test", "mediaX", 320, 240, "scale", "thumb_def", "image/png", 456, 3000
+        )
+        keys = await thumb_store.list_thumbnail_keys(db, "a.test", "mediaX")
+        assert sorted(keys) == ["thumb_abc", "thumb_def"]
+
+        await thumb_store.delete_thumbnails(db, "a.test", "mediaX")
+        assert await thumb_store.list_thumbnail_keys(db, "a.test", "mediaX") == []
+        assert await thumb_store.get_thumbnail(db, "a.test", "mediaX", 96, 96, "crop") is None
+    finally:
+        await db.disconnect()
