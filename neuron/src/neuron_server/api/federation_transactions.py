@@ -106,12 +106,19 @@ async def _process_edus(request: Request, origin: str, edus: list[Any]) -> None:
             sender = content.get("sender")
             event_type = content.get("type")
             messages = content.get("messages")
+            message_id = content.get("message_id")
             if (
                 isinstance(sender, str)
                 and domain_of(sender) == origin
                 and isinstance(event_type, str)
                 and isinstance(messages, dict)
+                and isinstance(message_id, str)
             ):
+                # Durable retry redelivers in a fresh transaction, so transaction
+                # dedup can't catch a re-sent Olm message; dedup on (origin,
+                # message_id) makes storing it exactly-once. message_id is opaque.
+                if await e2ee_store.was_to_device_seen(db, origin, message_id):
+                    continue
                 local = {
                     user_id: by_device
                     for user_id, by_device in messages.items()
@@ -120,6 +127,9 @@ async def _process_edus(request: Request, origin: str, edus: list[Any]) -> None:
                 if local:
                     # Wakes /sync itself once stored.
                     await request.app.state.e2ee.send_to_device(sender, event_type, local)
+                await e2ee_store.mark_to_device_seen(
+                    db, origin, message_id, int(time.time() * 1000)
+                )
             continue
         if edu_type == "m.device_list_update":
             # A remote user's device set changed. Family-scale approach: record

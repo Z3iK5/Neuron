@@ -44,6 +44,7 @@ STREAMS: dict[str, tuple[str, str]] = {
     "receipts": ("receipts", "stream_id"),
     "account_data": ("account_data", "stream_id"),
     "outbox": ("federation_outbox", "stream_id"),
+    "edu_outbox": ("federation_edu_outbox", "stream_id"),
     # Typing rows are upserted (never deleted), so MAX(stream_id)+1 stays
     # monotonic — the serial /sync compares must never regress on "stop typing".
     "typing": ("typing", "stream_id"),

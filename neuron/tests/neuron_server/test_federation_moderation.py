@@ -357,7 +357,7 @@ async def test_send_transaction_unions_extra_destinations() -> None:
     async def fake_remote(room_id: str) -> set[str]:
         return {"x.test"}
 
-    async def fake_deliver(server: str, *, new_pdus: list, edus: list) -> None:
+    async def fake_deliver(server: str, *, new_pdus: list, transient_edus: list) -> None:
         recorded.append(server)
 
     sender.remote_destinations = fake_remote  # type: ignore[method-assign]
