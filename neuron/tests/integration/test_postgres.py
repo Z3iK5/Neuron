@@ -788,6 +788,41 @@ async def test_edu_queue_on_postgres() -> None:
         await db.disconnect()
 
 
+async def test_federation_destinations_on_postgres() -> None:
+    """Migration 29 + the destination-health store on real Postgres/asyncpg: the
+    failure/success upserts round-trip (consecutive_failures increments then resets
+    on success), and the combined PDU+EDU backlog query groups per destination."""
+    from neuron_server.storage import destinations as destinations_store
+    from neuron_server.storage import outbox as outbox_store
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=2)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        await db.ensure_stream_sequences()
+
+        # Upsert semantics: two failures accumulate, a success resets the run.
+        await destinations_store.record_failure(db, "down.test", 1000, "ConnectError: refused")
+        await destinations_store.record_failure(db, "down.test", 2000, "ConnectError: refused")
+        rows = {r.destination: r for r in await destinations_store.list_destinations(db)}
+        assert rows["down.test"].consecutive_failures == 2
+        assert rows["down.test"].last_error == "ConnectError: refused"
+        await destinations_store.record_success(db, "down.test", 3000)
+        rows = {r.destination: r for r in await destinations_store.list_destinations(db)}
+        assert rows["down.test"].consecutive_failures == 0
+        assert rows["down.test"].last_success_ts == 3000
+        assert rows["down.test"].last_error is None
+
+        # Combined backlog across both outboxes, grouped per destination.
+        await outbox_store.enqueue(db, "down.test", {"n": 1})
+        await outbox_store.enqueue_edu(db, "down.test", {"edu_type": "m.receipt"})
+        backlog = await destinations_store.pending_backlog(db)
+        assert backlog["down.test"] == (1, 1)
+    finally:
+        await db.disconnect()
+
+
 async def test_pushers_and_notifications_on_postgres() -> None:
     """Migration 26 + the pushers/notifications storage on real Postgres/asyncpg:
     pusher upsert is unique per (user, app_id, pushkey), append=false clears the

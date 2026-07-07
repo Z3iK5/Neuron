@@ -38,6 +38,7 @@ from neuron_server.config import NeuronServerSettings
 from neuron_server.security import get_csrf_token, verify_csrf
 from neuron_server.storage import accounts, metadata
 from neuron_server.storage import admin as admin_store
+from neuron_server.storage import destinations as destinations_store
 
 router = APIRouter()
 log = get_logger(__name__)
@@ -1572,6 +1573,100 @@ async def report_dismiss(
     await _admin(request).delete_event_report(report_id)
     _flash(request, "Report dismissed.")
     return RedirectResponse("/console/reports", status_code=303)
+
+
+# --- federation health ------------------------------------------------------
+# Status thresholds: a run of >=3 failed transactions is "failing"; any smaller
+# failure run, or a pending backlog with no failures yet, is "delayed"; otherwise
+# "healthy". rank sorts worst-health first.
+_FAILING_THRESHOLD = 3
+_FED_STATUS = {
+    "failing": ("warn", 0),
+    "delayed": ("amber", 1),
+    "healthy": ("on", 2),
+}
+
+
+def _fed_status(consecutive_failures: int, pending: int) -> str:
+    if consecutive_failures >= _FAILING_THRESHOLD:
+        return "failing"
+    if consecutive_failures > 0 or pending > 0:
+        return "delayed"
+    return "healthy"
+
+
+def _sort_rank(failures: int, pending: int) -> tuple[int, int, int]:
+    """Sort key putting the worst-health servers first."""
+    return (_FED_STATUS[_fed_status(failures, pending)][1], -failures, -pending)
+
+
+@router.get("/console/federation", include_in_schema=False)
+async def federation_page(
+    request: Request, _: str = Depends(require_console_admin)
+) -> Response:
+    db = request.app.state.db
+    health = await destinations_store.list_destinations(db)
+    backlog = await destinations_store.pending_backlog(db)
+
+    # Union: every server we've recorded health for, plus any with a live backlog.
+    by_name = {h.destination: h for h in health}
+    names = set(by_name) | set(backlog)
+
+    def _row(name: str) -> tuple[int, int]:
+        h = by_name.get(name)
+        return (h.consecutive_failures if h else 0, sum(backlog.get(name, (0, 0))))
+
+    rows = ""
+    for name in sorted(names, key=lambda n: (*_sort_rank(*_row(n)), n)):
+        h = by_name.get(name)
+        failures, pending = _row(name)
+        status = _fed_status(failures, pending)
+        pill_cls = _FED_STATUS[status][0]
+        last_success = _fmt_ts(int(h.last_success_ts)) if h and h.last_success_ts else "—"
+        last_error = _e(h.last_error) if h and h.last_error else ""
+        rows += (
+            f"<tr><td>{_e(name)}</td>"
+            f'<td><span class="pill {pill_cls}">{status}</span></td>'
+            f"<td>{pending}</td>"
+            f'<td class="muted">{last_success}</td>'
+            f"<td>{failures}</td>"
+            f'<td class="muted">{last_error}</td>'
+            '<td><form class="inline" method="post" '
+            f'action="/console/federation/{_quote(name)}/retry">'
+            f'{_csrf_field(request)}'
+            '<button class="btn sm" type="submit">Retry now</button></form></td></tr>'
+        )
+    if not rows:
+        rows = (
+            '<tr><td colspan="7"><div class="empty"><div class="big">No federation activity yet'
+            "</div>Once this server delivers events to other servers, their delivery health "
+            "shows here.</div></td></tr>"
+        )
+    body = (
+        '<h1 class="page">Federation</h1>'
+        '<div class="panel"><table class="tbl"><thead><tr><th>Server</th><th>Status</th>'
+        "<th>Pending</th><th>Last success</th><th>Consecutive failures</th><th>Last error</th>"
+        "<th></th></tr></thead>"
+        f"<tbody>{rows}</tbody></table></div>"
+    )
+    return _page(request, "Federation", "/console/federation", body)
+
+
+@router.post("/console/federation/{destination}/retry", include_in_schema=False)
+async def federation_retry(
+    request: Request,
+    destination: str,
+    _: str = Depends(require_console_admin),
+    __: None = Depends(csrf_protect),
+) -> Response:
+    sender = request.app.state.federation_sender
+    try:
+        await sender.retry(destination)
+        _flash(request, f"Retried delivery to {destination}.")
+    except Exception:  # noqa: BLE001 - surface the failure without a 500
+        log.exception("federation retry failed", extra={"destination": destination})
+        _flash(request, f"Retry to {destination} failed — see server logs.")
+    return RedirectResponse("/console/federation", status_code=303)
 
 
 # --- pagination helper ------------------------------------------------------

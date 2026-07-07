@@ -16,6 +16,7 @@ from typing import Any
 from neuron_core import get_logger
 from neuron_server.federation.client import FederationClient
 from neuron_server.federation.validation import domain_of
+from neuron_server.storage import destinations as destinations_store
 from neuron_server.storage import outbox as outbox_store
 from neuron_server.storage import rooms as store
 from neuron_server.storage.database import Database
@@ -91,8 +92,26 @@ class FederationSender:
             )
         except Exception as exc:  # best effort; never block the local action
             _logger.warning("failed to send transaction to %s: %s", server, exc)
+            await self._record_health(server, exc)
             return False
+        await self._record_health(server, None)
         return True
+
+    async def _record_health(self, server: str, exc: BaseException | None) -> None:
+        """Record this attempt's delivery health for the console's Federation page.
+
+        Best-effort: a health-write failure is swallowed so it can never affect
+        federation delivery. ``last_error`` is only the exception class + a truncated
+        message — never key material or event content."""
+        try:
+            now = int(time.time() * 1000)
+            if exc is None:
+                await destinations_store.record_success(self._db, server, now)
+            else:
+                error = f"{type(exc).__name__}: {exc}"[:200]
+                await destinations_store.record_failure(self._db, server, now, error)
+        except Exception:  # noqa: BLE001 - health is advisory; never break sending
+            _logger.debug("failed to record federation health for %s", server, exc_info=True)
 
     async def _deliver(
         self,

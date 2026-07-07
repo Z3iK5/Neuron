@@ -641,6 +641,25 @@ MIGRATIONS: tuple[Migration, ...] = (
             ")",
         ),
     ),
+    Migration(
+        version=29,
+        name="federation_destinations",
+        # Per-destination federation delivery health, surfaced on the console's
+        # Federation page. One row per remote server we've sent a transaction to:
+        # the last success/failure timestamps, a run of consecutive failures (reset
+        # to 0 on any success), and a SHORT last error string (an exception class +
+        # truncated message — never key material or event content). Written
+        # best-effort by the sender, so a health-write failure never breaks delivery.
+        statements=(
+            "CREATE TABLE IF NOT EXISTS federation_destinations ("
+            " destination TEXT PRIMARY KEY,"
+            " last_success_ts BIGINT,"
+            " last_failure_ts BIGINT,"
+            " consecutive_failures BIGINT NOT NULL DEFAULT 0,"
+            " last_error TEXT"
+            ")",
+        ),
+    ),
 )
 
 
