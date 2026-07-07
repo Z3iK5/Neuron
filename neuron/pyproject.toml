@@ -13,7 +13,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neuron"
-version = "0.0.22"
+version = "0.0.23"
 description = "Neuron — an all-in-one, self-hosted Matrix platform (homeserver + operator tooling)"
 readme = "README.md"
 requires-python = ">=3.11"
