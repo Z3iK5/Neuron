@@ -692,3 +692,76 @@ async def test_concurrent_otk_claims_never_hand_out_same_key() -> None:
         assert sorted(claimed) == sorted(f"signed_curve25519:K{i}" for i in range(n_keys))
     finally:
         await db.disconnect()
+
+
+async def test_pushers_and_notifications_on_postgres() -> None:
+    """Migration 26 + the pushers/notifications storage on real Postgres/asyncpg:
+    pusher upsert is unique per (user, app_id, pushkey), append=false clears the
+    pushkey from other users, and a recorded notification lists back (read flag
+    computed against a receipt) — the same behaviour as on SQLite."""
+    from neuron_server.rooms.events import Event
+    from neuron_server.storage import notifications as notif_store
+    from neuron_server.storage import pushers as pusher_store
+    from neuron_server.storage import receipts as receipts_store
+    from neuron_server.storage import rooms as rooms_store
+
+    await _reset_schema()
+    db = connect_database(_PG, pool_size=4)
+    await db.connect()
+    try:
+        await run_migrations(db)
+        await db.ensure_stream_sequences()
+        alice, bob = "@alice:pg.test", "@bob:pg.test"
+
+        # Pusher upsert + uniqueness (a second set for the same key updates in place).
+        await pusher_store.upsert_pusher(
+            db, alice, app_id="app", pushkey="k1", kind="http",
+            app_display_name="A", device_display_name="Phone", profile_tag=None,
+            lang="en", data={"url": "https://gw/notify"}, ts=1000,
+        )
+        await pusher_store.upsert_pusher(
+            db, bob, app_id="app", pushkey="k1", kind="http",
+            app_display_name="B", device_display_name="Phone", profile_tag=None,
+            lang="en", data={"url": "https://gw/notify"}, ts=1000,
+        )
+        assert len(await pusher_store.get_pushers(db, alice)) == 1
+        # append=false semantics: bob claiming k1 removes it from alice.
+        await pusher_store.delete_pushkey_elsewhere(db, bob, "app", "k1")
+        assert await pusher_store.get_pushers(db, alice) == []
+        assert len(await pusher_store.get_pushers(db, bob)) == 1
+
+        # Seed a room + an event so notifications/receipts can join to it.
+        room_id = "!r:pg.test"
+        await rooms_store.create_room_row(db, room_id, alice, "11", 1000)
+        stream = await db.next_stream_id("events")
+        event = Event(
+            event_id="$e1", room_id=room_id, type="m.room.message", sender=alice,
+            content={"body": "hi bob"}, origin_server_ts=1000, depth=1,
+            stream_ordering=stream,
+        )
+        await rooms_store.insert_event(db, event)
+
+        await notif_store.record(
+            db, bob, event_id="$e1", room_id=room_id,
+            actions=["notify", {"set_tweak": "highlight"}], ts=2000, highlight=True,
+        )
+        entries, next_from = await notif_store.list_for_user(
+            db, bob, limit=10, from_ts=None, only_highlight=False
+        )
+        assert next_from is None
+        assert len(entries) == 1
+        notification, read = entries[0]
+        assert notification.event.event_id == "$e1" and read is False
+
+        # only=highlight keeps it; a receipt at the event flips read True.
+        hl, _ = await notif_store.list_for_user(
+            db, bob, limit=10, from_ts=None, only_highlight=True
+        )
+        assert len(hl) == 1
+        await receipts_store.upsert_receipt(db, room_id, bob, "m.read", "$e1", 3000)
+        entries, _ = await notif_store.list_for_user(
+            db, bob, limit=10, from_ts=None, only_highlight=False
+        )
+        assert entries[0][1] is True
+    finally:
+        await db.disconnect()

@@ -9,6 +9,7 @@ of the federation epic, HS-7). Every client-originated event is checked against
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from collections.abc import Awaitable, Callable
@@ -70,6 +71,7 @@ class RoomService:
         notify: Callable[[], None] | None = None,
         federation_sender: Callable[..., Awaitable[None]] | None = None,
         state_res_v2: bool = False,
+        push_dispatch: Callable[[Event], Awaitable[None]] | None = None,
     ) -> None:
         self._db = db
         self._server_name = server_name
@@ -77,6 +79,29 @@ class RoomService:
         self._notify = notify
         self._federation_sender = federation_sender
         self._state_res_v2 = state_res_v2
+        self._push_dispatch = push_dispatch
+        # Keep strong refs to in-flight push tasks so they aren't GC'd mid-run.
+        self._push_tasks: set[asyncio.Task[None]] = set()
+
+    def _dispatch_push(self, event: Event) -> None:
+        """Fire push delivery for ``event`` as a background task.
+
+        Deliberately NOT awaited: push evaluation + gateway POSTs must never delay
+        or fail the client's /send. A slow or broken gateway can only ever affect
+        this detached task, never the request path.
+        """
+        if self._push_dispatch is None:
+            return
+        task = asyncio.create_task(self._run_push(event))
+        self._push_tasks.add(task)
+        task.add_done_callback(self._push_tasks.discard)
+
+    async def _run_push(self, event: Event) -> None:
+        assert self._push_dispatch is not None
+        try:
+            await self._push_dispatch(event)
+        except Exception as exc:  # noqa: BLE001 - push is best-effort
+            _logger.warning("push dispatch failed for %s: %s", event.event_id, exc)
 
     def _is_resident(self, room_id: str) -> bool:
         """Whether we are the room's resident (hub) server — the room-id domain."""
@@ -543,6 +568,7 @@ class RoomService:
             event = await self._append(room_id, etype=etype, sender=sender, content=content)
             await store.put_txn_event(self._db, sender, txn_id, event.event_id)
         self._wake_syncs()
+        self._dispatch_push(event)
         await self._propagate(room_id, event)
         return event.event_id
 
@@ -603,6 +629,8 @@ class RoomService:
                 room_id, etype="m.room.member", sender=sender, content=content, state_key=target
             )
         self._wake_syncs()
+        if membership == "invite":
+            self._dispatch_push(event)
         await self._propagate(room_id, event, extra_destinations=pre)
         return event.event_id
 

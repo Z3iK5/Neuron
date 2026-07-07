@@ -36,6 +36,7 @@ from neuron_server.api.client_keys import router as client_keys_router
 from neuron_server.api.client_media import router as client_media_router
 from neuron_server.api.client_misc import router as client_misc_router
 from neuron_server.api.client_push import router as client_push_router
+from neuron_server.api.client_pushers import router as client_pushers_router
 from neuron_server.api.client_room_directory import router as client_room_directory_router
 from neuron_server.api.client_room_keys import router as client_room_keys_router
 from neuron_server.api.client_rooms import router as client_rooms_router
@@ -67,6 +68,7 @@ from neuron_server.media.service import MediaService
 from neuron_server.media.store import build_media_store
 from neuron_server.metrics import install_metrics
 from neuron_server.proxy import ProxyHeadersMiddleware, client_ip
+from neuron_server.push.sender import PushSender
 from neuron_server.ratelimit import build_rate_limiters
 from neuron_server.rooms.service import RoomService
 from neuron_server.spec import SUPPORTED_SPEC_VERSIONS, UNSTABLE_FEATURES
@@ -143,6 +145,9 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
         app.state.federation_sender = FederationSender(
             db, settings.name, app.state.federation_client
         )
+        app.state.push_sender = PushSender(
+            db, settings.name, timeout=settings.push_gateway_timeout_s
+        )
         app.state.rooms = RoomService(
             db,
             settings.name,
@@ -150,6 +155,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
             notify=notifier.notify,
             federation_sender=app.state.federation_sender.send_event,
             state_res_v2=settings.state_res_v2,
+            push_dispatch=app.state.push_sender.dispatch,
         )
         app.state.fed_membership = FederatedMembership(
             db,
@@ -355,6 +361,7 @@ def create_app(settings: NeuronServerSettings | None = None) -> FastAPI:
     app.include_router(client_keys_router)
     app.include_router(client_misc_router)
     app.include_router(client_push_router)
+    app.include_router(client_pushers_router)
     app.include_router(client_room_keys_router)
     app.include_router(client_directory_router)
     app.include_router(client_room_directory_router)
