@@ -5,7 +5,7 @@ All notable changes to Neuron. Each release attaches desktop installers — macO
 Tagged releases also publish a multi-arch container image to
 `ghcr.io/z3ik5/neuron-server`.
 
-## [Unreleased]
+## [0.0.25] — 2026-07-08
 
 ### Fixed
 - **Cross-server encryption no longer drops key exchanges.** Reliability-critical
