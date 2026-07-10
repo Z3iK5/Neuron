@@ -54,6 +54,45 @@ curl -s -XPOST localhost:8008/_matrix/client/v3/register \
 Or just open the homeserver in a browser and use **Get started**. To make a user an
 admin, add their localpart to `NEURON_SERVER_ADMIN_USERS` and restart.
 
+### Authentication — refresh tokens & OIDC
+
+The default password / passkey / UIA login works out of the box; the settings below
+are optional and leave that default experience unchanged.
+
+**Refresh tokens (CS API v1.3 / Element X).** Refreshable sessions are opt-in per
+login: a client sets `refresh_token: true` in the `POST /v3/login` or `/register`
+body, and the response then includes a long-lived `refresh_token` and `expires_in_ms`
+alongside the `access_token`. An expired access token returns `401 M_UNKNOWN_TOKEN`
+with `soft_logout: true`, prompting the client to call `POST /v3/refresh` (single-use:
+refreshing rotates and invalidates the presented token). A classic login (no
+`refresh_token: true`) issues a **non-expiring** token exactly as before.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NEURON_SERVER_ACCESS_TOKEN_LIFETIME_MS` | `3600000` (1 h) | How long a *refreshable* access token stays valid before the client must refresh. Non-refresh sessions are unaffected. |
+
+**OIDC / MSC3861 delegated auth (off by default).** Neuron can delegate
+authentication to an external OpenID Connect provider (Matrix Authentication Service,
+Keycloak, Dex, …), becoming an OAuth2 *resource server* — it does **not** act as an
+OIDC provider itself. Disabled by default; when disabled the OIDC endpoints are absent
+and nothing changes.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NEURON_SERVER_OIDC_ENABLED` | `false` | Turn on delegated auth. |
+| `NEURON_SERVER_OIDC_ISSUER` | _(empty)_ | Provider issuer URL (its `/.well-known/openid-configuration`). |
+| `NEURON_SERVER_OIDC_INTROSPECTION_ENDPOINT` | _(empty)_ | RFC 7662 introspection endpoint; discovered from the issuer if unset. |
+| `NEURON_SERVER_OIDC_CLIENT_ID` | _(empty)_ | OAuth2 client id for introspection. |
+| `NEURON_SERVER_OIDC_CLIENT_SECRET` | _(unset)_ | OAuth2 client secret (HTTP basic auth). |
+| `NEURON_SERVER_OIDC_ACCOUNT_MANAGEMENT_URL` | _(empty)_ | Optional account-management URL advertised to clients. |
+
+When enabled, Neuron advertises the provider via MSC2965 (`.../org.matrix.msc2965/auth_metadata`
+and `.../auth_issuer`), validates bearer tokens by RFC 7662 introspection (mapping the
+token subject to `@localpart:server` and provisioning the account on first sight; the
+token is never logged), and disables local `login`/`register`/`refresh`/`account
+password`/`deactivate` (`404 M_UNRECOGNIZED`) so clients use the provider's flow.
+Token-authenticated endpoints keep working via introspection.
+
 ---
 
 ## Admin console — `neuron_console`
